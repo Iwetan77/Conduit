@@ -15,7 +15,7 @@ export function Logo({ size = "md", href = "/" }: LogoProps) {
   const h = NAV_HEIGHTS[size];
   const content = (
     <Image
-      src="/conduit-mainLogo.svg.jpg"
+      src="/CONDUIT-MAIN.png"
       alt="Conduit"
       height={h}
       width={h}
@@ -35,7 +35,7 @@ export function Logo({ size = "md", href = "/" }: LogoProps) {
 export function ConduitMark({ height = 80 }: { height?: number; size?: number }) {
   return (
     <Image
-      src="/conduit-sublogo.svg.jpg"
+      src="/CONDUIT (1).png"
       alt="Conduit"
       height={height}
       width={height * 5}           // wordmark is ~5:1 aspect; next/image respects natural ratio via style

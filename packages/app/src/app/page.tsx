@@ -34,7 +34,7 @@ export default function HomePage() {
         {/* Hero */}
         <div className="text-center mb-10">
           <div className="flex justify-center mb-4">
-            <ConduitMark height={72} />
+            <ConduitMark height={140} />
           </div>
           <p className="text-brand-muted mt-3 text-sm font-mono">
             Arc&apos;s native agent payment protocol

@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <!-- Black background circle -->
+  <circle cx="50" cy="50" r="50" fill="#000000"/>
+  <!-- Green left circle -->
+  <circle cx="36" cy="50" r="28" fill="#B2F55A"/>
+  <!-- White D-shape (right half of the D) -->
+  <path d="M50 22 H64 C80 22 90 34 90 50 C90 66 80 78 64 78 H50 Z" fill="#FFFFFF"/>
+  <!-- Black horizontal pipe bar through center -->
+  <rect x="14" y="43" width="72" height="14" rx="2" fill="#000000"/>
+</svg>

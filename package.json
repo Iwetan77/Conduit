@@ -1,0 +1,26 @@
+{
+  "name": "conduit",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Arc's native agent payment protocol",
+  "packageManager": "pnpm@9.0.0",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "test": "turbo run test",
+    "lint": "turbo run lint",
+    "clean": "turbo run clean",
+    "app": "pnpm --filter @conduit/app dev",
+    "contracts:build": "pnpm --filter @conduit/contracts build",
+    "contracts:test": "pnpm --filter @conduit/contracts test",
+    "contracts:deploy": "pnpm --filter @conduit/contracts deploy",
+    "sdk:build": "pnpm --filter @conduit/sdk build"
+  },
+  "devDependencies": {
+    "turbo": "^2.0.0",
+    "typescript": "^5.4.0"
+  }
+}

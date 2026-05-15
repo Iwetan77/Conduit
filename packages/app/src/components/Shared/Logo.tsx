@@ -8,46 +8,38 @@ interface LogoProps {
   href?: string;
 }
 
-// Nav wordmark: CON (green) + DUIT (white) with a black stripe through the letters
-// Matches the real Conduit brand identity
-export function Logo({ size = "md", href = "/" }: LogoProps) {
-  const textSizes = { sm: "text-2xl", md: "text-3xl", lg: "text-5xl" };
+const HEIGHTS = { sm: 32, md: 40, lg: 56 };
 
+// Nav logo — the main wordmark image (conduit-mainLogo)
+export function Logo({ size = "md", href = "/" }: LogoProps) {
+  const h = HEIGHTS[size];
+  // Preserve aspect ratio; width is auto via unset or a generous max
   const content = (
-    <div className="relative inline-block select-none leading-none">
-      <span
-        className={`font-anton uppercase tracking-tight ${textSizes[size]}`}
-        style={{ letterSpacing: "-0.01em" }}
-      >
-        <span style={{ color: "#B2F55A" }}>CON</span>
-        <span style={{ color: "#FFFFFF" }}>DUIT</span>
-      </span>
-      {/* Black stripe cuts through the letters — same colour as header bg */}
-      <div
-        className="absolute inset-x-0 bg-black pointer-events-none"
-        style={{ top: "36%", height: "19%", zIndex: 2 }}
-      />
-    </div>
+    <Image
+      src="/conduit-mainLogo.svg.jpg"
+      alt="Conduit"
+      height={h}
+      width={h * 4}   // wide enough for the wordmark; next/image will respect the natural ratio
+      style={{ height: h, width: "auto" }}
+      priority
+    />
   );
 
   if (href) {
-    return (
-      <Link href={href} className="inline-block">
-        {content}
-      </Link>
-    );
+    return <Link href={href} className="inline-block">{content}</Link>;
   }
   return <div className="inline-block">{content}</div>;
 }
 
-// The ⊙D mark icon — used as the large hero centrepiece
-export function ConduitMark({ size = 80 }: { size?: number }) {
+// Hero centrepiece — the sub-logo / mark icon (conduit-sublogo)
+export function ConduitMark({ size = 96 }: { size?: number }) {
   return (
     <Image
-      src="/conduit-mark.svg"
+      src="/conduit-sublogo.svg.jpg"
       alt="Conduit"
       width={size}
       height={size}
+      style={{ width: size, height: size, objectFit: "contain" }}
       priority
     />
   );

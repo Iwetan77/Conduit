@@ -30,18 +30,28 @@ export function Logo({ size = "md", href = "/" }: LogoProps) {
   return <div className="inline-block">{content}</div>;
 }
 
-// Hero centrepiece — the CONDUIT wordmark (conduit-sublogo)
-// It's a wide image so we control height and let width be auto
+// Hero centrepiece — the CONDUIT wordmark (CONDUIT (1).png)
+// The PNG has large black padding top/bottom; we crop it with objectFit:cover
+// so only the actual text portion is visible.
 export function ConduitMark({ height = 80 }: { height?: number; size?: number }) {
   return (
-    <Image
-      src="/CONDUIT (1).png"
-      alt="Conduit"
-      height={height}
-      width={height * 5}           // wordmark is ~5:1 aspect; next/image respects natural ratio via style
-      style={{ height: height, width: "auto", maxWidth: "100%" }}
-      priority
-    />
+    <div
+      style={{
+        position: "relative",
+        width: "100%",
+        maxWidth: 480,
+        height: height,
+        overflow: "hidden",
+      }}
+    >
+      <Image
+        src="/CONDUIT (1).png"
+        alt="Conduit"
+        fill
+        style={{ objectFit: "cover", objectPosition: "center" }}
+        priority
+      />
+    </div>
   );
 }
 

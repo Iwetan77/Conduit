@@ -59,7 +59,7 @@ export function WalletConnect() {
         <button
           onClick={() => connect({ connector: injectedConnector })}
           disabled={isPending}
-          className="px-4 py-2 rounded-lg text-sm font-medium
+          className="px-4 py-2 rounded-lg text-sm font-anton tracking-wide
                      bg-brand-green text-brand-black
                      hover:bg-brand-green/90 transition-colors
                      disabled:opacity-50 disabled:cursor-not-allowed"
@@ -71,7 +71,7 @@ export function WalletConnect() {
         <button
           onClick={() => connect({ connector: wcConnector })}
           disabled={isPending}
-          className="px-4 py-2 rounded-lg text-sm font-medium
+          className="px-4 py-2 rounded-lg text-sm font-anton tracking-wide
                      border border-brand-border text-brand-white
                      hover:border-brand-green/50 transition-colors
                      disabled:opacity-50"

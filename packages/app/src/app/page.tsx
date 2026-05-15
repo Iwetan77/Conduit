@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useAccount } from "wagmi";
 import { isAddress } from "viem";
-import { Logo } from "@/components/Shared/Logo";
+import { ConduitMark } from "@/components/Shared/Logo";
 import { Nav, MobileNav } from "@/components/Shared/Nav";
 import { AddressInput } from "@/components/SendFlow/AddressInput";
 import { AmountInput } from "@/components/SendFlow/AmountInput";
@@ -33,7 +33,9 @@ export default function HomePage() {
       <main className="max-w-lg mx-auto px-4 pt-24 pb-24">
         {/* Hero */}
         <div className="text-center mb-10">
-          <Logo size="lg" />
+          <div className="flex justify-center mb-4">
+            <ConduitMark size={96} />
+          </div>
           <p className="text-brand-muted mt-3 text-sm font-mono">
             Arc&apos;s native agent payment protocol
           </p>

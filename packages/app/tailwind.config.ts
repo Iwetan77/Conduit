@@ -19,6 +19,7 @@ const config: Config = {
         },
       },
       fontFamily: {
+        anton: ["Anton", "sans-serif"],
         display: ["Barlow Condensed", "sans-serif"],
         body: ["Barlow", "sans-serif"],
         mono: ["IBM Plex Mono", "monospace"],

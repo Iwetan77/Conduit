@@ -27,7 +27,7 @@ export function Nav() {
               <Link
                 key={href}
                 href={href}
-                className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                className={`px-3 py-1.5 rounded-lg text-sm font-anton tracking-wide transition-colors ${
                   isActive
                     ? "text-brand-white bg-brand-surface"
                     : "text-brand-muted hover:text-brand-white"

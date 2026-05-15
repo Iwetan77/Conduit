@@ -6,55 +6,54 @@ import Image from "next/image";
 interface LogoProps {
   size?: "sm" | "md" | "lg";
   href?: string;
-  showMark?: boolean;
 }
 
-// The Conduit wordmark: CON in #B2F55A, DUIT in #FFFFFF
-// Logomark: /public/conduit-mark.svg — black circle, green left-circle, white D, black pipe
-export function Logo({ size = "md", href = "/", showMark = false }: LogoProps) {
-  const sizes = {
-    sm: { text: "text-xl", mark: 28 },
-    md: { text: "text-2xl", mark: 36 },
-    lg: { text: "text-4xl", mark: 56 },
-  };
+// Nav wordmark: CON (green) + DUIT (white) with a black stripe through the letters
+// Matches the real Conduit brand identity
+export function Logo({ size = "md", href = "/" }: LogoProps) {
+  const textSizes = { sm: "text-2xl", md: "text-3xl", lg: "text-5xl" };
 
-  const wordmark = (
-    <span
-      className={`font-display font-black tracking-tight ${sizes[size].text} select-none`}
-      style={{ letterSpacing: "-0.02em" }}
-    >
-      <span style={{ color: "#B2F55A" }}>CON</span>
-      <span style={{ color: "#FFFFFF" }}>DUIT</span>
-    </span>
+  const content = (
+    <div className="relative inline-block select-none leading-none">
+      <span
+        className={`font-anton uppercase tracking-tight ${textSizes[size]}`}
+        style={{ letterSpacing: "-0.01em" }}
+      >
+        <span style={{ color: "#B2F55A" }}>CON</span>
+        <span style={{ color: "#FFFFFF" }}>DUIT</span>
+      </span>
+      {/* Black stripe cuts through the letters — same colour as header bg */}
+      <div
+        className="absolute inset-x-0 bg-black pointer-events-none"
+        style={{ top: "36%", height: "19%", zIndex: 2 }}
+      />
+    </div>
   );
 
-  const content = showMark ? (
-    <div className="flex items-center gap-3">
-      <ConduitMark size={sizes[size].mark} />
-      {wordmark}
-    </div>
-  ) : wordmark;
-
   if (href) {
-    return <Link href={href} className="inline-block">{content}</Link>;
+    return (
+      <Link href={href} className="inline-block">
+        {content}
+      </Link>
+    );
   }
   return <div className="inline-block">{content}</div>;
 }
 
-// The logomark: loads from /public/conduit-mark.svg
-export function ConduitMark({ size = 40 }: { size?: number }) {
+// The ⊙D mark icon — used as the large hero centrepiece
+export function ConduitMark({ size = 80 }: { size?: number }) {
   return (
     <Image
       src="/conduit-mark.svg"
       alt="Conduit"
       width={size}
       height={size}
-      className="rounded-full"
+      priority
     />
   );
 }
 
-// Wordmark only — footer variant
+// Wordmark only — footer / compact variant
 export function Wordmark({ size = "sm" }: { size?: "sm" | "md" | "lg" }) {
   return <Logo size={size} href={undefined} />;
 }

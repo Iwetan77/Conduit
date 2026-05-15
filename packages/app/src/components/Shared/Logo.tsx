@@ -8,18 +8,17 @@ interface LogoProps {
   href?: string;
 }
 
-const HEIGHTS = { sm: 32, md: 40, lg: 56 };
+// Nav logo — the ⊙D mark icon (conduit-mainLogo)
+const NAV_HEIGHTS = { sm: 48, md: 56, lg: 72 };
 
-// Nav logo — the main wordmark image (conduit-mainLogo)
 export function Logo({ size = "md", href = "/" }: LogoProps) {
-  const h = HEIGHTS[size];
-  // Preserve aspect ratio; width is auto via unset or a generous max
+  const h = NAV_HEIGHTS[size];
   const content = (
     <Image
       src="/conduit-mainLogo.svg.jpg"
       alt="Conduit"
       height={h}
-      width={h * 4}   // wide enough for the wordmark; next/image will respect the natural ratio
+      width={h}
       style={{ height: h, width: "auto" }}
       priority
     />
@@ -31,15 +30,16 @@ export function Logo({ size = "md", href = "/" }: LogoProps) {
   return <div className="inline-block">{content}</div>;
 }
 
-// Hero centrepiece — the sub-logo / mark icon (conduit-sublogo)
-export function ConduitMark({ size = 96 }: { size?: number }) {
+// Hero centrepiece — the CONDUIT wordmark (conduit-sublogo)
+// It's a wide image so we control height and let width be auto
+export function ConduitMark({ height = 80 }: { height?: number; size?: number }) {
   return (
     <Image
       src="/conduit-sublogo.svg.jpg"
       alt="Conduit"
-      width={size}
-      height={size}
-      style={{ width: size, height: size, objectFit: "contain" }}
+      height={height}
+      width={height * 5}           // wordmark is ~5:1 aspect; next/image respects natural ratio via style
+      style={{ height: height, width: "auto", maxWidth: "100%" }}
       priority
     />
   );

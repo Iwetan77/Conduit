@@ -13,7 +13,7 @@ const TOKEN_CONFIG: Record<Currency, { symbol: string; logo: string; color: stri
   EURC: { symbol: "EURC", logo: "/eurc.svg",  color: "#2775CA", bg: "rgba(39, 117, 202, 0.10)" },
 };
 
-const ICON_PX: Record<"sm" | "md" | "lg", number> = { sm: 14, md: 18, lg: 22 };
+const ICON_PX: Record<"sm" | "md" | "lg", number> = { sm: 20, md: 26, lg: 32 };
 
 export function TokenBadge({ currency, size = "md" }: TokenBadgeProps) {
   const config = TOKEN_CONFIG[currency];
@@ -67,7 +67,7 @@ export function TokenSelector({ value, onChange, label }: TokenSelectorProps) {
                               : "border-brand-border text-brand-muted hover:border-brand-white/20"
                           }`}
             >
-              <Image src={config.logo} alt={currency} width={18} height={18} className="rounded-full" />
+              <Image src={config.logo} alt={currency} width={26} height={26} className="rounded-full" />
               {currency}
             </button>
           );

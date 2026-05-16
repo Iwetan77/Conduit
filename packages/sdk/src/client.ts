@@ -3,7 +3,9 @@ import { ARC_TESTNET, QUOTE_TTL_SECONDS, DEFAULT_APP_URL } from "./constants.js"
 import { DeclarationClient } from "./declaration.js";
 import { RouterClient } from "./router.js";
 import { ReceiptClient } from "./receipt.js";
-import { swapWithBrowserWallet, toHumanAmount } from "./swap.js";
+import { swap, swapWithBrowserWallet, toHumanAmount } from "./swap.js";
+import { discover as _discover } from "./discovery.js";
+import type { DiscoveryResult } from "./discovery.js";
 import type {
   Address,
   Bytes32,
@@ -12,6 +14,7 @@ import type {
   PaymentReceipt,
   Quote,
   ConduitClientConfig,
+  AgentConfig,
   PayOptions,
   CreateLinkOptions,
   FulfillOptions,
@@ -20,17 +23,23 @@ import type {
 
 /// @notice Main entry point for the Conduit SDK.
 ///
-/// Usage:
-///   const conduit = new ConduitClient({ signer, kitKey: "TEST_...", network: "arc-testnet" });
+/// Browser usage (wagmi/viem):
+///   const conduit = ConduitClient.fromBrowserProvider(window.ethereum, kitKey);
 ///   await conduit.pay({ recipient, amount: 10_000_000n, currency: "USDC" });
-///   await conduit.pay({ recipient, amount: 10_000_000n, currency: "EURC", payerToken: "USDC" }); // cross-currency
-///   const { paymentUrl } = await conduit.createLink({ amount: 0n, currency: "EURC" });
+///
+/// Server / agent usage:
+///   const conduit = new ConduitClient({ privateKey: process.env.PRIVATE_KEY, kitKey: "..." });
+///   const result = await conduit.discover("https://service.xyz/api");
+///   if (result.found) await conduit.fulfill(result.declaration!);
 export class ConduitClient {
   private provider: ethers.JsonRpcProvider;
   private signerProvider: ethers.BrowserProvider | ethers.JsonRpcProvider;
   private signerAddress?: Address;
   private appUrl: string;
   private kitKey: string;
+  private privateKey?: string;
+  private walletSigner?: ethers.Wallet;
+  private agentConfig?: AgentConfig;
 
   private declarationClient: DeclarationClient;
   private routerClient: RouterClient;
@@ -46,6 +55,23 @@ export class ConduitClient {
     this.signerProvider = this.provider;
     this.appUrl = config.appUrl ?? DEFAULT_APP_URL;
     this.kitKey = config.kitKey ?? "";
+    this.agentConfig = config.agentConfig;
+
+    // Server-side: build a wallet signer from privateKey
+    if (config.privateKey) {
+      this.privateKey = config.privateKey;
+      this.walletSigner = new ethers.Wallet(config.privateKey, this.provider);
+      if (!config.signer) {
+        config.signer = this.walletSigner;
+      }
+    }
+
+    if (!config.signer) {
+      throw new Error(
+        "ConduitClient requires either signer or privateKey. " +
+        "Pass a wallet signer for browser flows, or privateKey for server/agent flows."
+      );
+    }
 
     this.declarationClient = new DeclarationClient(this.provider, config.signer, this.appUrl);
     this.routerClient = new RouterClient(this.provider);
@@ -89,10 +115,13 @@ export class ConduitClient {
   ///     Single tx: ConduitRouter.execute()
   ///
   ///   Cross-currency (USDC→EURC or EURC→USDC):
-  ///     Tx 1: Circle App Kit kit.swap() → converts in payer's wallet
-  ///     Tx 2: ConduitRouter.execute() → forwards to recipient
+  ///     Server path: swap() via privateKey → ConduitRouter.execute()
+  ///     Browser path: swapWithBrowserWallet() → ConduitRouter.execute()
   ///
   async pay(options: PayOptions): Promise<PaymentReceipt> {
+    // Enforce agent spending constraints before any execution
+    await this.checkAgentConstraints(options);
+
     const signerAddr = await this.getSignerAddress();
     const payerToken = this.currencyToAddress(options.payerToken ?? options.currency);
     const recipientToken = this.currencyToAddress(options.currency);
@@ -108,19 +137,38 @@ export class ConduitClient {
         );
       }
 
-      // Step 1: Swap payerToken → recipientToken in payer's wallet
       const humanAmount = toHumanAmount(options.amount);
-      const swapResult = await swapWithBrowserWallet(
-        this.getEip1193Provider(),
-        options.payerToken ?? options.currency,
-        options.currency,
-        humanAmount,
-        this.kitKey
-      );
 
-      // Step 2: Transfer the received recipientToken to recipient
-      // amountOutRaw is in base units (6 decimals); fall back to requested amount
-      // if LI.FI lookup failed and amountOut is unavailable.
+      // Detect environment: server (Node.js) vs browser
+      const isServer = typeof window === "undefined";
+      let swapResult;
+
+      if (isServer) {
+        // Server/agent path — requires privateKey in config
+        if (!this.privateKey) {
+          throw new Error(
+            "Server-side cross-currency payments require privateKey in ConduitClient config. " +
+            "Example: new ConduitClient({ privateKey: process.env.PRIVATE_KEY, kitKey: '...' })"
+          );
+        }
+        swapResult = await swap(
+          this.privateKey,
+          options.payerToken ?? options.currency,
+          options.currency,
+          humanAmount,
+          this.kitKey
+        );
+      } else {
+        // Browser path — uses EIP-1193 provider
+        swapResult = await swapWithBrowserWallet(
+          this.getEip1193Provider(),
+          options.payerToken ?? options.currency,
+          options.currency,
+          humanAmount,
+          this.kitKey
+        );
+      }
+
       const receivedAmount = swapResult.amountOutRaw
         ? BigInt(swapResult.amountOutRaw)
         : options.amount;
@@ -135,7 +183,7 @@ export class ConduitClient {
         declarationId: "0x0000000000000000000000000000000000000000000000000000000000000000" as Bytes32,
       };
 
-      return this.routerClient.execute(instruction, this.signerProvider);
+      return this.routerClient.execute(instruction, this.getSignerProvider());
     }
 
     // ── Same-currency: single tx ──────────────────────────────────────────
@@ -149,14 +197,14 @@ export class ConduitClient {
       declarationId: "0x0000000000000000000000000000000000000000000000000000000000000000" as Bytes32,
     };
 
-    return this.routerClient.execute(instruction, this.signerProvider);
+    return this.routerClient.execute(instruction, this.getSignerProvider());
   }
 
   /// @notice Create a payment declaration and get a shareable URL + declarationId.
   async createLink(
     options: CreateLinkOptions
   ): Promise<{ declarationId: Bytes32; paymentUrl: string; txHash: string }> {
-    return this.declarationClient.register(options, this.signerProvider);
+    return this.declarationClient.register(options, this.getSignerProvider());
   }
 
   /// @notice Parse a declaration from a Conduit payment URL.
@@ -185,13 +233,32 @@ export class ConduitClient {
 
       const humanAmount = toHumanAmount(declaration.amount);
 
-      const swapResult = await swapWithBrowserWallet(
-        this.getEip1193Provider(),
-        payerCurrency,
-        declaration.currency,
-        humanAmount,
-        this.kitKey
-      );
+      // Detect environment: server (Node.js) vs browser
+      const isServer = typeof window === "undefined";
+      let swapResult;
+
+      if (isServer) {
+        if (!this.privateKey) {
+          throw new Error(
+            "Server-side cross-currency fulfillment requires privateKey in ConduitClient config."
+          );
+        }
+        swapResult = await swap(
+          this.privateKey,
+          payerCurrency,
+          declaration.currency,
+          humanAmount,
+          this.kitKey
+        );
+      } else {
+        swapResult = await swapWithBrowserWallet(
+          this.getEip1193Provider(),
+          payerCurrency,
+          declaration.currency,
+          humanAmount,
+          this.kitKey
+        );
+      }
 
       const receivedAmount = swapResult.amountOutRaw
         ? BigInt(swapResult.amountOutRaw)
@@ -207,7 +274,7 @@ export class ConduitClient {
         declarationId: declaration.declarationId,
       };
 
-      return this.routerClient.execute(instruction, this.signerProvider);
+      return this.routerClient.execute(instruction, this.getSignerProvider());
     }
 
     // Same-currency fulfill
@@ -221,12 +288,24 @@ export class ConduitClient {
       declarationId: declaration.declarationId,
     };
 
-    return this.routerClient.execute(instruction, this.signerProvider);
+    return this.routerClient.execute(instruction, this.getSignerProvider());
+  }
+
+  /// @notice Discover a Conduit payment declaration from a service endpoint.
+  ///
+  /// Checks for a Conduit-Payment HTTP header or /.well-known/conduit file.
+  /// Returns the declaration if found, or { found: false } if not.
+  ///
+  /// Use with fulfill() for fully autonomous agent payment flows:
+  ///   const result = await conduit.discover("https://service.xyz/api")
+  ///   if (result.found) await conduit.fulfill(result.declaration!)
+  async discover(url: string): Promise<DiscoveryResult> {
+    return _discover(url, this.declarationClient);
   }
 
   /// @notice Deactivate a declaration (only callable by the creator).
   async deactivateLink(declarationId: Bytes32): Promise<string> {
-    return this.declarationClient.deactivate(declarationId, this.signerProvider);
+    return this.declarationClient.deactivate(declarationId, this.getSignerProvider());
   }
 
   /// @notice Quote a payment.
@@ -297,12 +376,70 @@ export class ConduitClient {
 
   // ── Helpers ───────────────────────────────────────────────────────────────
 
+  /// @notice Enforce agent spending constraints before any payment execution.
+  private async checkAgentConstraints(options: PayOptions): Promise<void> {
+    if (!this.agentConfig) return;
+
+    const { maxPerTransactionUSDC, allowedTokens, allowedRecipients } = this.agentConfig;
+
+    if (
+      maxPerTransactionUSDC &&
+      maxPerTransactionUSDC > 0n &&
+      options.amount > maxPerTransactionUSDC
+    ) {
+      throw new Error(
+        `Payment of ${options.amount} exceeds agent maxPerTransactionUSDC ` +
+        `limit of ${maxPerTransactionUSDC}`
+      );
+    }
+
+    if (allowedTokens && allowedTokens.length > 0) {
+      if (!allowedTokens.includes(options.currency)) {
+        throw new Error(
+          `Token ${options.currency} is not in agent allowedTokens: ` +
+          `${allowedTokens.join(", ")}`
+        );
+      }
+    }
+
+    if (allowedRecipients && allowedRecipients.length > 0) {
+      const recipientLower = options.recipient.toLowerCase();
+      const allowed = allowedRecipients.map((r) => r.toLowerCase());
+      if (!allowed.includes(recipientLower)) {
+        throw new Error(
+          `Recipient ${options.recipient} is not in agent allowedRecipients`
+        );
+      }
+    }
+  }
+
   private async getSignerAddress(): Promise<Address> {
     if (this.signerAddress) return this.signerAddress;
+
+    // Fast path for server-side wallet
+    if (this.walletSigner) {
+      this.signerAddress = (await this.walletSigner.getAddress()) as Address;
+      return this.signerAddress;
+    }
+
     const signer = await (this.signerProvider as ethers.BrowserProvider).getSigner?.();
     if (!signer) throw new Error("No signer available. Connect a wallet.");
     this.signerAddress = (await signer.getAddress()) as Address;
     return this.signerAddress;
+  }
+
+  /// @notice Returns a signerProvider-compatible object for sub-clients.
+  /// For server-side wallet flows, wraps the wallet into a getSigner() interface.
+  private getSignerProvider(): ethers.BrowserProvider | ethers.JsonRpcProvider {
+    if (this.walletSigner) {
+      const wallet = this.walletSigner;
+      // Wrap wallet as a minimal provider-like object that returns the wallet as signer
+      return {
+        getSigner: async (_addressOrIndex?: string | number) =>
+          wallet as unknown as ethers.JsonRpcSigner,
+      } as unknown as ethers.JsonRpcProvider;
+    }
+    return this.signerProvider as ethers.BrowserProvider | ethers.JsonRpcProvider;
   }
 
   // Wrap ethers BrowserProvider as an EIP-1193 object for Circle App Kit

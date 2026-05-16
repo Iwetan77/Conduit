@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { Providers } from "./providers";
+import { ChainGuard } from "@/components/Shared/ChainGuard";
 
 export const metadata: Metadata = {
   title: "Conduit — Arc Native Agent Payment Protocol",
@@ -22,7 +23,11 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className="bg-brand-black text-brand-white font-body antialiased">
-        <Providers>{children}</Providers>
+        <Providers>
+          <ChainGuard>
+            {children}
+          </ChainGuard>
+        </Providers>
       </body>
     </html>
   );

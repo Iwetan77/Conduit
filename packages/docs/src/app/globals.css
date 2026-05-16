@@ -1,0 +1,46 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --green: #B2F55A;
+  --surface: #111111;
+  --border: #1F1F1F;
+  --muted: #555555;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html { scroll-behavior: smooth; background: #000; }
+
+body {
+  background: #000;
+  color: #fff;
+  font-family: 'Barlow', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow-x: hidden;
+}
+
+::-webkit-scrollbar { width: 3px; }
+::-webkit-scrollbar-track { background: #000; }
+::-webkit-scrollbar-thumb { background: #1F1F1F; border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: #B2F55A; }
+
+::selection { background: #B2F55A; color: #000; }
+
+/* Prose utilities */
+.prose-conduit h1 { font-family: 'Barlow Condensed', sans-serif; font-weight: 900; font-size: 2.5rem; color: #fff; line-height: 1.1; margin-bottom: 1rem; }
+.prose-conduit h2 { font-family: 'Barlow Condensed', sans-serif; font-weight: 700; font-size: 1.5rem; color: #fff; margin-top: 2.5rem; margin-bottom: 0.75rem; }
+.prose-conduit h3 { font-family: 'IBM Plex Mono', monospace; font-size: 0.85rem; color: #B2F55A; text-transform: uppercase; letter-spacing: 0.12em; margin-top: 2rem; margin-bottom: 0.5rem; }
+.prose-conduit p  { color: #555; font-size: 0.9rem; line-height: 1.8; margin-bottom: 1rem; }
+.prose-conduit a  { color: #B2F55A; text-decoration: none; }
+.prose-conduit a:hover { text-decoration: underline; }
+.prose-conduit code { font-family: 'IBM Plex Mono', monospace; font-size: 0.78rem; color: #B2F55A; background: #111; padding: 0.1em 0.35em; border-radius: 4px; }
+.prose-conduit pre { background: #0A0A0A; border: 1px solid #1F1F1F; border-radius: 12px; padding: 1.25rem; overflow-x: auto; margin-bottom: 1.25rem; }
+.prose-conduit pre code { background: none; padding: 0; color: #ccc; }
+.prose-conduit ul { list-style: none; padding: 0; margin-bottom: 1rem; }
+.prose-conduit ul li { padding-left: 1.2rem; position: relative; color: #555; font-size: 0.9rem; line-height: 1.8; }
+.prose-conduit ul li::before { content: '→'; position: absolute; left: 0; color: #B2F55A; }
+.prose-conduit strong { color: #fff; font-weight: 600; }
+.prose-conduit hr { border: none; border-top: 1px solid #1F1F1F; margin: 2rem 0; }

@@ -13,11 +13,12 @@ export const ARC_TESTNET = {
   },
 
   contracts: {
-    // Populated by Deploy.s.sol — fill from .env after deployment
-    conduitRouter: (process.env["NEXT_PUBLIC_CONDUIT_ROUTER"] ?? "") as Address,
-    declarationRegistry: (process.env["NEXT_PUBLIC_DECLARATION_REGISTRY"] ?? "") as Address,
-    stableFXAdapter: (process.env["NEXT_PUBLIC_STABLEFX_ADAPTER"] ?? "") as Address,
-    atomicSettler: (process.env["NEXT_PUBLIC_ATOMIC_SETTLER"] ?? "") as Address,
+    // Deployed to Arc Testnet — 2026-05-16
+    conduitRouter: (process.env["NEXT_PUBLIC_CONDUIT_ROUTER"] ?? "0xCd86C3AB40d3bc6bf6C181F0BF7a00112B244096") as Address,
+    declarationRegistry: (process.env["NEXT_PUBLIC_DECLARATION_REGISTRY"] ?? "0x9ce428B7a0DA93B58Ed35D664F1C8aE438Fa0439") as Address,
+    stableFXAdapter: (process.env["NEXT_PUBLIC_STABLEFX_ADAPTER"] ?? "0x6D71C30b022336148DbA580FcAdbE8B3B6ee415D") as Address,
+    atomicSettler: (process.env["NEXT_PUBLIC_ATOMIC_SETTLER"] ?? "0xBb55a2595c1Da42b5817f5c60828C9D8dF607313") as Address,
+    cctpAdapter: (process.env["NEXT_PUBLIC_CCTP_ADAPTER"] ?? "0xfa141fc27CC7dd9d44ef2CEd8812648C6705e997") as Address,
 
     // Arc native (immutable)
     stableFXEscrow: "0x867650F5eAe8df91445971f14d89fd84F0C9a9f8" as Address,

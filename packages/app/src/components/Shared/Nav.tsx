@@ -12,6 +12,7 @@ const NAV_LINKS = [
   { href: "/history", label: "History" },
 ];
 
+
 export function Nav() {
   const pathname = usePathname();
 
@@ -27,7 +28,7 @@ export function Nav() {
               <Link
                 key={href}
                 href={href}
-                className={`px-3 py-1.5 rounded-lg text-sm font-anton tracking-wide transition-colors ${
+                className={`px-3 py-1.5 rounded-lg text-sm font-mono tracking-wider transition-colors ${
                   isActive
                     ? "text-brand-white bg-brand-surface"
                     : "text-brand-muted hover:text-brand-white"
@@ -45,7 +46,6 @@ export function Nav() {
   );
 }
 
-// Mobile bottom nav
 export function MobileNav() {
   const pathname = usePathname();
 
@@ -58,7 +58,7 @@ export function MobileNav() {
             <Link
               key={href}
               href={href}
-              className={`flex-1 py-3 text-center text-xs font-medium transition-colors ${
+              className={`flex-1 py-3 text-center text-xs font-mono tracking-wider transition-colors ${
                 isActive ? "text-brand-green" : "text-brand-muted"
               }`}
             >

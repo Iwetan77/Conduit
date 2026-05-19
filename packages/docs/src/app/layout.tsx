@@ -1,6 +1,11 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { Anton, Barlow, IBM_Plex_Mono } from "next/font/google";
 import { DocNav } from "@/components/DocNav";
+
+const anton = Anton({ weight: "400", subsets: ["latin"], variable: "--font-anton" });
+const barlow = Barlow({ weight: ["400", "500", "600"], subsets: ["latin"], variable: "--font-barlow" });
+const mono = IBM_Plex_Mono({ weight: ["400", "500"], subsets: ["latin"], variable: "--font-mono" });
 
 export const metadata: Metadata = {
   title: { default: "Conduit Docs", template: "%s — Conduit Docs" },
@@ -10,15 +15,7 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
-      <head>
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-        <link
-          href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@700;900&family=Barlow:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap"
-          rel="stylesheet"
-        />
-      </head>
+    <html lang="en" className={`${anton.variable} ${barlow.variable} ${mono.variable}`}>
       <body>
         <DocNav />
         <div className="max-w-3xl mx-auto px-6 pt-24 pb-32">

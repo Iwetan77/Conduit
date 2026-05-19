@@ -1,8 +1,7 @@
-@import url('https://fonts.googleapis.com/css2?family=Anton&family=Barlow+Condensed:wght@700;800;900&family=Barlow:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap');
-
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
 
 :root {
   --brand-green: #B2F55A;
@@ -25,7 +24,7 @@ body {
   overflow-x: hidden;
   background: #000000;
   color: #FFFFFF;
-  font-family: "Barlow", sans-serif;
+  font-family: "anton", sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }

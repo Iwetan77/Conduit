@@ -19,10 +19,10 @@ const config: Config = {
         },
       },
       fontFamily: {
-        anton: ["Anton", "sans-serif"],
-        display: ["Barlow Condensed", "sans-serif"],
-        body: ["Barlow", "sans-serif"],
-        mono: ["IBM Plex Mono", "monospace"],
+        anton: ['"Anton"', "sans-serif"],
+        display: ['"Barlow Condensed"', "sans-serif"],
+        body: ['"Barlow"', "sans-serif"],
+        mono: ['"IBM Plex Mono"', "monospace"],
       },
       fontSize: {
         "display-xl": ["5rem", { lineHeight: "1", letterSpacing: "-0.02em", fontWeight: "800" }],

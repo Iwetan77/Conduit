@@ -21,7 +21,7 @@ html {
 body {
   background: #000;
   color: #fff;
-  font-family: 'Barlow', sans-serif;
+  font-family: var(--font-barlow), sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   overflow-x: hidden;
@@ -49,10 +49,10 @@ body::after {
 ::selection { background: #B2F55A; color: #000; }
 
 /* Font utilities */
-.font-display { font-family: 'Barlow Condensed', sans-serif; }
-.font-body    { font-family: 'Barlow', sans-serif; }
-.font-mono    { font-family: 'IBM Plex Mono', monospace; }
-.font-anton   { font-family: 'Anton', sans-serif; }
+.font-display { font-family: var(--font-anton), sans-serif; }
+.font-body    { font-family: var(--font-barlow), sans-serif; }
+.font-mono    { font-family: var(--font-mono), monospace; }
+.font-anton   { font-family: var(--font-anton), sans-serif; }
 
 /* Grid background pattern */
 .grid-bg {

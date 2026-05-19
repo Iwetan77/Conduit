@@ -41,7 +41,7 @@ export default function HistoryPage() {
       <Nav />
       <main className="max-w-2xl mx-auto px-4 pt-24 pb-24">
         <div className="mb-8">
-          <h1 className="text-3xl font-display font-black text-brand-white">History</h1>
+          <h1 className="text-3xl font-anton text-brand-white">History</h1>
           <p className="text-brand-muted text-sm mt-1">All settled payments from this wallet</p>
         </div>
 

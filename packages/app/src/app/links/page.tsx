@@ -73,13 +73,13 @@ export default function LinksPage() {
       <main className="max-w-2xl mx-auto px-4 pt-24 pb-24">
         <div className="flex items-center justify-between mb-8">
           <div>
-            <h1 className="text-3xl font-display font-black text-brand-white">My Links</h1>
+            <h1 className="text-3xl font-anton text-brand-white">My Links</h1>
             <p className="text-brand-muted text-sm mt-1">Manage your payment declarations</p>
           </div>
           <a
             href="/create"
             className="px-4 py-2 rounded-xl bg-brand-green text-brand-black
-                       text-sm font-bold hover:bg-brand-green/90 transition-colors"
+                       text-sm font-anton tracking-wide hover:bg-brand-green/90 transition-colors"
           >
             + New Link
           </a>
@@ -101,7 +101,7 @@ export default function LinksPage() {
             <p className="text-brand-muted mb-4">No payment links yet.</p>
             <a
               href="/create"
-              className="px-6 py-3 rounded-xl bg-brand-green text-brand-black font-bold"
+              className="px-6 py-3 rounded-xl bg-brand-green text-brand-black font-anton tracking-wide"
             >
               Create your first link
             </a>
@@ -128,7 +128,7 @@ export default function LinksPage() {
                         <span
                           className={`w-1.5 h-1.5 rounded-full ${decl.active ? "bg-brand-green" : "bg-brand-muted"}`}
                         />
-                        <span className="text-sm font-medium text-brand-white">
+                        <span className="text-sm font-anton text-brand-white">
                           {decl.amount > 0n ? formatAmount(decl.amount, currency) : `Open · ${currency}`}
                         </span>
                         <TokenBadge currency={currency} size="sm" />

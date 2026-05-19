@@ -126,15 +126,11 @@ function Nav() {
       }}
     >
       <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
-        {/* Logomark + wordmark */}
-        <Link href="/" className="flex items-center gap-2.5 group">
-          <motion.div whileHover={{ rotate: 5, scale: 1.08 }} transition={{ type: 'spring', stiffness: 400 }}>
-            <Image src="/conduit-mark.svg" alt="Conduit" width={30} height={30} priority />
+        {/* Logo */}
+        <Link href="/" className="flex items-center group">
+          <motion.div whileHover={{ scale: 1.05 }} transition={{ type: 'spring', stiffness: 400 }}>
+            <Image src="/CONDUIT-MAIN.png" alt="Conduit" height={44} width={140} style={{ height: 44, width: 'auto' }} priority />
           </motion.div>
-          <span className="font-display font-black text-xl tracking-tight select-none leading-none">
-            <span style={{ color: '#B2F55A' }}>CON</span>
-            <span style={{ color: '#FFFFFF' }}>DUIT</span>
-          </span>
         </Link>
 
         {/* Nav links — hidden on mobile */}

@@ -86,7 +86,7 @@ export function LinkCard({
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
             <ConduitMark size={32} />
-            <span style={{ fontFamily: "Barlow Condensed, sans-serif", fontWeight: 900, fontSize: "22px" }}>
+            <span style={{ fontFamily: "Anton, sans-serif", fontWeight: 900, fontSize: "22px" }}>
               <span style={{ color: "#B2F55A" }}>CON</span>
               <span style={{ color: "#FFFFFF" }}>DUIT</span>
             </span>
@@ -115,7 +115,7 @@ export function LinkCard({
           )}
           <p
             style={{
-              fontFamily: "Barlow Condensed, sans-serif",
+              fontFamily: "Anton, sans-serif",
               fontWeight: 800,
               fontSize: "52px",
               color: "#FFFFFF",

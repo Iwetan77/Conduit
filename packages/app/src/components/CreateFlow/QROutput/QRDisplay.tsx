@@ -91,7 +91,7 @@ export function QRDisplay({
           {/* Wordmark */}
           <div
             style={{
-              fontFamily: "Barlow Condensed, sans-serif",
+              fontFamily: "Anton, sans-serif",
               fontWeight: 900,
               fontSize: "28px",
               letterSpacing: "-0.02em",
@@ -136,7 +136,7 @@ export function QRDisplay({
             )}
             <p
               style={{
-                fontFamily: "Barlow Condensed, sans-serif",
+                fontFamily: "Anton, sans-serif",
                 fontWeight: 800,
                 fontSize: "36px",
                 color: "#FFFFFF",

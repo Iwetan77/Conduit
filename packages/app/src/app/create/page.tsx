@@ -35,7 +35,7 @@ export default function CreatePage() {
 
       <main className="max-w-2xl mx-auto px-4 pt-24 pb-24">
         <div className="mb-8">
-          <h1 className="text-3xl font-display font-black text-brand-white">
+          <h1 className="text-3xl font-anton text-brand-white">
             Create Payment
           </h1>
           <p className="text-brand-muted text-sm mt-1">
@@ -57,7 +57,7 @@ export default function CreatePage() {
             <div className="flex bg-brand-surface border border-brand-border rounded-xl p-1 gap-1">
               <button
                 onClick={() => setActiveTab("link")}
-                className={`flex-1 py-2.5 rounded-lg text-sm font-medium transition-all ${
+                className={`flex-1 py-2.5 rounded-lg text-sm font-anton tracking-wide transition-all ${
                   activeTab === "link"
                     ? "bg-brand-black text-brand-white"
                     : "text-brand-muted hover:text-brand-white"
@@ -67,7 +67,7 @@ export default function CreatePage() {
               </button>
               <button
                 onClick={() => setActiveTab("qr")}
-                className={`flex-1 py-2.5 rounded-lg text-sm font-medium transition-all ${
+                className={`flex-1 py-2.5 rounded-lg text-sm font-anton tracking-wide transition-all ${
                   activeTab === "qr"
                     ? "bg-brand-black text-brand-white"
                     : "text-brand-muted hover:text-brand-white"
@@ -124,7 +124,7 @@ export default function CreatePage() {
                   resetCreateFlow();
                 }}
                 className="flex-1 py-3 rounded-xl bg-brand-green text-brand-black
-                           text-sm font-bold hover:bg-brand-green/90 transition-colors"
+                           text-sm font-anton tracking-wide hover:bg-brand-green/90 transition-colors"
               >
                 Create Another
               </button>

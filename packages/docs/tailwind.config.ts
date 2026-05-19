@@ -11,9 +11,10 @@ const config: Config = {
         muted: "#555555",
       },
       fontFamily: {
-        mono: ["IBM Plex Mono", "monospace"],
-        display: ["Barlow Condensed", "sans-serif"],
-        body: ["Barlow", "sans-serif"],
+        mono: ["var(--font-mono)", "monospace"],
+        display: ["var(--font-anton)", "sans-serif"],
+        anton: ["var(--font-anton)", "sans-serif"],
+        body: ["var(--font-barlow)", "sans-serif"],
       },
     },
   },

@@ -20,11 +20,11 @@ export function DeclarationDisplay({ declaration }: DeclarationDisplayProps) {
           {isOpenAmount ? "Open payment request" : "Payment request"}
         </p>
         {isOpenAmount ? (
-          <p className="text-4xl font-display font-black text-brand-white">
+          <p className="text-4xl font-anton text-brand-white">
             Pay what you want
           </p>
         ) : (
-          <p className="text-5xl font-display font-black text-brand-white">
+          <p className="text-5xl font-anton text-brand-white">
             {formatAmount(declaration.amount, declaration.currency)}
           </p>
         )}

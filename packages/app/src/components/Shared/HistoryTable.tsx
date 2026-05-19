@@ -69,7 +69,7 @@ export function HistoryTable({ receipts, walletAddress, isLoading }: HistoryTabl
                 {isSender ? "↑" : "↓"}
               </div>
               <div>
-                <p className="text-sm font-medium text-brand-white">
+                <p className="text-sm font-anton text-brand-white">
                   {isSender
                     ? `To ${shortenAddress(receipt.recipient)}`
                     : `From ${shortenAddress(receipt.payer)}`}

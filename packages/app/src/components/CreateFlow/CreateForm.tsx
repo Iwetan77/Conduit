@@ -95,7 +95,7 @@ export function CreateForm({ onSuccess }: CreateFormProps) {
         type="submit"
         disabled={isSubmitting}
         className="w-full py-4 rounded-xl bg-brand-green text-brand-black
-                   font-bold text-lg hover:bg-brand-green/90 transition-colors
+                   font-anton tracking-wide text-lg hover:bg-brand-green/90 transition-colors
                    disabled:opacity-50 disabled:cursor-not-allowed"
       >
         {isSubmitting ? "Creating on-chain..." : "Create Payment Link"}

@@ -45,7 +45,7 @@ export function ReceiptCard({ receipt, onClose }: ReceiptCardProps) {
 
         <div className="text-center py-4">
           <p className="text-brand-muted text-sm mb-1">Amount received</p>
-          <p className="text-4xl font-display font-black text-brand-white">
+          <p className="text-4xl font-anton text-brand-white">
             {formatAmount(receipt.recipientAmount, recipientCurrency)}
           </p>
           {isCrossChain && (

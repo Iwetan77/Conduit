@@ -55,7 +55,7 @@ function Tabs({
           onClick={() => onChange(tab)}
           className={`px-4 py-1.5 rounded-md text-xs font-mono transition-all ${
             active === tab
-              ? "bg-brand-green text-brand-black font-bold"
+              ? "bg-brand-green text-brand-black font-anton"
               : "text-brand-muted hover:text-brand-white"
           }`}
         >
@@ -161,7 +161,7 @@ export default function AgentPage() {
           <p className="text-[10px] font-mono text-brand-green uppercase tracking-[0.18em]">
             Item 6 of 8
           </p>
-          <h1 className="text-3xl font-display font-black text-brand-white">
+          <h1 className="text-3xl font-anton text-brand-white">
             Conduit Relay
           </h1>
           <p className="text-brand-muted text-sm leading-relaxed max-w-lg">
@@ -175,7 +175,7 @@ export default function AgentPage() {
         {/* ── Section 2: SDK Integration (for payers / agents) ──────────── */}
         <div className="space-y-5">
           <div>
-            <h2 className="text-lg font-display font-bold text-brand-white">
+            <h2 className="text-lg font-anton text-brand-white">
               SDK Integration
             </h2>
             <p className="text-brand-muted text-xs mt-1">
@@ -199,7 +199,7 @@ export default function AgentPage() {
         {/* ── Section 3: Accept Agent Payments ──────────────────────────── */}
         <div className="space-y-5">
           <div>
-            <h2 className="text-lg font-display font-bold text-brand-white">
+            <h2 className="text-lg font-anton text-brand-white">
               Accept Agent Payments
             </h2>
             <p className="text-brand-muted text-xs mt-1">
@@ -210,7 +210,7 @@ export default function AgentPage() {
           {/* Step 1 */}
           <div className="bg-brand-surface border border-brand-border rounded-2xl p-6 space-y-3">
             <div className="flex items-center gap-3">
-              <span className="w-6 h-6 rounded-full bg-brand-green text-brand-black text-xs font-bold flex items-center justify-center flex-shrink-0">
+              <span className="w-6 h-6 rounded-full bg-brand-green text-brand-black text-xs font-anton flex items-center justify-center flex-shrink-0">
                 1
               </span>
               <h3 className="font-mono text-sm text-brand-white">
@@ -224,7 +224,7 @@ export default function AgentPage() {
             <div className="pl-9">
               <a
                 href="/create"
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-brand-green text-brand-black text-sm font-bold hover:opacity-90 transition-opacity"
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-brand-green text-brand-black text-sm font-anton tracking-wide hover:opacity-90 transition-opacity"
               >
                 Create your payment declaration →
               </a>
@@ -234,7 +234,7 @@ export default function AgentPage() {
           {/* Step 2 */}
           <div className="bg-brand-surface border border-brand-border rounded-2xl p-6 space-y-4">
             <div className="flex items-center gap-3">
-              <span className="w-6 h-6 rounded-full bg-brand-green text-brand-black text-xs font-bold flex items-center justify-center flex-shrink-0">
+              <span className="w-6 h-6 rounded-full bg-brand-green text-brand-black text-xs font-anton flex items-center justify-center flex-shrink-0">
                 2
               </span>
               <h3 className="font-mono text-sm text-brand-white">

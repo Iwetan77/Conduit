@@ -5,6 +5,7 @@ import { arcTestnet } from "@/lib/wagmi";
 import { shortenAddress } from "@/lib/format";
 import { motion } from "framer-motion";
 
+
 export function WalletConnect() {
   const { address, isConnected } = useAccount();
   const { connect, connectors, isPending } = useConnect();
@@ -59,7 +60,7 @@ export function WalletConnect() {
         <button
           onClick={() => connect({ connector: injectedConnector })}
           disabled={isPending}
-          className="px-4 py-2 rounded-lg text-sm font-anton tracking-wide
+          className="px-4 py-2 rounded-lg text-sm font-mono
                      bg-brand-green text-brand-black
                      hover:bg-brand-green/90 transition-colors
                      disabled:opacity-50 disabled:cursor-not-allowed"
@@ -71,7 +72,7 @@ export function WalletConnect() {
         <button
           onClick={() => connect({ connector: wcConnector })}
           disabled={isPending}
-          className="px-4 py-2 rounded-lg text-sm font-anton tracking-wide
+          className="px-4 py-2 rounded-lg text-sm font-mono
                      border border-brand-border text-brand-white
                      hover:border-brand-green/50 transition-colors
                      disabled:opacity-50"

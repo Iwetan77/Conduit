@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useAccount } from "wagmi";
 import { isAddress } from "viem";
 import { ConduitMark } from "@/components/Shared/Logo";
@@ -16,8 +16,11 @@ import { motion, AnimatePresence } from "framer-motion";
 type Step = "input" | "confirm";
 
 export default function HomePage() {
+  const [mounted, setMounted] = useState(false);
   const { isConnected } = useAccount();
   const [step, setStep] = useState<Step>("input");
+
+  useEffect(() => { setMounted(true); }, []);
 
   const [recipient, setRecipient] = useState("");
   const [amount, setAmount] = useState("");
@@ -106,7 +109,7 @@ export default function HomePage() {
                 )}
               </div>
 
-              {!isConnected ? (
+              {!mounted || !isConnected ? (
                 <div className="text-center space-y-3">
                   <p className="text-brand-muted text-sm">Connect your wallet to send</p>
                   <WalletConnect />

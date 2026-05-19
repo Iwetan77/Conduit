@@ -1,5 +1,6 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import { useAccount, useConnect, useDisconnect, useChainId, useSwitchChain } from "wagmi";
 import { arcTestnet } from "@/lib/wagmi";
 import { shortenAddress } from "@/lib/format";
@@ -7,11 +8,15 @@ import { motion } from "framer-motion";
 
 
 export function WalletConnect() {
+  const [mounted, setMounted] = useState(false);
   const { address, isConnected } = useAccount();
   const { connect, connectors, isPending } = useConnect();
   const { disconnect } = useDisconnect();
   const chainId = useChainId();
   const { switchChain } = useSwitchChain();
+
+  useEffect(() => { setMounted(true); }, []);
+  if (!mounted) return null;
 
   const isWrongNetwork = isConnected && chainId !== arcTestnet.id;
 
@@ -86,8 +91,12 @@ export function WalletConnect() {
 
 // Compact version for mobile
 export function WalletConnectCompact() {
+  const [mounted, setMounted] = useState(false);
   const { address, isConnected } = useAccount();
   const { connect, connectors, isPending } = useConnect();
+
+  useEffect(() => { setMounted(true); }, []);
+  if (!mounted) return null;
 
   if (isConnected && address) {
     return (

@@ -57,7 +57,7 @@ export default function CreatePage() {
             <div className="flex bg-brand-surface border border-brand-border rounded-xl p-1 gap-1">
               <button
                 onClick={() => setActiveTab("link")}
-                className={`flex-1 py-2.5 rounded-lg text-sm font-anton tracking-wide transition-all ${
+                className={`flex-1 py-2.5 rounded-lg text-sm font-mono transition-all ${
                   activeTab === "link"
                     ? "bg-brand-black text-brand-white"
                     : "text-brand-muted hover:text-brand-white"
@@ -67,7 +67,7 @@ export default function CreatePage() {
               </button>
               <button
                 onClick={() => setActiveTab("qr")}
-                className={`flex-1 py-2.5 rounded-lg text-sm font-anton tracking-wide transition-all ${
+                className={`flex-1 py-2.5 rounded-lg text-sm font-mono transition-all ${
                   activeTab === "qr"
                     ? "bg-brand-black text-brand-white"
                     : "text-brand-muted hover:text-brand-white"
@@ -124,7 +124,7 @@ export default function CreatePage() {
                   resetCreateFlow();
                 }}
                 className="flex-1 py-3 rounded-xl bg-brand-green text-brand-black
-                           text-sm font-anton tracking-wide hover:bg-brand-green/90 transition-colors"
+                           text-sm font-mono hover:bg-brand-green/90 transition-colors"
               >
                 Create Another
               </button>

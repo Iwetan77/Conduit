@@ -62,7 +62,7 @@ export function ChainGuard({ children }: ChainGuardProps) {
         <button
           onClick={() => switchChain({ chainId: arcTestnet.id })}
           className="w-full py-3 rounded-xl bg-brand-green text-brand-black
-                     font-anton tracking-wide hover:opacity-90 transition-opacity"
+                     font-mono hover:opacity-90 transition-opacity"
         >
           Switch to Arc Testnet
         </button>

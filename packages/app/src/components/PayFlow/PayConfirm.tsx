@@ -80,7 +80,7 @@ export function PayConfirm({ declaration, payerCurrency, openAmount }: PayConfir
           <button
             onClick={handlePay}
             className="w-full py-4 rounded-2xl bg-brand-green text-brand-black
-                       font-anton tracking-wide text-xl hover:bg-brand-green/90 transition-colors"
+                       font-mono text-xl hover:bg-brand-green/90 transition-colors"
           >
             {amount
               ? `Pay ${formatAmount(amount, declaration.currency)}`
@@ -104,7 +104,7 @@ export function PayConfirm({ declaration, payerCurrency, openAmount }: PayConfir
             className="w-14 h-14 rounded-full border-2 border-brand-green border-t-transparent
                           animate-spin mx-auto"
           />
-          <p className="text-brand-white font-anton tracking-wide">Settling on Arc...</p>
+          <p className="text-brand-white font-mono">Settling on Arc...</p>
           <p className="text-brand-muted text-sm font-mono">Sub-second finality</p>
         </motion.div>
       )}
@@ -128,7 +128,7 @@ export function PayConfirm({ declaration, payerCurrency, openAmount }: PayConfir
           className="space-y-4"
         >
           <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/30">
-            <p className="text-red-400 font-anton tracking-wide text-sm mb-1">Payment failed</p>
+            <p className="text-red-400 font-mono text-sm mb-1">Payment failed</p>
             <p className="text-red-400/70 text-xs font-mono">{error}</p>
           </div>
           <button

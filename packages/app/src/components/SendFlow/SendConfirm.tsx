@@ -105,14 +105,14 @@ export function SendConfirm({
                 onClick={onBack}
                 className="flex-1 py-3 rounded-xl border border-brand-border
                            text-brand-muted hover:text-brand-white hover:border-brand-white/20
-                           transition-colors font-anton tracking-wide"
+                           transition-colors font-mono"
               >
                 Back
               </button>
               <button
                 onClick={handleSend}
                 className="flex-1 py-3 rounded-xl bg-brand-green text-brand-black
-                           font-anton tracking-wide hover:bg-brand-green/90 transition-colors"
+                           font-mono hover:bg-brand-green/90 transition-colors"
               >
                 Send Payment
               </button>
@@ -129,7 +129,7 @@ export function SendConfirm({
           >
             <div className="w-16 h-16 rounded-full border-2 border-brand-green border-t-transparent
                             animate-spin mx-auto" />
-            <p className="text-brand-white font-anton tracking-wide">Settling on-chain...</p>
+            <p className="text-brand-white font-mono">Settling on-chain...</p>
             <p className="text-brand-muted text-sm font-mono">
               Arc finalizes in under a second
             </p>
@@ -147,7 +147,7 @@ export function SendConfirm({
             <button
               onClick={onReset}
               className="w-full py-3 rounded-xl border border-brand-border
-                         text-brand-white hover:border-brand-green/30 transition-colors font-anton tracking-wide"
+                         text-brand-white hover:border-brand-green/30 transition-colors font-mono"
             >
               Send Another
             </button>
@@ -162,7 +162,7 @@ export function SendConfirm({
             className="space-y-4"
           >
             <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-5">
-              <p className="text-red-400 font-anton tracking-wide mb-2">Transaction Failed</p>
+              <p className="text-red-400 font-mono mb-2">Transaction Failed</p>
               <p className="text-red-400/70 text-sm font-mono">{error}</p>
             </div>
             <div className="flex gap-3">

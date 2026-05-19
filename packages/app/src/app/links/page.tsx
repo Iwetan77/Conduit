@@ -79,7 +79,7 @@ export default function LinksPage() {
           <a
             href="/create"
             className="px-4 py-2 rounded-xl bg-brand-green text-brand-black
-                       text-sm font-anton tracking-wide hover:bg-brand-green/90 transition-colors"
+                       text-sm font-mono hover:bg-brand-green/90 transition-colors"
           >
             + New Link
           </a>
@@ -101,7 +101,7 @@ export default function LinksPage() {
             <p className="text-brand-muted mb-4">No payment links yet.</p>
             <a
               href="/create"
-              className="px-6 py-3 rounded-xl bg-brand-green text-brand-black font-anton tracking-wide"
+              className="px-6 py-3 rounded-xl bg-brand-green text-brand-black font-mono"
             >
               Create your first link
             </a>

@@ -116,7 +116,7 @@ export default function HomePage() {
                   onClick={() => setStep("confirm")}
                   disabled={!canProceed}
                   className="w-full py-4 rounded-2xl bg-brand-green text-brand-black
-                             font-anton tracking-wide text-xl hover:bg-brand-green/90 transition-colors
+                             font-mono text-xl hover:bg-brand-green/90 transition-colors
                              disabled:opacity-30 disabled:cursor-not-allowed"
                 >
                   Review Payment →

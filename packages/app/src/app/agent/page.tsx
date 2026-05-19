@@ -224,7 +224,7 @@ export default function AgentPage() {
             <div className="pl-9">
               <a
                 href="/create"
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-brand-green text-brand-black text-sm font-anton tracking-wide hover:opacity-90 transition-opacity"
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-brand-green text-brand-black text-sm font-mono hover:opacity-90 transition-opacity"
               >
                 Create your payment declaration →
               </a>

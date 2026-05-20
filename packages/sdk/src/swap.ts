@@ -58,21 +58,39 @@ export async function swapWithBrowserWallet(
   tokenIn: Currency,
   tokenOut: Currency,
   amountIn: string,
-  kitKey: string
+  kitKey: string,
+  proxyBase = "/api/circle-proxy"
 ): Promise<SwapResult> {
   const { createViemAdapterFromProvider } = await import("@circle-fin/adapter-viem-v2");
-  // createViemAdapterFromProvider is async — it resolves accounts from the provider
   const adapter = await createViemAdapterFromProvider({
     provider: eip1193Provider as Parameters<typeof createViemAdapterFromProvider>[0]["provider"],
   });
 
-  const result = await kit.swap({
-    from: { adapter, chain: "Arc_Testnet" },
-    tokenIn,
-    tokenOut,
-    amountIn,
-    config: { kitKey },
-  });
+  // Intercept Circle API calls from the kit and route them through our server proxy
+  // to avoid CORS issues when called from the browser.
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    if (url.includes("api.circle.com")) {
+      const path = url.replace(/^https?:\/\/api\.circle\.com\//, "");
+      const proxyUrl = `${proxyBase}?path=${encodeURIComponent(path)}`;
+      return originalFetch(proxyUrl, init);
+    }
+    return originalFetch(input, init);
+  };
+
+  let result;
+  try {
+    result = await kit.swap({
+      from: { adapter, chain: "Arc_Testnet" },
+      tokenIn,
+      tokenOut,
+      amountIn,
+      config: { kitKey },
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 
   return {
     tokenIn,

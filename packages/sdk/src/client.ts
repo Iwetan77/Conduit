@@ -128,15 +128,7 @@ export class ConduitClient {
     const deadline = Math.floor(Date.now() / 1000) + QUOTE_TTL_SECONDS;
 
     if (payerToken !== recipientToken) {
-      // ── Cross-currency: swap first, then transfer ─────────────────────────
-      if (!this.kitKey) {
-        throw new Error(
-          "Cross-currency payments require a Circle Kit Key. " +
-          "Get one at https://console.circle.com → Keys → Kit Key, " +
-          "then pass it as kitKey in ConduitClient config."
-        );
-      }
-
+      // ── Cross-currency: swap via ArcSwap Uniswap V2, then transfer ────────
       const humanAmount = toHumanAmount(options.amount);
 
       // Detect environment: server (Node.js) vs browser
@@ -223,14 +215,7 @@ export class ConduitClient {
     const deadline = Math.floor(Date.now() / 1000) + QUOTE_TTL_SECONDS;
 
     if (payerToken !== declaration.recipientToken) {
-      // Cross-currency fulfill: swap then transfer
-      if (!this.kitKey) {
-        throw new Error(
-          "Cross-currency fulfillment requires a Circle Kit Key. " +
-          "Get one at https://console.circle.com → Keys → Kit Key."
-        );
-      }
-
+      // Cross-currency fulfill: swap via ArcSwap V2, then transfer
       const humanAmount = toHumanAmount(declaration.amount);
 
       // Detect environment: server (Node.js) vs browser

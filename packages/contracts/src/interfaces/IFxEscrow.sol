@@ -1,29 +1,27 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-// Circle StableFX FxEscrow — 0x867650F5eAe8df91445971f14d89fd84F0C9a9f8
-// This address is an ERC-1967 proxy that delegates to the Circle FxEscrow implementation.
+// Circle FxEscrow — verified ABI from Arc testnet explorer
+// Proxy:          0x867650F5eAe8df91445971f14d89fd84F0C9a9f8  (ERC-1967)
+// Implementation: 0x721eAFa9C1e38DD7fFf81d30ea1a5500b37Cf658
 //
-// ── Correct Architecture ──────────────────────────────────────────────────────
-// The FxEscrow does NOT expose a swap() function that you call directly.
-// Instead, it acts as the Permit2 SPENDER in a PermitWitnessTransferFrom flow.
+// ── Architecture ─────────────────────────────────────────────────────────────
+// FxEscrow is a two-party settlement contract. It cannot be called unilaterally
+// by the taker alone. Both parties must commit before settlement executes:
 //
-// Onchain flow (after Circle StableFX API returns signed typed data):
-//   Permit2.permitWitnessTransferFrom(permit, transferDetails, owner, witness, witnessTypeString, sig)
-//     └─ Permit2 transfers takerToken from taker → FxEscrow (as spender)
-//     └─ FxEscrow delivers makerToken from maker → recipient
+//   1. recordTrade(taker, takerPermit, maker, makerPermit) → tradeId
+//      Both sides provide EIP-712 signed Permit2 data simultaneously.
+//      Circle's relayer (0x379c868f...e3) typically submits this on-chain.
 //
-// Witness types used by Circle StableFX:
-//   Consideration { quoteId, base, quote, baseAmount, quoteAmount, maturity }
-//   TakerDetails  { consideration, recipient, fee }
+//   2. takerDeliver(id, permit, sig) — taker funds (payerToken → escrow)
+//   3. makerDeliver(id, permit, sig) — maker funds (recipientToken → recipient)
 //
-// The witness hash = keccak256(abi.encode(TakerDetails))
-// The witness type string is passed as-is from the Circle API response.
+// Circle's stablecoinKits API (v1/stablecoinKits/swap) orchestrates all three
+// steps and returns ready-to-execute calldata for a Circle Adapter Contract.
+// Use swap.ts → callStablecoinKits() rather than calling FxEscrow directly.
 //
-// ── Permit2 Interface (the actual onchain call) ───────────────────────────────
-// See IPermit2SignatureTransfer below.
+// ── Permit2 interface used by FxEscrow ───────────────────────────────────────
 
-// Minimal Permit2 SignatureTransfer interface needed for StableFX taker funding.
 interface IPermit2SignatureTransfer {
     struct TokenPermissions {
         address token;
@@ -37,21 +35,10 @@ interface IPermit2SignatureTransfer {
     }
 
     struct SignatureTransferDetails {
-        address to;       // FxEscrow address — receives takerToken
+        address to;
         uint256 requestedAmount;
     }
 
-    /// @notice Transfer tokens using a signed permit with an arbitrary witness.
-    /// @dev Called by the spender (FxEscrow address) on behalf of the owner (taker).
-    ///      In practice, the Circle StableFX API submits this OR you submit it directly
-    ///      using the typed data returned by the Circle /signatures/funding/presign endpoint.
-    ///
-    /// @param permit          Token, amount, nonce, deadline
-    /// @param transferDetails Destination (FxEscrow) and amount
-    /// @param owner           Taker's wallet address
-    /// @param witness         keccak256(abi.encode(SingleTradeWitness { id: contractTradeId }))
-    /// @param witnessTypeString Full EIP-712 type string from Circle API response
-    /// @param signature       Taker EIP-712 signature over the full typed data
     function permitWitnessTransferFrom(
         PermitTransferFrom memory permit,
         SignatureTransferDetails calldata transferDetails,
@@ -62,24 +49,116 @@ interface IPermit2SignatureTransfer {
     ) external;
 }
 
-// ── StableFX API Data Structures ─────────────────────────────────────────────
-// These mirror what the Circle StableFX API returns in its typed data responses.
-// Used by the SDK — not on-chain structs.
+// ── Structs used in recordTrade ───────────────────────────────────────────────
 
-// Phase 1 — Quote + Trade creation witness (TakerDetails)
-// From POST /v1/exchange/stablefx/quotes (type=tradable) response typedData:
-//   Consideration { quoteId, base, quote, baseAmount, quoteAmount, maturity }
-//   TakerDetails  { consideration, recipient, fee }
+struct Consideration {
+    bytes32 quoteId;
+    address base;        // payerToken (e.g. USDC)
+    address quote;       // recipientToken (e.g. EURC)
+    uint256 baseAmount;
+    uint256 quoteAmount;
+    uint256 maturity;    // unix timestamp deadline
+}
 
-// Phase 2 — Funding witness (SingleTradeWitness)
-// From POST /v1/exchange/stablefx/signatures/funding/presign response typedData:
-//   SingleTradeWitness { id: uint256 }  // contractTradeId from trade creation
+struct TakerDetails {
+    Consideration consideration;
+    address recipient;
+    uint256 fee;
+}
 
-// ── FxEscrow Proxy ────────────────────────────────────────────────────────────
-// The proxy at 0x867650F5eAe8df91445971f14d89fd84F0C9a9f8 implements ERC-1967.
-// Its implementation holds the FxEscrow logic. The Permit2 call with FxEscrow
-// as the spender triggers FxEscrow's callback to settle the maker side.
-interface IFxEscrowProxy {
-    /// @notice ERC-1967: returns current implementation address.
-    function implementation() external view returns (address);
+struct MakerDetails {
+    uint256 fee;
+}
+
+struct TakerPermitWitnessTransferFrom {
+    IPermit2SignatureTransfer.TokenPermissions permitted;
+    uint256 nonce;
+    uint256 deadline;
+    TakerDetails witness;
+    bytes signature;
+}
+
+struct MakerPermitWitnessTransferFrom {
+    IPermit2SignatureTransfer.TokenPermissions permitted;
+    uint256 nonce;
+    uint256 deadline;
+    MakerDetails witness;
+    bytes signature;
+}
+
+enum TradeStatus   { Pending, Active, Settled, Breached }
+enum FundingStatus { Unfunded, Funded }
+
+struct TradeDetails {
+    address base;
+    address quote;
+    address taker;
+    address maker;
+    address recipient;
+    uint256 baseAmount;
+    uint256 quoteAmount;
+    uint256 takerFee;
+    uint256 makerFee;
+    uint256 takerRiskBuffer;
+    uint256 makerRiskBuffer;
+    uint256 maturity;
+    TradeStatus status;
+    FundingStatus takerFundingStatus;
+    FundingStatus makerFundingStatus;
+}
+
+// ── IFxEscrow ─────────────────────────────────────────────────────────────────
+
+interface IFxEscrow {
+    // EIP-712 type string constants
+    function SINGLE_TRADE_WITNESS_TYPE() external view returns (string memory);
+    function SINGLE_TRADE_WITNESS_TYPEHASH() external view returns (bytes32);
+    function TAKER_DETAILS_WITNESS_TYPE() external view returns (string memory);
+    function BATCH_TRADE_WITNESS_TYPE() external view returns (string memory);
+    function BATCH_TRADE_WITNESS_TYPEHASH() external view returns (bytes32);
+    function MAKER_DETAILS_WITNESS_TYPE() external view returns (string memory);
+
+    /// @notice Record a trade. Requires valid signed permits from both taker and maker.
+    ///         Only callable by an authorized relayer (Circle's backend).
+    function recordTrade(
+        address taker,
+        TakerPermitWitnessTransferFrom calldata takerPermit,
+        address maker,
+        MakerPermitWitnessTransferFrom calldata makerPermit
+    ) external returns (uint256 id);
+
+    /// @notice Taker funds: transfers payerToken from taker → escrow via Permit2.
+    function takerDeliver(
+        uint256 id,
+        IPermit2SignatureTransfer.PermitTransferFrom calldata permit,
+        bytes calldata signature
+    ) external;
+
+    /// @notice Maker funds: transfers recipientToken from maker → recipient via Permit2.
+    function makerDeliver(
+        uint256 id,
+        IPermit2SignatureTransfer.PermitTransferFrom calldata permit,
+        bytes calldata signature
+    ) external;
+
+    function takerBatchDeliver(
+        uint256[] calldata ids,
+        IPermit2SignatureTransfer.PermitTransferFrom calldata permit,
+        bytes calldata signature
+    ) external;
+
+    function makerBatchDeliver(
+        uint256[] calldata ids,
+        IPermit2SignatureTransfer.PermitTransferFrom calldata permit,
+        bytes calldata signature
+    ) external;
+
+    function getTradeDetails(uint256 id) external view returns (TradeDetails memory);
+    function lastTradeId() external view returns (uint256);
+    function relayers(address relayer) external view returns (bool);
+    function permit2() external view returns (address);
+    function addRelayer(address relayer) external;
+    function removeRelayer(address relayer) external;
+    function breach(uint256 id) external;
+    function batchBreach(uint256[] calldata ids) external;
 }

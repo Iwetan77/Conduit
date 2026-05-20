@@ -1,6 +1,5 @@
 import { ethers } from "ethers";
 import { ARC_TESTNET, ROUTER_ABI, ERC20_ABI } from "./constants.js";
-import type { Permit2FundingData } from "./stablefx.js";
 import type {
   Address,
   Bytes32,
@@ -54,38 +53,6 @@ export class RouterClient {
 
     const contractWithSigner = this.contract.connect(signer) as ethers.Contract;
     const tx = await contractWithSigner.execute(this.encodeInstruction(instruction));
-    const receipt = await tx.wait();
-
-    return this.parseReceipt(receipt, instruction);
-  }
-
-  // ── Execute cross-currency via Circle StableFX + Permit2 ──────────────────
-
-  /// @notice Submit a cross-currency payment with pre-built Permit2 funding data.
-  /// @dev The SDK caller must first use StableFXClient.prepareFXPayment() to
-  ///      call the Circle StableFX API and obtain the Permit2FundingData.
-  async executeWithFX(
-    instruction: PaymentInstruction,
-    fundingData: Permit2FundingData,
-    signerProvider: ethers.BrowserProvider | ethers.JsonRpcProvider
-  ): Promise<PaymentReceipt> {
-    const signer = await signerProvider.getSigner();
-    const contractWithSigner = this.contract.connect(signer) as ethers.Contract;
-
-    const tx = await contractWithSigner.executeWithFX(
-      this.encodeInstruction(instruction),
-      // permit: (permitted, nonce, deadline)
-      [
-        [fundingData.permit.permitted.token, fundingData.permit.permitted.amount],
-        fundingData.permit.nonce,
-        fundingData.permit.deadline,
-      ],
-      // transferDetails: (to, requestedAmount)
-      [fundingData.transferDetails.to, fundingData.transferDetails.requestedAmount],
-      fundingData.witness,
-      fundingData.witnessTypeString,
-      fundingData.signature
-    );
     const receipt = await tx.wait();
 
     return this.parseReceipt(receipt, instruction);

@@ -1,19 +1,29 @@
 import { NextRequest, NextResponse } from "next/server";
 
+// Proxy for Circle stablecoinKits API calls.
+// The browser cannot call api.circle.com directly due to CORS.
+// This route forwards requests server-side with the Kit Key attached.
+//
+// Usage: POST /api/circle-proxy?path=v1/stablecoinKits/swap
+//        GET  /api/circle-proxy?path=v1/stablecoinKits/swap/status?...
+
 const CIRCLE_BASE = "https://api.circle.com";
+
+function getKitKey(): string {
+  const key = process.env.NEXT_PUBLIC_KIT_KEY ?? "";
+  if (!key) throw new Error("NEXT_PUBLIC_KIT_KEY is not set");
+  return key; // Pass full value as Bearer — Circle expects "KIT_KEY:id:secret"
+}
 
 export async function POST(req: NextRequest) {
   const path = req.nextUrl.searchParams.get("path") ?? "";
-  const kitKey = process.env.NEXT_PUBLIC_KIT_KEY ?? "";
-  const apiKey = kitKey.startsWith("KIT_KEY:") ? kitKey.slice("KIT_KEY:".length) : kitKey;
-
   const body = await req.text();
 
   const res = await fetch(`${CIRCLE_BASE}/${path}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
+      Authorization: `Bearer ${getKitKey()}`,
     },
     body,
   });
@@ -27,11 +37,9 @@ export async function POST(req: NextRequest) {
 
 export async function GET(req: NextRequest) {
   const path = req.nextUrl.searchParams.get("path") ?? "";
-  const kitKey = process.env.NEXT_PUBLIC_KIT_KEY ?? "";
-  const apiKey = kitKey.startsWith("KIT_KEY:") ? kitKey.slice("KIT_KEY:".length) : kitKey;
 
   const res = await fetch(`${CIRCLE_BASE}/${path}`, {
-    headers: { Authorization: `Bearer ${apiKey}` },
+    headers: { Authorization: `Bearer ${getKitKey()}` },
   });
 
   const data = await res.text();

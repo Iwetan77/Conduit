@@ -20,6 +20,8 @@ export default function LinksPage() {
   const [declarations, setDeclarations] = useState<PaymentDeclaration[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [deactivating, setDeactivating] = useState<string | null>(null);
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
 
   const loadDeclarations = async () => {
     if (!address) return;
@@ -43,10 +45,10 @@ export default function LinksPage() {
   };
 
   useEffect(() => {
-    if (isConnected && address) {
+    if (mounted && isConnected && address) {
       loadDeclarations();
     }
-  }, [isConnected, address]);
+  }, [mounted, isConnected, address]);
 
   const handleDeactivate = async (declarationId: string) => {
     if (!window.confirm("Deactivate this link? It cannot be reactivated.")) return;
@@ -85,7 +87,7 @@ export default function LinksPage() {
           </a>
         </div>
 
-        {!isConnected ? (
+        {!mounted || !isConnected ? (
           <div className="text-center py-16 space-y-4">
             <p className="text-brand-muted">Connect your wallet to see your links.</p>
             <WalletConnect />

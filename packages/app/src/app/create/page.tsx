@@ -53,8 +53,8 @@ export default function CreatePage() {
             animate={{ opacity: 1, y: 0 }}
             className="space-y-6"
           >
-            {/* Tab switcher */}
-            <div className="flex bg-brand-surface border border-brand-border rounded-xl p-1 gap-1">
+            {/* Tab switcher — only needed on mobile; desktop shows both columns */}
+            <div className="md:hidden flex bg-brand-surface border border-brand-border rounded-xl p-1 gap-1">
               <button
                 onClick={() => setActiveTab("link")}
                 className={`flex-1 py-2.5 rounded-lg text-sm font-mono transition-all ${
@@ -78,8 +78,8 @@ export default function CreatePage() {
             </div>
 
             {/* Outputs side by side on desktop, tabs on mobile */}
-            <div className="grid md:grid-cols-2 gap-6">
-              <div className={activeTab === "link" ? "block" : "hidden md:block"}>
+            <div className="grid md:grid-cols-2 gap-6 md:items-stretch">
+              <div className={`${activeTab === "link" ? "block" : "hidden md:block"} flex flex-col`}>
                 <p className="text-xs font-mono text-brand-muted uppercase tracking-wider mb-3">
                   Payment Link — Digital sharing
                 </p>
@@ -93,7 +93,7 @@ export default function CreatePage() {
                 />
               </div>
 
-              <div className={activeTab === "qr" ? "block" : "hidden md:block"}>
+              <div className={`${activeTab === "qr" ? "block" : "hidden md:block"} flex flex-col`}>
                 <p className="text-xs font-mono text-brand-muted uppercase tracking-wider mb-3">
                   QR Code — Physical commerce
                 </p>

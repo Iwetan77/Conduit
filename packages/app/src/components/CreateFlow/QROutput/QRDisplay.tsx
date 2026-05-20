@@ -50,15 +50,8 @@ export function QRDisplay({
     if (!cardRef.current) return;
     try {
       const dataUrl = await toPng(cardRef.current, { pixelRatio: 3 });
-
-      // A5 at 300dpi equivalent: 148×210mm
-      const pdf = new jsPDF({
-        format: "a5",
-        unit: "mm",
-        orientation: "portrait",
-      });
-
-      pdf.addImage(dataUrl, "PNG", 0, 0, 148, 148); // square QR card on A5
+      const pdf = new jsPDF({ format: "a5", unit: "mm", orientation: "portrait" });
+      pdf.addImage(dataUrl, "PNG", 0, 0, 148, 148);
       pdf.save(`conduit-qr-${declarationId.slice(0, 8)}.pdf`);
     } catch (err) {
       console.error("Failed to generate PDF:", err);
@@ -70,38 +63,36 @@ export function QRDisplay({
   };
 
   return (
-    <div className="space-y-4">
-      {/* QR Card — designed for physical printing */}
+    <div className="flex flex-col flex-1">
+      {/* QR Card — grows to fill column height, designed for physical printing */}
       <div
         ref={cardRef}
         className="bg-brand-black border border-brand-border rounded-2xl overflow-hidden"
-        style={{ aspectRatio: "1/1" }}
+        style={{ flex: 1 }}
       >
         <div
           style={{
             background: "#000000",
-            padding: "40px",
+            padding: "32px",
             display: "flex",
             flexDirection: "column",
             alignItems: "center",
-            gap: "24px",
+            gap: "20px",
             height: "100%",
+            boxSizing: "border-box",
           }}
         >
-          {/* Wordmark */}
-          <div
-            style={{
-              fontFamily: "Anton, sans-serif",
-              fontWeight: 900,
-              fontSize: "28px",
-              letterSpacing: "-0.02em",
-            }}
-          >
-            <span style={{ color: "#B2F55A" }}>CON</span>
-            <span style={{ color: "#FFFFFF" }}>DUIT</span>
+          {/* 2000×2000 PNG — fixed px dimensions, negative margin crops to center text */}
+          <div style={{ overflow: "hidden", height: "22px", width: "130px" }}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/conduit-logo.png"
+              alt="Conduit"
+              style={{ width: "130px", height: "130px", marginTop: "-54px", display: "block" }}
+            />
           </div>
 
-          {/* QR Code — green on black, error level H for physical damage tolerance */}
+          {/* QR Code */}
           <div
             style={{
               background: "#000000",
@@ -112,7 +103,7 @@ export function QRDisplay({
           >
             <QRCodeSVG
               value={paymentUrl}
-              size={240}
+              size={220}
               bgColor="#000000"
               fgColor="#B2F55A"
               level="H"
@@ -123,83 +114,47 @@ export function QRDisplay({
           {/* Amount */}
           <div style={{ textAlign: "center" }}>
             {label && (
-              <p
-                style={{
-                  color: "#666666",
-                  fontSize: "14px",
-                  marginBottom: "6px",
-                  fontFamily: "Barlow, sans-serif",
-                }}
-              >
+              <p style={{ color: "#666666", fontSize: "13px", marginBottom: "6px", fontFamily: "Barlow, sans-serif" }}>
                 {label}
               </p>
             )}
-            <p
-              style={{
-                fontFamily: "Anton, sans-serif",
-                fontWeight: 800,
-                fontSize: "36px",
-                color: "#FFFFFF",
-                lineHeight: 1,
-              }}
-            >
+            <p style={{ fontFamily: "Anton, sans-serif", fontWeight: 800, fontSize: "32px", color: "#FFFFFF", lineHeight: 1 }}>
               {displayAmount}
             </p>
-            <p
-              style={{
-                color: "#666666",
-                fontSize: "13px",
-                marginTop: "8px",
-                fontFamily: "Barlow, sans-serif",
-              }}
-            >
+            <p style={{ color: "#666666", fontSize: "12px", marginTop: "6px", fontFamily: "Barlow, sans-serif" }}>
               Scan to pay · Any currency accepted
             </p>
           </div>
 
           {/* Footer */}
-          <div
-            style={{
-              borderTop: "1px solid #1F1F1F",
-              paddingTop: "12px",
-              width: "100%",
-              textAlign: "center",
-            }}
-          >
-            <span
-              style={{
-                fontFamily: "IBM Plex Mono, monospace",
-                color: "#666666",
-                fontSize: "11px",
-                letterSpacing: "0.05em",
-              }}
-            >
+          <div style={{ borderTop: "1px solid #1F1F1F", paddingTop: "12px", width: "100%", textAlign: "center", marginTop: "auto" }}>
+            <span style={{ fontFamily: "IBM Plex Mono, monospace", color: "#666666", fontSize: "10px", letterSpacing: "0.05em" }}>
               — Powered by Conduit —
             </span>
           </div>
         </div>
       </div>
 
-      {/* Actions */}
-      <div className="flex gap-2">
+      {/* Actions — stacked vertically, pinned below card */}
+      <div className="flex flex-col gap-2 mt-3">
         <button
           onClick={downloadPng}
-          className="flex-1 py-3 rounded-xl border border-brand-border
+          className="w-full py-3 rounded-xl border border-brand-border
                      text-sm font-mono text-brand-muted hover:text-brand-white
                      hover:border-brand-white/20 transition-colors"
         >
-          PNG
+          Download PNG
         </button>
         <button
           onClick={downloadPdf}
-          className="flex-1 py-3 rounded-xl bg-brand-green/10 border border-brand-green/30
+          className="w-full py-3 rounded-xl bg-brand-green/10 border border-brand-green/30
                      text-sm font-mono text-brand-green hover:bg-brand-green/20 transition-colors"
         >
-          PDF (A5)
+          Download PDF (A5)
         </button>
         <button
           onClick={handlePrint}
-          className="flex-1 py-3 rounded-xl border border-brand-border
+          className="w-full py-3 rounded-xl border border-brand-border
                      text-sm font-mono text-brand-muted hover:text-brand-white
                      hover:border-brand-white/20 transition-colors no-print"
         >
@@ -207,9 +162,6 @@ export function QRDisplay({
         </button>
       </div>
 
-      <p className="text-xs text-brand-muted text-center">
-        QR code encodes error correction level H — suitable for laminated physical displays.
-      </p>
     </div>
   );
 }

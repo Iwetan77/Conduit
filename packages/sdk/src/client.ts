@@ -62,7 +62,7 @@ export class ConduitClient {
       this.privateKey = config.privateKey;
       this.walletSigner = new ethers.Wallet(config.privateKey, this.provider);
       if (!config.signer) {
-        config.signer = this.walletSigner;
+        config.signer = this.walletSigner as unknown as import("./types.js").SignerLike;
       }
     }
 

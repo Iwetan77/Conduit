@@ -4,7 +4,7 @@
 // Someone who has never heard of Conduit lands here after clicking a link or scanning a QR.
 // Rules: no crypto jargon, mobile-first, works without wallet connected, 3 taps to pay.
 
-import { use, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import type { PaymentDeclaration, Currency } from "@conduit/sdk";
 import { DeclarationDisplay } from "@/components/PayFlow/DeclarationDisplay";
 import { PayConfirm } from "@/components/PayFlow/PayConfirm";
@@ -13,11 +13,11 @@ import { Logo, Wordmark } from "@/components/Shared/Logo";
 import { motion } from "framer-motion";
 
 interface PageParams {
-  params: Promise<{ declarationId: string }>;
+  params: { declarationId: string };
 }
 
 export default function PayPage({ params }: PageParams) {
-  const { declarationId } = use(params);
+  const { declarationId } = params;
   const [declaration, setDeclaration] = useState<PaymentDeclaration | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string>("");

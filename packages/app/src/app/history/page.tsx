@@ -11,30 +11,37 @@ export default function HistoryPage() {
   const { address, isConnected } = useAccount();
   const [history, setHistory] = useState<PaymentReceipt[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string>("");
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
 
   useEffect(() => {
-    if (!isConnected || !address) return;
+    if (!mounted || !isConnected || !address) return;
 
     const load = async () => {
       setIsLoading(true);
+      setError("");
       try {
-        const { ConduitClient } = await import("@conduit/sdk");
-        const mockSigner = {
-          getAddress: async () => address,
-          sendTransaction: async () => ({ hash: "0x", wait: async () => ({ status: 1, blockNumber: 0 }) }),
-        };
-        const client = new ConduitClient({ signer: mockSigner });
-        const receipts = await client.getHistory(address as `0x${string}`, { limit: 50 });
+        const { ReceiptClient, ARC_TESTNET } = await import("@conduit/sdk");
+        const { ethers } = await import("ethers");
+
+        const provider = new ethers.JsonRpcProvider(ARC_TESTNET.rpc, {
+          chainId: ARC_TESTNET.chainId,
+          name: "arc-testnet",
+        });
+        const receiptClient = new ReceiptClient(provider);
+        const receipts = await receiptClient.getHistory(address as `0x${string}`, { limit: 50 });
         setHistory(receipts);
       } catch (err) {
         console.error("Failed to load history:", err);
+        setError(err instanceof Error ? err.message : "Failed to load history");
       } finally {
         setIsLoading(false);
       }
     };
 
     load();
-  }, [isConnected, address]);
+  }, [mounted, isConnected, address]);
 
   return (
     <div className="min-h-screen bg-brand-black">
@@ -45,17 +52,24 @@ export default function HistoryPage() {
           <p className="text-brand-muted text-sm mt-1">All settled payments from this wallet</p>
         </div>
 
-        {!isConnected ? (
+        {!mounted || !isConnected ? (
           <div className="text-center py-16 space-y-4">
             <p className="text-brand-muted">Connect your wallet to see your history.</p>
             <WalletConnect />
           </div>
         ) : (
-          <HistoryTable
-            receipts={history}
-            walletAddress={address}
-            isLoading={isLoading}
-          />
+          <>
+            {error && (
+              <div className="mb-4 p-3 rounded-xl bg-red-500/10 border border-red-500/30">
+                <p className="text-red-400 text-sm font-mono">{error}</p>
+              </div>
+            )}
+            <HistoryTable
+              receipts={history}
+              walletAddress={address}
+              isLoading={isLoading}
+            />
+          </>
         )}
       </main>
       <MobileNav />

@@ -128,7 +128,7 @@ export class ConduitClient {
     const deadline = Math.floor(Date.now() / 1000) + QUOTE_TTL_SECONDS;
 
     if (payerToken !== recipientToken) {
-      // ── Cross-currency: swap via ArcSwap Uniswap V2, then transfer ────────
+      // ── Cross-currency: swap via AMM, then transfer ────────────────────────
       const humanAmount = toHumanAmount(options.amount);
 
       // Detect environment: server (Node.js) vs browser
@@ -165,13 +165,17 @@ export class ConduitClient {
         ? BigInt(swapResult.amountOutRaw)
         : options.amount;
 
+      // Recompute deadline after swap — swap txs can take 60+ seconds and the
+      // original deadline would be expired by the time execute() is submitted.
+      const freshDeadline = Math.floor(Date.now() / 1000) + QUOTE_TTL_SECONDS;
+
       const instruction = {
         payer: signerAddr,
         recipient: options.recipient,
         payerToken: recipientToken, // now same as recipient (post-swap)
         recipientToken,
         amount: receivedAmount,
-        deadline,
+        deadline: freshDeadline,
         declarationId: "0x0000000000000000000000000000000000000000000000000000000000000000" as Bytes32,
       };
 
@@ -215,7 +219,7 @@ export class ConduitClient {
     const deadline = Math.floor(Date.now() / 1000) + QUOTE_TTL_SECONDS;
 
     if (payerToken !== declaration.recipientToken) {
-      // Cross-currency fulfill: swap via ArcSwap V2, then transfer
+      // Cross-currency fulfill: swap via AMM, then transfer
       const humanAmount = toHumanAmount(declaration.amount);
 
       // Detect environment: server (Node.js) vs browser
@@ -249,13 +253,16 @@ export class ConduitClient {
         ? BigInt(swapResult.amountOutRaw)
         : declaration.amount;
 
+      // Recompute deadline after swap completes — original would be expired.
+      const freshDeadline = Math.floor(Date.now() / 1000) + QUOTE_TTL_SECONDS;
+
       const instruction = {
         payer: signerAddr,
         recipient: declaration.recipient,
         payerToken: declaration.recipientToken,
         recipientToken: declaration.recipientToken,
         amount: receivedAmount,
-        deadline,
+        deadline: freshDeadline,
         declarationId: declaration.declarationId,
       };
 

@@ -20,9 +20,13 @@ export const ARC_TESTNET = {
     atomicSettler: (process.env["NEXT_PUBLIC_ATOMIC_SETTLER"] ?? "0xBb55a2595c1Da42b5817f5c60828C9D8dF607313") as Address,
     cctpAdapter: (process.env["NEXT_PUBLIC_CCTP_ADAPTER"] ?? "0xfa141fc27CC7dd9d44ef2CEd8812648C6705e997") as Address,
 
-    // ArcSwap — Uniswap V2 deployed by Arc Foundation (chain 5042002)
+    // ArcSwap — Uniswap V2 by Arc Foundation
     ammRouter: "0x48a9bd1644ac67fbef4183261c466bea3eb333fc" as Address,
     ammFactory: "0x45dd35611179ae6663ae47791175d7d598ced086" as Address,
+
+    // UnitFlow — V2.5 AMM (Uniswap V2-compatible)
+    unitflowRouter: "0x4AA8c7Ac458479d9A4FA5c1481e03061ac76824A" as Address,
+    unitflowFactory: "0xd67F63A4F26a497b364d1C82e6747Aec8B5743a5" as Address,
 
     // Arc native (immutable)
     stableFXEscrow: "0x867650F5eAe8df91445971f14d89fd84F0C9a9f8" as Address,

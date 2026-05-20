@@ -1,15 +1,18 @@
-// Cross-currency swap via ArcSwap Uniswap V2 (Arc Foundation deployment).
+// Cross-currency swap via Arc testnet AMMs.
 //
-// Router: 0x48a9bd1644ac67fbef4183261c466bea3eb333fc (Arc Testnet, chain 5042002)
-// Factory: 0x45dd35611179ae6663ae47791175d7d598ced086
-// Source: https://arcswap.net/docs — official Arc Foundation Uniswap V2 deploy.
+// Routers queried (best price wins):
+//   1. ArcSwap  — Uniswap V2 by Arc Foundation
+//                 Router:  0x48a9bd1644ac67fbef4183261c466bea3eb333fc
+//                 Factory: 0x45dd35611179ae6663ae47791175d7d598ced086
+//   2. UnitFlow — V2.5 AMM (Uniswap V2-compatible)
+//                 Router:  0x4AA8c7Ac458479d9A4FA5c1481e03061ac76824A
+//                 Factory: 0xd67F63A4F26a497b364d1C82e6747Aec8B5743a5
 //
-// Uses swapTokensForExactTokens so the recipient always receives the exact declared
-// amount. Payer's maximum input = getAmountsIn(amountOut) * 1.01 (1% slippage cap).
+// Synthra (V3 fork) is deployed on Arc testnet but its contract addresses are
+// not publicly documented — add here if/when they become available.
 //
-// Circle StableFX API (both institutional stablefx and stablecoinKits) removed:
-//   - v1/exchange/stablefx  → requires institutional KYB/AML onboarding
-//   - v1/stablecoinKits/swap → returns no instructions for Arc USDC/EURC swaps
+// Uses swapTokensForExactTokens — recipient always receives the exact declared
+// amount. Payer's max input = getAmountsIn(amountOut) * 1.01 (1% slippage cap).
 
 import { ethers } from "ethers";
 import type { Currency } from "./types.js";
@@ -21,8 +24,15 @@ const ARC_EXPLORER = "https://testnet.arcscan.app";
 const USDC = "0x3600000000000000000000000000000000000000";
 const EURC = "0x89B50855Aa3bE2F677cD6303Cec089B5F319D72a";
 
-// ArcSwap Uniswap V2 — deployed by Arc Foundation
-const AMM_ROUTER = "0x48a9bd1644ac67fbef4183261c466bea3eb333fc";
+interface RouterConfig {
+  name: string;
+  address: string;
+}
+
+const ROUTERS: RouterConfig[] = [
+  { name: "ArcSwap",  address: "0x48a9bd1644ac67fbef4183261c466bea3eb333fc" },
+  { name: "UnitFlow", address: "0x4AA8c7Ac458479d9A4FA5c1481e03061ac76824A" },
+];
 
 const ERC20_ABI = [
   "function approve(address spender, uint256 amount) returns (bool)",
@@ -45,10 +55,46 @@ export interface SwapResult {
   explorerUrl: string;
 }
 
+// ── Best-price router selection ───────────────────────────────────────────────
+
+interface RouterQuote {
+  router: RouterConfig;
+  requiredIn: bigint;
+}
+
+async function getBestRouter(
+  provider: ethers.Provider,
+  amountOut: bigint,
+  path: string[]
+): Promise<RouterQuote> {
+  const quotes = await Promise.allSettled(
+    ROUTERS.map(async (router) => {
+      const contract = new ethers.Contract(router.address, V2_ROUTER_ABI, provider);
+      const amounts: bigint[] = await contract.getAmountsIn(amountOut, path);
+      return { router, requiredIn: amounts[0] };
+    })
+  );
+
+  const successful = quotes
+    .filter((r): r is PromiseFulfilledResult<RouterQuote> => r.status === "fulfilled")
+    .map((r) => r.value);
+
+  if (successful.length === 0) {
+    throw new Error(
+      "No AMM router could quote this swap. " +
+      "Ensure a USDC/EURC liquidity pool exists on ArcSwap or UnitFlow."
+    );
+  }
+
+  // Pick router with lowest required input (best rate for payer)
+  return successful.reduce((best, cur) => (cur.requiredIn < best.requiredIn ? cur : best));
+}
+
 // ── Core swap logic ───────────────────────────────────────────────────────────
 
-// amountOut: exact base-unit amount the recipient must receive (e.g. 1_000_000n = 1 EURC)
-// recipient: address that receives the output tokens (usually the signer's address)
+// amountOut:  exact base-unit amount the recipient receives (e.g. 1_000_000n = 1 EURC)
+// recipient:  address that receives the output tokens
+// deadline:   unix timestamp after which the swap reverts on-chain
 async function executeSwap(
   signer: ethers.Signer,
   tokenIn: Currency,
@@ -57,27 +103,27 @@ async function executeSwap(
   recipient: string,
   deadline: number
 ): Promise<SwapResult> {
-  const router = new ethers.Contract(AMM_ROUTER, V2_ROUTER_ABI, signer);
+  const provider = signer.provider!;
   const path = [currencyToAddress(tokenIn), currencyToAddress(tokenOut)];
 
-  // Query required input from router
-  const amounts: bigint[] = await router.getAmountsIn(amountOut, path);
-  const requiredIn = amounts[0];
+  // Query all routers and pick best price
+  const { router: bestRouter, requiredIn } = await getBestRouter(provider, amountOut, path);
 
-  // 1% slippage on input side
+  // 1% slippage tolerance on input
   const amountInMax = requiredIn * 101n / 100n;
 
-  // Approve router if needed
+  // Approve router if allowance is insufficient
   const tokenContract = new ethers.Contract(currencyToAddress(tokenIn), ERC20_ABI, signer);
   const signerAddr = await signer.getAddress();
-  const currentAllowance: bigint = await tokenContract.allowance(signerAddr, AMM_ROUTER);
+  const currentAllowance: bigint = await tokenContract.allowance(signerAddr, bestRouter.address);
   if (currentAllowance < amountInMax) {
-    const approveTx = await tokenContract.approve(AMM_ROUTER, ethers.MaxUint256);
+    const approveTx = await tokenContract.approve(bestRouter.address, ethers.MaxUint256);
     await approveTx.wait();
   }
 
-  // Execute exact-output swap
-  const tx = await router.swapTokensForExactTokens(
+  // Execute exact-output swap on the best router
+  const routerContract = new ethers.Contract(bestRouter.address, V2_ROUTER_ABI, signer);
+  const tx = await routerContract.swapTokensForExactTokens(
     amountOut,
     amountInMax,
     path,
@@ -86,7 +132,7 @@ async function executeSwap(
   );
   const receipt = await tx.wait();
   if (receipt?.status === 0) {
-    throw new Error("Swap transaction reverted on-chain");
+    throw new Error(`Swap reverted on ${bestRouter.name}`);
   }
 
   return {
@@ -101,9 +147,9 @@ async function executeSwap(
 
 // ── Server-side swap (private key) ───────────────────────────────────────────
 //
-// amountIn: human-readable exact output amount the recipient must receive
-//           (e.g. "1.00" for 1 EURC). Input is computed via getAmountsIn + 1% slippage.
-// kitKey:   unused — kept for API compatibility with existing callers
+// amountIn:  human-readable exact output amount the recipient must receive
+//            (e.g. "1.00" for 1 EURC). Payer input is getAmountsIn + 1% slippage.
+// _kitKey:   unused — kept for API compatibility
 
 export async function swap(
   privateKey: string,
@@ -119,15 +165,15 @@ export async function swap(
   const wallet = new ethers.Wallet(privateKey, provider);
   const signerAddr = await wallet.getAddress();
   const amountOut = fromHumanAmount(amountIn);
-  const deadline = Math.floor(Date.now() / 1000) + 300;
+  const deadline = Math.floor(Date.now() / 1000) + 300; // 5 min
 
   return executeSwap(wallet, tokenIn, tokenOut, amountOut, signerAddr, deadline);
 }
 
 // ── Browser-side swap (EIP-1193 provider / MetaMask) ─────────────────────────
 //
-// amountIn:  human-readable exact output amount the recipient must receive
-// _kitKey:   unused
+// amountIn:   human-readable exact output amount the recipient must receive
+// _kitKey:    unused
 // _proxyBase: unused
 
 export async function swapWithBrowserWallet(
@@ -142,7 +188,7 @@ export async function swapWithBrowserWallet(
   const signer = await provider.getSigner();
   const signerAddr = await signer.getAddress();
   const amountOut = fromHumanAmount(amountIn);
-  const deadline = Math.floor(Date.now() / 1000) + 300;
+  const deadline = Math.floor(Date.now() / 1000) + 300; // 5 min
 
   return executeSwap(signer, tokenIn, tokenOut, amountOut, signerAddr, deadline);
 }

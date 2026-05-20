@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useAccount } from "wagmi";
 import type { Currency } from "@conduit/sdk";
 import { AmountInput } from "@/components/SendFlow/AmountInput";
@@ -16,6 +16,8 @@ export function CreateForm({ onSuccess }: CreateFormProps) {
   const { createFlow, setCreateFlow } = useConduitStore();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string>("");
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -50,7 +52,7 @@ export function CreateForm({ onSuccess }: CreateFormProps) {
     }
   };
 
-  if (!isConnected) {
+  if (!mounted || !isConnected) {
     return (
       <div className="text-center py-12 space-y-4">
         <p className="text-brand-muted">Connect your wallet to create a payment link.</p>

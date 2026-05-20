@@ -3,18 +3,22 @@
 // Routers queried (best price wins):
 //   1. ArcSwap  — Uniswap V2 by Arc Foundation
 //                 Router:  0x48a9bd1644ac67fbef4183261c466bea3eb333fc
-//                 Factory: 0x45dd35611179ae6663ae47791175d7d598ced086
 //   2. UnitFlow — V2.5 AMM (Uniswap V2-compatible)
 //                 Router:  0x4AA8c7Ac458479d9A4FA5c1481e03061ac76824A
-//                 Factory: 0xd67F63A4F26a497b364d1C82e6747Aec8B5743a5
 //
-// Synthra (V3 fork) is deployed on Arc testnet but its contract addresses are
-// not publicly documented — add here if/when they become available.
+// Approval strategy (EIP-2612 permit):
+//   First use:  signTypedData (off-chain, gasless) → StableFXAdapter.swapWithPermit
+//               Sets MaxUint256 allowance in the same tx as the swap.
+//   Subsequent: allowance already MaxUint256 → StableFXAdapter.swapDirect (no sign needed)
 //
-// Uses swapTokensForExactTokens — recipient always receives the exact declared
-// amount. Payer's max input = getAmountsIn(amountOut) * 1.01 (1% slippage cap).
+// Wallet interactions:
+//   First cross-currency payment:  1 sign (permit) + 1 swap tx = 2 total
+//   Subsequent cross-currency:     1 swap tx = 1 total
+//
+// If the token does not support EIP-2612, falls back to a regular approve tx.
 
 import { ethers } from "ethers";
+import { ARC_TESTNET } from "./constants.js";
 import type { Currency } from "./types.js";
 
 const ARC_RPC = "https://rpc.testnet.arc.network";
@@ -24,10 +28,9 @@ const ARC_EXPLORER = "https://testnet.arcscan.app";
 const USDC = "0x3600000000000000000000000000000000000000";
 const EURC = "0x89B50855Aa3bE2F677cD6303Cec089B5F319D72a";
 
-interface RouterConfig {
-  name: string;
-  address: string;
-}
+const STABLEFX_ADAPTER = ARC_TESTNET.contracts.stableFXAdapter;
+
+interface RouterConfig { name: string; address: string }
 
 const ROUTERS: RouterConfig[] = [
   { name: "ArcSwap",  address: "0x48a9bd1644ac67fbef4183261c466bea3eb333fc" },
@@ -37,11 +40,27 @@ const ROUTERS: RouterConfig[] = [
 const ERC20_ABI = [
   "function approve(address spender, uint256 amount) returns (bool)",
   "function allowance(address owner, address spender) view returns (uint256)",
+  "function name() view returns (string)",
+  "function nonces(address owner) view returns (uint256)",
+  "function version() view returns (string)",
 ];
 
 const V2_ROUTER_ABI = [
   "function swapTokensForExactTokens(uint amountOut, uint amountInMax, address[] calldata path, address to, uint deadline) external returns (uint[] memory amounts)",
   "function getAmountsIn(uint amountOut, address[] calldata path) external view returns (uint[] memory amounts)",
+];
+
+const ADAPTER_ABI = [
+  "function swapWithPermit(address tokenIn, uint256 permitDeadline, uint8 v, bytes32 r, bytes32 s, address tokenOut, uint256 amountOut, uint256 amountInMax, address router, uint256 swapDeadline) external",
+  "function swapDirect(address tokenIn, address tokenOut, uint256 amountOut, uint256 amountInMax, address router, uint256 swapDeadline) external",
+];
+
+const PERMIT_TYPES = [
+  { name: "owner",    type: "address" },
+  { name: "spender",  type: "address" },
+  { name: "value",    type: "uint256" },
+  { name: "nonce",    type: "uint256" },
+  { name: "deadline", type: "uint256" },
 ];
 
 // ── Public types ──────────────────────────────────────────────────────────────
@@ -57,10 +76,7 @@ export interface SwapResult {
 
 // ── Best-price router selection ───────────────────────────────────────────────
 
-interface RouterQuote {
-  router: RouterConfig;
-  requiredIn: bigint;
-}
+interface RouterQuote { router: RouterConfig; requiredIn: bigint }
 
 async function getBestRouter(
   provider: ethers.Provider,
@@ -69,8 +85,8 @@ async function getBestRouter(
 ): Promise<RouterQuote> {
   const quotes = await Promise.allSettled(
     ROUTERS.map(async (router) => {
-      const contract = new ethers.Contract(router.address, V2_ROUTER_ABI, provider);
-      const amounts: bigint[] = await contract.getAmountsIn(amountOut, path);
+      const c = new ethers.Contract(router.address, V2_ROUTER_ABI, provider);
+      const amounts: bigint[] = await c.getAmountsIn(amountOut, path);
       return { router, requiredIn: amounts[0] };
     })
   );
@@ -86,15 +102,57 @@ async function getBestRouter(
     );
   }
 
-  // Pick router with lowest required input (best rate for payer)
   return successful.reduce((best, cur) => (cur.requiredIn < best.requiredIn ? cur : best));
+}
+
+// ── EIP-2612 permit helper ────────────────────────────────────────────────────
+
+interface PermitSig { v: number; r: string; s: string; deadline: number }
+
+// Returns a signed permit if allowance is insufficient, or null if already approved.
+// Falls back to a regular approve tx if the token does not support EIP-2612.
+async function signPermitOrApprove(
+  signer: ethers.Signer,
+  tokenAddr: string,
+  owner: string,
+  amountNeeded: bigint
+): Promise<PermitSig | null> {
+  const token = new ethers.Contract(tokenAddr, ERC20_ABI, signer);
+  const allowance: bigint = await token.allowance(owner, STABLEFX_ADAPTER);
+  if (allowance >= amountNeeded) return null; // already approved — no permit needed
+
+  const deadline = Math.floor(Date.now() / 1000) + 600; // 10 min window for signing
+
+  try {
+    const nonce: bigint = await token.nonces(owner);
+    const tokenName: string = await token.name();
+    let version = "2"; // Circle tokens (USDC, EURC) use version 2
+    try { version = await token.version(); } catch { /* not all tokens expose version() */ }
+
+    const sig = await signer.signTypedData(
+      { name: tokenName, version, chainId: ARC_CHAIN_ID, verifyingContract: tokenAddr },
+      { Permit: PERMIT_TYPES },
+      {
+        owner,
+        spender: STABLEFX_ADAPTER,
+        value: ethers.MaxUint256,
+        nonce,
+        deadline: BigInt(deadline),
+      }
+    );
+
+    const { v, r, s } = ethers.Signature.from(sig);
+    return { v, r, s, deadline };
+  } catch {
+    // Token does not support EIP-2612 — fall back to a regular approve tx
+    const tx = await token.approve(STABLEFX_ADAPTER, ethers.MaxUint256);
+    await tx.wait();
+    return null; // allowance now set via approve, swapDirect will work
+  }
 }
 
 // ── Core swap logic ───────────────────────────────────────────────────────────
 
-// amountOut:  exact base-unit amount the recipient receives (e.g. 1_000_000n = 1 EURC)
-// recipient:  address that receives the output tokens
-// deadline:   unix timestamp after which the swap reverts on-chain
 async function executeSwap(
   signer: ethers.Signer,
   tokenIn: Currency,
@@ -104,32 +162,38 @@ async function executeSwap(
   deadline: number
 ): Promise<SwapResult> {
   const provider = signer.provider!;
-  const path = [currencyToAddress(tokenIn), currencyToAddress(tokenOut)];
+  const tokenInAddr = currencyToAddress(tokenIn);
+  const tokenOutAddr = currencyToAddress(tokenOut);
+  const path = [tokenInAddr, tokenOutAddr];
 
-  // Query all routers and pick best price
+  // Get best-price router
   const { router: bestRouter, requiredIn } = await getBestRouter(provider, amountOut, path);
+  const amountInMax = requiredIn * 101n / 100n; // 1% slippage
 
-  // 1% slippage tolerance on input
-  const amountInMax = requiredIn * 101n / 100n;
-
-  // Approve router if allowance is insufficient
-  const tokenContract = new ethers.Contract(currencyToAddress(tokenIn), ERC20_ABI, signer);
   const signerAddr = await signer.getAddress();
-  const currentAllowance: bigint = await tokenContract.allowance(signerAddr, bestRouter.address);
-  if (currentAllowance < amountInMax) {
-    const approveTx = await tokenContract.approve(bestRouter.address, ethers.MaxUint256);
-    await approveTx.wait();
+
+  // Get permit signature (or approve if permit unsupported)
+  const permit = await signPermitOrApprove(signer, tokenInAddr, signerAddr, amountInMax);
+
+  // Execute via StableFXAdapter — handles permit, pull, swap, refund in one tx
+  const adapter = new ethers.Contract(STABLEFX_ADAPTER, ADAPTER_ABI, signer);
+
+  let tx;
+  if (permit) {
+    // First use: permit was just signed — call swapWithPermit (sets MaxUint256 allowance + swaps)
+    tx = await adapter.swapWithPermit(
+      tokenInAddr, permit.deadline, permit.v, permit.r, permit.s,
+      tokenOutAddr, amountOut, amountInMax,
+      bestRouter.address, deadline
+    );
+  } else {
+    // Subsequent use: allowance already MaxUint256 — skip permit entirely
+    tx = await adapter.swapDirect(
+      tokenInAddr, tokenOutAddr, amountOut, amountInMax,
+      bestRouter.address, deadline
+    );
   }
 
-  // Execute exact-output swap on the best router
-  const routerContract = new ethers.Contract(bestRouter.address, V2_ROUTER_ABI, signer);
-  const tx = await routerContract.swapTokensForExactTokens(
-    amountOut,
-    amountInMax,
-    path,
-    recipient,
-    deadline
-  );
   const receipt = await tx.wait();
   if (receipt?.status === 0) {
     throw new Error(`Swap reverted on ${bestRouter.name}`);
@@ -146,10 +210,6 @@ async function executeSwap(
 }
 
 // ── Server-side swap (private key) ───────────────────────────────────────────
-//
-// amountIn:  human-readable exact output amount the recipient must receive
-//            (e.g. "1.00" for 1 EURC). Payer input is getAmountsIn + 1% slippage.
-// _kitKey:   unused — kept for API compatibility
 
 export async function swap(
   privateKey: string,
@@ -165,16 +225,12 @@ export async function swap(
   const wallet = new ethers.Wallet(privateKey, provider);
   const signerAddr = await wallet.getAddress();
   const amountOut = fromHumanAmount(amountIn);
-  const deadline = Math.floor(Date.now() / 1000) + 300; // 5 min
+  const deadline = Math.floor(Date.now() / 1000) + 300;
 
   return executeSwap(wallet, tokenIn, tokenOut, amountOut, signerAddr, deadline);
 }
 
 // ── Browser-side swap (EIP-1193 provider / MetaMask) ─────────────────────────
-//
-// amountIn:   human-readable exact output amount the recipient must receive
-// _kitKey:    unused
-// _proxyBase: unused
 
 export async function swapWithBrowserWallet(
   eip1193Provider: unknown,
@@ -188,7 +244,7 @@ export async function swapWithBrowserWallet(
   const signer = await provider.getSigner();
   const signerAddr = await signer.getAddress();
   const amountOut = fromHumanAmount(amountIn);
-  const deadline = Math.floor(Date.now() / 1000) + 300; // 5 min
+  const deadline = Math.floor(Date.now() / 1000) + 300;
 
   return executeSwap(signer, tokenIn, tokenOut, amountOut, signerAddr, deadline);
 }
@@ -207,8 +263,6 @@ export function fromHumanAmount(amount: string): bigint {
   const paddedFrac = frac.slice(0, 6).padEnd(6, "0");
   return BigInt(whole) * 1_000_000n + BigInt(paddedFrac || "0");
 }
-
-// ── Internal helpers ──────────────────────────────────────────────────────────
 
 function currencyToAddress(currency: Currency): string {
   return currency === "USDC" ? USDC : EURC;

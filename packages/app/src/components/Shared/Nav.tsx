@@ -29,16 +29,18 @@ function WalletBalances({ address }: { address: `0x${string}` }) {
   const { data: usdcData, isLoading: usdcLoading } = useBalance({
     address,
     token: ARC_TESTNET.tokens.USDC as `0x${string}`,
+    query: { refetchInterval: 5000 },
   });
   const { data: eurcData, isLoading: eurcLoading } = useBalance({
     address,
     token: ARC_TESTNET.tokens.EURC as `0x${string}`,
+    query: { refetchInterval: 5000 },
   });
 
   return (
     <div className="hidden md:flex items-center gap-4">
       <div className="flex items-center gap-1.5">
-        <Image src="/usdc.svg" alt="USDC" width={16} height={16} />
+        <Image src="/usdc.svg" alt="USDC" width={22} height={22} />
         {usdcLoading ? (
           <span className="w-14 h-3 bg-brand-surface animate-pulse rounded block" />
         ) : (
@@ -48,7 +50,7 @@ function WalletBalances({ address }: { address: `0x${string}` }) {
         )}
       </div>
       <div className="flex items-center gap-1.5">
-        <Image src="/eurc.svg" alt="EURC" width={16} height={16} />
+        <Image src="/eurc.svg" alt="EURC" width={22} height={22} />
         {eurcLoading ? (
           <span className="w-14 h-3 bg-brand-surface animate-pulse rounded block" />
         ) : (

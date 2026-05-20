@@ -35,8 +35,7 @@ export function PayConfirm({ declaration, payerCurrency, openAmount }: PayConfir
       const browserProvider = new ethers.BrowserProvider(
         (window as unknown as { ethereum: unknown }).ethereum
       );
-      const kitKey = process.env.NEXT_PUBLIC_KIT_KEY ?? "";
-      const client = ConduitClient.fromBrowserProvider(browserProvider, kitKey);
+      const client = ConduitClient.fromBrowserProvider(browserProvider, "");
 
       const result = await client.fulfill(declaration, { payerToken: payerCurrency });
 

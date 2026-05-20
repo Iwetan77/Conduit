@@ -44,13 +44,13 @@ export function ReceiptCard({ receipt, onClose }: ReceiptCardProps) {
         </div>
 
         <div className="text-center py-4">
-          <p className="text-brand-muted text-sm mb-1">Amount received</p>
+          <p className="text-brand-muted text-sm mb-1">Amount sent</p>
           <p className="text-4xl font-anton text-brand-white">
-            {formatAmount(receipt.recipientAmount, recipientCurrency)}
+            {formatAmount(receipt.payerAmount, payerCurrency)}
           </p>
           {isCrossChain && (
             <p className="text-brand-muted text-sm mt-2">
-              Paid {formatAmount(receipt.payerAmount, payerCurrency)} ·{" "}
+              Recipient received {formatAmount(receipt.recipientAmount, recipientCurrency)} ·{" "}
               <span className="text-brand-green">Rate secured</span>
             </p>
           )}

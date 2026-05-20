@@ -5,6 +5,8 @@ import { useAccount } from "wagmi";
 import type { PaymentDeclaration } from "@conduit/sdk";
 import { Nav, MobileNav } from "@/components/Shared/Nav";
 import { WalletConnect } from "@/components/Shared/WalletConnect";
+import { LinkCard } from "@/components/CreateFlow/LinkOutput/LinkCard";
+import { QRDisplay } from "@/components/CreateFlow/QROutput/QRDisplay";
 import { formatAmount, shortenAddress } from "@/lib/format";
 import { TokenBadge } from "@/components/Shared/TokenBadge";
 import type { Currency } from "@conduit/sdk";
@@ -18,8 +20,10 @@ function addressToCurrency(address: string): Currency {
 export default function LinksPage() {
   const { address, isConnected } = useAccount();
   const [declarations, setDeclarations] = useState<PaymentDeclaration[]>([]);
+  const [paymentCounts, setPaymentCounts] = useState<Record<string, number>>({});
   const [isLoading, setIsLoading] = useState(false);
   const [deactivating, setDeactivating] = useState<string | null>(null);
+  const [selectedDecl, setSelectedDecl] = useState<PaymentDeclaration | null>(null);
   const [mounted, setMounted] = useState(false);
   useEffect(() => { setMounted(true); }, []);
 
@@ -27,16 +31,38 @@ export default function LinksPage() {
     if (!address) return;
     setIsLoading(true);
     try {
-      const { ConduitClient } = await import("@conduit/sdk");
-      const { ethers } = await import("ethers");
-      const provider = new ethers.JsonRpcProvider("https://rpc.testnet.arc.network");
+      const [{ ConduitClient, ReceiptClient, ARC_TESTNET }, { ethers }] = await Promise.all([
+        import("@conduit/sdk"),
+        import("ethers"),
+      ]);
+
+      const provider = new ethers.JsonRpcProvider(ARC_TESTNET.rpc, {
+        chainId: ARC_TESTNET.chainId,
+        name: "arc-testnet",
+      });
       const mockSigner = {
         getAddress: async () => address,
         sendTransaction: async () => ({ hash: "0x", wait: async () => ({ status: 1, blockNumber: 0 }) }),
       };
-      const client = new ConduitClient({ signer: mockSigner });
-      const decls = await client.getDeclarations(address as `0x${string}`);
+
+      const receiptClient = new ReceiptClient(provider);
+      const conduitClient = new ConduitClient({ signer: mockSigner });
+
+      const [decls, receipts] = await Promise.all([
+        conduitClient.getDeclarations(address as `0x${string}`),
+        receiptClient.getHistory(address as `0x${string}`, { limit: 200 }),
+      ]);
+
       setDeclarations(decls);
+
+      // Count payments received per declaration
+      const counts: Record<string, number> = {};
+      for (const r of receipts) {
+        if (r.recipient.toLowerCase() === address.toLowerCase()) {
+          counts[r.declarationId] = (counts[r.declarationId] ?? 0) + 1;
+        }
+      }
+      setPaymentCounts(counts);
     } catch (err) {
       console.error("Failed to load declarations:", err);
     } finally {
@@ -59,7 +85,7 @@ export default function LinksPage() {
       const browserProvider = new ethers.BrowserProvider(
         (window as unknown as { ethereum: unknown }).ethereum
       );
-      const client = ConduitClient.fromBrowserProvider(browserProvider);
+      const client = ConduitClient.fromBrowserProvider(browserProvider, "");
       await client.deactivateLink(declarationId as `0x${string}`);
       await loadDeclarations();
     } catch (err) {
@@ -101,10 +127,7 @@ export default function LinksPage() {
         ) : declarations.length === 0 ? (
           <div className="text-center py-16">
             <p className="text-brand-muted mb-4">No payment links yet.</p>
-            <a
-              href="/create"
-              className="px-6 py-3 rounded-xl bg-brand-green text-brand-black font-mono"
-            >
+            <a href="/create" className="px-6 py-3 rounded-xl bg-brand-green text-brand-black font-mono">
               Create your first link
             </a>
           </div>
@@ -112,8 +135,7 @@ export default function LinksPage() {
           <div className="space-y-3">
             {declarations.map((decl) => {
               const currency = addressToCurrency(decl.recipientToken);
-              const appUrl = process.env["NEXT_PUBLIC_APP_URL"] ?? "https://app.conduit.xyz";
-              const paymentUrl = `${appUrl}/pay/${decl.declarationId}`;
+              const count = paymentCounts[decl.declarationId] ?? 0;
 
               return (
                 <div
@@ -126,37 +148,45 @@ export default function LinksPage() {
                 >
                   <div className="flex items-start justify-between gap-4">
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-2">
-                        <span
-                          className={`w-1.5 h-1.5 rounded-full ${decl.active ? "bg-brand-green" : "bg-brand-muted"}`}
-                        />
+                      <div className="flex items-center gap-2 mb-1.5">
+                        <span className={`w-1.5 h-1.5 rounded-full ${decl.active ? "bg-brand-green" : "bg-brand-muted"}`} />
                         <span className="text-sm font-anton text-brand-white">
                           {decl.amount > 0n ? formatAmount(decl.amount, currency) : `Open · ${currency}`}
                         </span>
                         <TokenBadge currency={currency} size="sm" />
+                        {count > 0 && (
+                          <span className="px-2 py-0.5 rounded-full bg-brand-green/10 border border-brand-green/20 text-brand-green text-xs font-mono">
+                            {count} payment{count !== 1 ? "s" : ""}
+                          </span>
+                        )}
                       </div>
                       <p className="text-xs font-mono text-brand-muted truncate">
-                        {paymentUrl}
+                        {typeof window !== "undefined"
+                          ? `${window.location.origin}/pay/${decl.declarationId}`
+                          : decl.paymentUrl}
                       </p>
                     </div>
 
                     <div className="flex items-center gap-2 shrink-0">
                       <button
-                        onClick={() => navigator.clipboard.writeText(paymentUrl)}
+                        onClick={() => {
+                          const url = typeof window !== "undefined"
+                            ? `${window.location.origin}/pay/${decl.declarationId}`
+                            : decl.paymentUrl;
+                          navigator.clipboard.writeText(url);
+                        }}
                         className="px-3 py-1.5 rounded-lg text-xs border border-brand-border
                                    text-brand-muted hover:text-brand-white hover:border-brand-white/20 transition-colors"
                       >
                         Copy
                       </button>
-                      <a
-                        href={paymentUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
+                      <button
+                        onClick={() => setSelectedDecl(decl)}
                         className="px-3 py-1.5 rounded-lg text-xs border border-brand-border
                                    text-brand-muted hover:text-brand-white hover:border-brand-white/20 transition-colors"
                       >
                         View
-                      </a>
+                      </button>
                       {decl.active && (
                         <button
                           onClick={() => handleDeactivate(decl.declarationId)}
@@ -177,6 +207,56 @@ export default function LinksPage() {
         )}
       </main>
       <MobileNav />
+
+      {/* Link card modal */}
+      {selectedDecl && (
+        <div
+          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-start justify-center p-4 overflow-y-auto"
+          onClick={(e) => { if (e.target === e.currentTarget) setSelectedDecl(null); }}
+        >
+          <div className="w-full max-w-4xl my-8">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-anton text-brand-white">Payment Link</h2>
+              <button
+                onClick={() => setSelectedDecl(null)}
+                className="text-brand-muted hover:text-brand-white text-3xl leading-none transition-colors"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="grid md:grid-cols-2 gap-6 md:items-stretch">
+              <div className="flex flex-col">
+                <p className="text-xs font-mono text-brand-muted uppercase tracking-wider mb-3">
+                  Payment Link — Digital sharing
+                </p>
+                <LinkCard
+                  declarationId={selectedDecl.declarationId}
+                  paymentUrl={typeof window !== "undefined"
+                    ? `${window.location.origin}/pay/${selectedDecl.declarationId}`
+                    : selectedDecl.paymentUrl}
+                  amount={selectedDecl.amount}
+                  currency={selectedDecl.currency}
+                  recipientAddress={selectedDecl.recipient}
+                />
+              </div>
+              <div className="flex flex-col">
+                <p className="text-xs font-mono text-brand-muted uppercase tracking-wider mb-3">
+                  QR Code — Physical commerce
+                </p>
+                <QRDisplay
+                  declarationId={selectedDecl.declarationId}
+                  paymentUrl={typeof window !== "undefined"
+                    ? `${window.location.origin}/pay/${selectedDecl.declarationId}`
+                    : selectedDecl.paymentUrl}
+                  amount={selectedDecl.amount}
+                  currency={selectedDecl.currency}
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

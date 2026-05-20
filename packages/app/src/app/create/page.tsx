@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useAccount } from "wagmi";
 import { Nav, MobileNav } from "@/components/Shared/Nav";
 import { CreateForm } from "@/components/CreateFlow/CreateForm";
@@ -21,6 +21,9 @@ export default function CreatePage() {
     declarationId: string;
     paymentUrl: string;
   } | null>(null);
+
+  // Clear stale form values from previous sessions on mount
+  useEffect(() => { resetCreateFlow(); }, []);
 
   const handleSuccess = (declarationId: string, paymentUrl: string) => {
     setResult({ declarationId, paymentUrl });

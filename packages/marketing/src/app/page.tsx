@@ -12,7 +12,6 @@ import Link from 'next/link'
 function Orbs() {
   return (
     <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden">
-      {/* Primary orb — top left */}
       <motion.div
         className="absolute rounded-full"
         style={{
@@ -23,7 +22,6 @@ function Orbs() {
         animate={{ x: [0, 90, -60, 0], y: [0, -60, 80, 0], scale: [1, 1.1, 0.93, 1] }}
         transition={{ duration: 22, repeat: Infinity, ease: 'easeInOut' }}
       />
-      {/* Secondary orb — bottom right */}
       <motion.div
         className="absolute rounded-full"
         style={{
@@ -34,7 +32,6 @@ function Orbs() {
         animate={{ x: [0, -80, 50, 0], y: [0, 60, -70, 0], scale: [1, 0.9, 1.08, 1] }}
         transition={{ duration: 28, repeat: Infinity, ease: 'easeInOut', delay: 6 }}
       />
-      {/* Accent orb — mid right */}
       <motion.div
         className="absolute rounded-full"
         style={{
@@ -126,17 +123,14 @@ function Nav() {
       }}
     >
       <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
-        {/* Logo */}
         <Link href="/" className="flex items-center group">
           <motion.div whileHover={{ scale: 1.05 }} transition={{ type: 'spring', stiffness: 400 }}>
             <Image src="/CONDUIT-MAIN.png" alt="Conduit" height={44} width={140} style={{ height: 44, width: 'auto' }} priority />
           </motion.div>
         </Link>
 
-        {/* Nav links — hidden on mobile */}
         <nav className="hidden md:flex items-center gap-8">
           {[
-            { label: 'App', href: 'https://app.conduit.xyz' },
             { label: 'Docs', href: 'https://docs.conduit.xyz' },
             { label: 'Arc Ecosystem', href: 'https://arc.network' },
           ].map(({ label, href }) => (
@@ -150,15 +144,85 @@ function Nav() {
           ))}
         </nav>
 
-        {/* Mobile: just "App" */}
+        {/* Mobile: waitlist pill */}
         <a
-          href="https://app.conduit.xyz"
+          href="#waitlist"
+          onClick={e => { e.preventDefault(); document.getElementById('waitlist-input')?.focus() }}
           className="md:hidden font-mono text-[10px] uppercase tracking-widest text-[#B2F55A] border border-[#B2F55A]/30 px-3 py-1.5 rounded"
         >
-          App
+          Waitlist
         </a>
       </div>
     </motion.header>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// WAITLIST FORM
+// ─────────────────────────────────────────────────────────────────────────────
+
+// To collect emails, replace YOUR_FORM_ID with your Formspree form ID.
+// Sign up free at formspree.io — create a form and paste the ID here.
+const FORMSPREE_ID = 'YOUR_FORM_ID'
+
+function WaitlistForm() {
+  const [email, setEmail] = useState('')
+  const [status, setStatus] = useState<'idle' | 'loading' | 'done' | 'error'>('idle')
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!email || status === 'loading' || status === 'done') return
+    setStatus('loading')
+    try {
+      const res = await fetch(`https://formspree.io/f/${FORMSPREE_ID}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ email }),
+      })
+      setStatus(res.ok ? 'done' : 'error')
+    } catch {
+      setStatus('error')
+    }
+  }
+
+  if (status === 'done') {
+    return (
+      <motion.div
+        className="flex items-center gap-3 px-5 py-3 rounded-xl border border-[#B2F55A]/30 bg-[#B2F55A]/5"
+        initial={{ opacity: 0, scale: 0.96 }}
+        animate={{ opacity: 1, scale: 1 }}
+      >
+        <span className="w-2 h-2 rounded-full bg-[#B2F55A] animate-pulse" />
+        <span className="font-mono text-[12px] text-[#B2F55A]">You&apos;re on the list. We&apos;ll reach out.</span>
+      </motion.div>
+    )
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="flex items-center gap-2 w-full max-w-sm">
+      <input
+        id="waitlist-input"
+        type="email"
+        required
+        value={email}
+        onChange={e => setEmail(e.target.value)}
+        placeholder="your@email.com"
+        className="flex-1 px-4 py-3 rounded-xl bg-[#0A0A0A] border border-[#1F1F1F]
+                   font-mono text-[12px] text-white placeholder-[#333]
+                   focus:outline-none focus:border-[#B2F55A]/40 transition-colors"
+      />
+      <motion.button
+        type="submit"
+        disabled={status === 'loading'}
+        className="px-5 py-3 rounded-xl font-mono font-bold text-[12px] bg-[#B2F55A] text-black
+                   disabled:opacity-60 whitespace-nowrap"
+        whileHover={{ scale: 1.04, boxShadow: '0 0 28px rgba(178,245,90,0.3)' }}
+        whileTap={{ scale: 0.97 }}
+        transition={{ type: 'spring', stiffness: 500, damping: 20 }}
+      >
+        {status === 'loading' ? '...' : 'Join Waitlist'}
+      </motion.button>
+    </form>
   )
 }
 
@@ -198,7 +262,6 @@ function Hero() {
 
   return (
     <section className="relative min-h-screen flex flex-col items-center justify-center text-center px-4 pt-24 pb-20 overflow-hidden">
-      {/* Subtle radial vignette */}
       <div
         className="absolute inset-0 pointer-events-none"
         style={{
@@ -217,7 +280,7 @@ function Hero() {
           Arc-native · Agent Payment Protocol · Testnet 2026
         </motion.p>
 
-        {/* Headline — staggered words */}
+        {/* Headline */}
         <motion.h1
           className="font-display font-black uppercase leading-[0.92] tracking-tight mb-8 overflow-hidden"
           style={{ fontSize: 'clamp(3.2rem, 9.5vw, 8.5rem)' }}
@@ -248,31 +311,20 @@ function Hero() {
           Conduit converts, routes, and settles — in any currency, in under a second.
         </motion.p>
 
-        {/* CTAs */}
+        {/* Waitlist form */}
         <motion.div
-          className="flex items-center gap-3 mb-16 flex-wrap justify-center"
+          className="flex flex-col items-center gap-4 mb-16 w-full"
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.7, delay: 1.1 }}
         >
-          <motion.a
-            href="https://app.conduit.xyz"
-            className="px-7 py-3 rounded-xl font-body font-bold text-sm bg-[#B2F55A] text-black"
-            whileHover={{ scale: 1.05, boxShadow: '0 0 36px rgba(178,245,90,0.35)' }}
-            whileTap={{ scale: 0.96 }}
-            transition={{ type: 'spring', stiffness: 500, damping: 20 }}
-          >
-            Open App →
-          </motion.a>
-          <motion.a
+          <WaitlistForm />
+          <a
             href="https://docs.conduit.xyz"
-            className="px-7 py-3 rounded-xl font-body text-sm text-white border border-[#1F1F1F]"
-            whileHover={{ scale: 1.05, borderColor: 'rgba(178,245,90,0.35)', boxShadow: '0 0 20px rgba(178,245,90,0.08)' }}
-            whileTap={{ scale: 0.96 }}
-            transition={{ type: 'spring', stiffness: 500, damping: 20 }}
+            className="font-mono text-[11px] text-[#444] hover:text-[#B2F55A] transition-colors uppercase tracking-widest"
           >
-            Read the docs
-          </motion.a>
+            Read the docs →
+          </a>
         </motion.div>
 
         {/* Stats */}
@@ -314,13 +366,7 @@ function Hero() {
 // FEATURE PANELS
 // ─────────────────────────────────────────────────────────────────────────────
 
-function PanelShell({
-  children,
-  delay = 0,
-}: {
-  children: React.ReactNode
-  delay?: number
-}) {
+function PanelShell({ children, delay = 0 }: { children: React.ReactNode; delay?: number }) {
   return (
     <motion.div
       className="bg-black flex flex-col gap-6 p-8 group cursor-default transition-all duration-500 hover:bg-[#030303]"
@@ -352,7 +398,6 @@ function PanelDesc({ children }: { children: React.ReactNode }) {
   return <p className="font-body text-[0.85rem] text-[#555] leading-[1.75]">{children}</p>
 }
 
-// Panel 1 — SEND
 function SendPanel() {
   const ref = useRef(null)
   const inView = useInView(ref, { once: true, margin: '-80px' })
@@ -368,7 +413,6 @@ function SendPanel() {
         </PanelDesc>
       </div>
 
-      {/* Animated steps terminal */}
       <div
         ref={ref}
         className="rounded-xl border border-[#1A1A1A] bg-[#050505] p-5 space-y-2.5 font-mono text-[11px]"
@@ -403,17 +447,11 @@ function SendPanel() {
           </motion.div>
         ))}
       </div>
-
-      <a href="https://app.conduit.xyz" className="font-mono text-[11px] text-[#B2F55A] hover:underline mt-auto transition-opacity group-hover:opacity-100 opacity-60">
-        Try it →
-      </a>
     </PanelShell>
   )
 }
 
-// Panel 2 — RECEIVE
 function ReceivePanel() {
-  // Minimal 7×7 QR pattern
   const qr = [1,1,1,1,1,1,1,1,0,0,0,0,0,1,1,0,1,0,1,0,1,1,0,0,1,0,0,1,1,0,1,0,1,0,1,1,0,0,0,0,0,1,1,1,1,1,1,1,1]
 
   return (
@@ -427,9 +465,7 @@ function ReceivePanel() {
         </PanelDesc>
       </div>
 
-      {/* Mini link + QR visual */}
       <div className="flex gap-4 items-start">
-        {/* Link card */}
         <div className="flex-1 rounded-xl border border-[#1A1A1A] bg-[#050505] p-4 overflow-hidden">
           <div className="h-[2px] w-8 bg-[#B2F55A] rounded-full mb-3" />
           <p className="font-display font-black text-base text-white">10.00 USDC</p>
@@ -439,7 +475,6 @@ function ReceivePanel() {
           <p className="font-mono text-[8px] text-[#222] mt-3 uppercase tracking-widest">Digital</p>
         </div>
 
-        {/* QR */}
         <div className="flex-shrink-0 flex flex-col items-center gap-2">
           <div
             className="bg-[#B2F55A] p-2 rounded-md"
@@ -456,15 +491,10 @@ function ReceivePanel() {
       <p className="font-mono text-[9px] text-[#333]">
         Restaurant tables · Freelance invoices · Creator pages
       </p>
-
-      <a href="https://app.conduit.xyz/create" className="font-mono text-[11px] text-[#B2F55A] hover:underline mt-auto transition-opacity group-hover:opacity-100 opacity-60">
-        Create a link →
-      </a>
     </PanelShell>
   )
 }
 
-// Panel 3 — BUILD
 function BuildPanel() {
   const ref = useRef(null)
   const inView = useInView(ref, { once: true, margin: '-80px' })
@@ -480,9 +510,7 @@ function BuildPanel() {
         </PanelDesc>
       </div>
 
-      {/* Code block */}
       <div ref={ref} className="rounded-xl border border-[#1A1A1A] bg-[#030303] overflow-hidden">
-        {/* Terminal chrome */}
         <div className="flex items-center gap-1.5 px-4 py-2.5 border-b border-[#1A1A1A]">
           <div className="w-2 h-2 rounded-full bg-[#FF5F57]" />
           <div className="w-2 h-2 rounded-full bg-[#FEBC2E]" />
@@ -492,7 +520,7 @@ function BuildPanel() {
 
         <div className="p-5 font-mono text-[11px] leading-[1.9] space-y-0">
           {[
-            { delay: 0.3, content: <span className="text-[#444]">{'// Agent discovers and pays automatically'}</span> },
+            { delay: 0.3, content: <span key="c0" className="text-[#444]">{'// Agent discovers and pays automatically'}</span> },
             { delay: 0.6, content: <>
               <span className="text-[#B2F55A]">const </span>
               <span className="text-white">req </span>
@@ -505,7 +533,7 @@ function BuildPanel() {
               <span className="text-[#B2F55A]">conduit</span>
               <span className="text-white">.fulfill(req)</span>
             </> },
-            { delay: 1.3, content: <span className="text-[#B2F55A]">{'// ✓ Settled. No human involved.'}</span> },
+            { delay: 1.3, content: <span key="c3" className="text-[#B2F55A]">{'// ✓ Settled. No human involved.'}</span> },
           ].map(({ delay, content }, i) => (
             <motion.div
               key={i}
@@ -519,7 +547,7 @@ function BuildPanel() {
 
           <div className="mt-4 pt-4 border-t border-[#111]">
             {[
-              { delay: 1.6, content: <span className="text-[#333]">{'// Or direct'}</span> },
+              { delay: 1.6, content: <span key="d0" className="text-[#333]">{'// Or direct'}</span> },
               { delay: 1.8, content: <>
                 <span className="text-[#555]">await </span>
                 <span className="text-[#B2F55A]">conduit</span>
@@ -613,7 +641,6 @@ function HowItWorks() {
           <p className="text-[#333]">Built on Arc. Powered by Circle StableFX and CCTP.</p>
         </motion.div>
 
-        {/* Flow diagram */}
         <div ref={ref} className="flex items-center overflow-x-auto pb-4">
           {nodes.map((node, i) => (
             <div key={node} className="flex items-center flex-shrink-0">
@@ -648,107 +675,32 @@ function HowItWorks() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// COMPARISON
+// WAITLIST SECTION (second CTA before footer)
 // ─────────────────────────────────────────────────────────────────────────────
 
-const ROWS = [
-  ['Arc-native protocol',          '✓ Native',  '✗',   '✗',    'App only'],
-  ['Multi-currency routing',       '✓ Core',    '✗',   'Ltd',  '✗'],
-  ['Atomic swap + send',           '✓',         '✗',   '✗',    '✗'],
-  ['Payment declaration standard', '✓',         '✓',   '✓',    '✗'],
-  ['Human payment links',          '✓ Unique',  '✗',   'Part', '✗'],
-  ['QR for physical commerce',     '✓ Unique',  '✗',   '✗',    '✗'],
-  ['Agent discovery (Relay)',       '✓',         '✗',   '✗',    '✗'],
-  ['Composable SDK',               '✓',         'Ltd', 'Ltd',  '✗'],
-]
-
-function Comparison() {
+function WaitlistSection() {
   return (
-    <section className="relative z-10 py-32 px-4 border-t border-[#1F1F1F]">
-      <div className="max-w-5xl mx-auto">
-        <motion.p
-          className="font-mono text-[10px] text-[#B2F55A] uppercase tracking-[0.18em] mb-4"
-          initial={{ opacity: 0 }} whileInView={{ opacity: 1 }} viewport={{ once: true }}
+    <section className="relative z-10 py-32 px-4 border-t border-[#1F1F1F] text-center">
+      <motion.div
+        className="max-w-xl mx-auto flex flex-col items-center gap-6"
+        initial={{ opacity: 0, y: 24 }}
+        whileInView={{ opacity: 1, y: 0 }}
+        viewport={{ once: true }}
+        transition={{ duration: 0.6 }}
+      >
+        <p className="font-mono text-[10px] text-[#B2F55A] uppercase tracking-[0.18em]">Early Access</p>
+        <h2
+          className="font-display font-bold text-white leading-tight"
+          style={{ fontSize: 'clamp(1.8rem, 4vw, 2.6rem)' }}
         >
-          VS The Alternatives
-        </motion.p>
-
-        <motion.h2
-          className="font-display font-bold text-white mb-4"
-          style={{ fontSize: 'clamp(1.8rem, 4vw, 2.8rem)' }}
-          initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true }} transition={{ delay: 0.1 }}
-        >
-          Built for a world x402 wasn&apos;t.
-        </motion.h2>
-
-        <motion.p
-          className="font-body text-[0.9rem] text-[#444] max-w-xl mb-12 leading-[1.75]"
-          initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true }} transition={{ delay: 0.15 }}
-        >
-          x402 and MPP break when currencies don&apos;t match. On Arc, they almost never match.
-          Conduit is the only protocol that treats cross-currency settlement as a spec requirement,
-          not an afterthought.
-        </motion.p>
-
-        <div className="overflow-x-auto rounded-xl border border-[#1A1A1A]">
-          <table className="w-full border-collapse font-mono text-[10px] min-w-[640px]">
-            <thead>
-              <tr className="border-b border-[#1A1A1A]">
-                {['Capability', 'Conduit', 'x402', 'MPP / Tempo', 'Arc Apps'].map((h, i) => (
-                  <th
-                    key={h}
-                    className="text-left py-3 px-4 font-mono text-[10px] uppercase tracking-widest"
-                    style={{
-                      color: i === 1 ? '#B2F55A' : '#333',
-                      background: i === 1 ? 'rgba(178,245,90,0.04)' : 'transparent',
-                      borderTop: i === 1 ? '2px solid #B2F55A' : '2px solid transparent',
-                      borderLeft: i === 1 ? '1px solid rgba(178,245,90,0.15)' : undefined,
-                      borderRight: i === 1 ? '1px solid rgba(178,245,90,0.15)' : undefined,
-                    }}
-                  >
-                    {h}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {ROWS.map((row, ri) => (
-                <motion.tr
-                  key={ri}
-                  className="border-b border-[#0D0D0D] hover:bg-[#060606] transition-colors"
-                  initial={{ opacity: 0, x: -8 }}
-                  whileInView={{ opacity: 1, x: 0 }}
-                  viewport={{ once: true }}
-                  transition={{ delay: ri * 0.05 }}
-                >
-                  {row.map((cell, ci) => {
-                    const isConduit = ci === 1
-                    const isCheck = cell.startsWith('✓')
-                    const isCross = cell === '✗'
-                    const isPartial = cell === 'Ltd' || cell === 'Part' || cell === 'App only'
-                    return (
-                      <td
-                        key={ci}
-                        className="py-3 px-4"
-                        style={{
-                          background: isConduit ? 'rgba(178,245,90,0.025)' : 'transparent',
-                          borderLeft: isConduit ? '1px solid rgba(178,245,90,0.1)' : undefined,
-                          borderRight: isConduit ? '1px solid rgba(178,245,90,0.1)' : undefined,
-                          color: isCheck ? '#B2F55A' : isCross ? '#222' : isPartial ? '#3a3a3a' : '#666',
-                        }}
-                      >
-                        {cell}
-                      </td>
-                    )
-                  })}
-                </motion.tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
+          Be first on Arc.
+        </h2>
+        <p className="font-body text-[0.9rem] text-[#444] leading-[1.75]">
+          Conduit is live on Arc Testnet. Mainnet access is invite-only. Drop your email and we&apos;ll
+          reach out when it&apos;s your turn.
+        </p>
+        <WaitlistForm />
+      </motion.div>
     </section>
   )
 }
@@ -759,7 +711,7 @@ function Comparison() {
 
 function EcosystemBadge() {
   return (
-    <section className="relative z-10 py-24 px-4 border-t border-[#1F1F1F] text-center">
+    <section className="relative z-10 py-16 px-4 border-t border-[#1F1F1F] text-center">
       <motion.div
         className="flex flex-col items-center gap-5"
         initial={{ opacity: 0, y: 20 }}
@@ -814,7 +766,6 @@ function Footer() {
 
         <div className="flex flex-col gap-2.5">
           {[
-            { label: 'App', href: 'https://app.conduit.xyz' },
             { label: 'Docs', href: 'https://docs.conduit.xyz' },
             { label: 'X / Twitter', href: 'https://x.com/conduit' },
             { label: 'Arc', href: 'https://arc.network' },
@@ -840,19 +791,17 @@ function Footer() {
 export default function Page() {
   return (
     <>
-      {/* Fixed ambient effects */}
       <div className="fixed inset-0 z-0 grid-bg pointer-events-none" />
       <Orbs />
       <Particles />
       <Scanline />
 
-      {/* Content */}
       <div className="relative z-10">
         <Nav />
         <Hero />
         <Features />
         <HowItWorks />
-        <Comparison />
+        <WaitlistSection />
         <EcosystemBadge />
         <Footer />
       </div>

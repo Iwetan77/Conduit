@@ -163,7 +163,8 @@ function Nav() {
 
 // To collect emails, replace YOUR_FORM_ID with your Formspree form ID.
 // Sign up free at formspree.io — create a form and paste the ID here.
-const FORMSPREE_ID = 'YOUR_FORM_ID'
+// Replace with your Formspree form ID from formspree.io/f/{id}
+const FORMSPREE_ID = 'mzdwlelo'
 
 function WaitlistForm() {
   const [email, setEmail] = useState('')

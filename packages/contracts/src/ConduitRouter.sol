@@ -10,6 +10,20 @@ import {IPermit2SignatureTransfer} from "./interfaces/IFxEscrow.sol";
 import {DeclarationRegistry} from "./DeclarationRegistry.sol";
 import {AtomicSettler} from "./AtomicSettler.sol";
 import {StableFXAdapter} from "./StableFXAdapter.sol";
+import {SettlementPreferenceRegistry} from "./SettlementPreferenceRegistry.sol";
+
+/// @dev Minimal Uniswap V2-compatible router interface for the AMM fallback path.
+///      Same interface StableFXAdapter uses internally — declared again here so
+///      ConduitRouter.executeWithAmm doesn't depend on StableFXAdapter internals.
+interface IUniswapV2RouterMinimal {
+    function swapTokensForExactTokens(
+        uint256 amountOut,
+        uint256 amountInMax,
+        address[] calldata path,
+        address to,
+        uint256 deadline
+    ) external returns (uint256[] memory amounts);
+}
 
 /// @title ConduitRouter
 /// @notice The single execution surface for all Conduit payments.
@@ -39,11 +53,16 @@ contract ConduitRouter is IConduitRouter, ReentrancyGuard, Ownable {
     DeclarationRegistry public declarationRegistry;
     AtomicSettler public atomicSettler;
     StableFXAdapter public stableFXAdapter;
+    SettlementPreferenceRegistry public settlementPreferenceRegistry;
 
     uint256 public protocolFeeBps;
     mapping(address => uint256) public accumulatedFees;
 
     uint256 private _receiptNonce;
+
+    // ── Errors (declared here since IConduitRouter doesn't carry them) ────────
+
+    error PreferenceMismatch(address recipient, address preferenceToken, address instructionToken);
 
     // ── Constructor ───────────────────────────────────────────────────────────
 
@@ -151,10 +170,16 @@ contract ConduitRouter is IConduitRouter, ReentrancyGuard, Ownable {
             instruction.payerToken != instruction.recipientToken,
             "use execute() for same-currency"
         );
-        require(
-            instruction.payer == msg.sender || instruction.payer == tx.origin,
-            "payer mismatch"
-        );
+        // No msg.sender/tx.origin check on the payer here — deliberately.
+        // Permit2.permitWitnessTransferFrom (called inside atomicSettler.settleViaFX)
+        // verifies `fundingSignature` against `instruction.payer` as the signing
+        // owner; that signature IS the payer's authorization, independent of who
+        // submits this transaction. A msg.sender/tx.origin check would just be a
+        // weaker, spoofable proxy for something Permit2 already checks
+        // cryptographically — and it would block third-party/relayer submission,
+        // which is exactly what Phase 5 (gas-sponsored settlement, so the payer
+        // never needs a gas token) requires. Submission is intentionally open;
+        // fund authorization is Permit2's signature check, not msg.sender.
         require(
             permit.deadline >= block.timestamp,
             "permit expired"
@@ -186,6 +211,65 @@ contract ConduitRouter is IConduitRouter, ReentrancyGuard, Ownable {
             instruction.recipientToken,
             permit.permitted.amount, // payerAmount (takerAmount)
             instruction.amount,       // recipientAmount (makerAmount)
+            instruction.declarationId,
+            block.timestamp
+        );
+    }
+
+    // ── Path 3: Cross-currency execute via AMM fallback ───────────────────────
+
+    /// @notice Execute a cross-currency payment by routing through a Uniswap
+    ///         V2-compatible AMM. Fallback only — used for pairs StableFX
+    ///         refuses to quote (see docs/fx-capability.md for which pairs that
+    ///         is today). Provider selection happens off-chain in the Go API;
+    ///         this entry point just executes whichever route it picked.
+    /// @param path        [payerToken, ..., recipientToken] — validated at the ends only.
+    /// @param amountInMax Maximum payerToken the payer will spend (slippage cap,
+    ///                    computed off-chain via the router's getAmountsIn).
+    /// @param ammRouter   Uniswap V2-compatible router address (ArcSwap or UnitFlow).
+    function executeWithAmm(
+        PaymentInstruction calldata instruction,
+        address[] calldata path,
+        uint256 amountInMax,
+        address ammRouter
+    ) external nonReentrant returns (bytes32 receiptId) {
+        _validateInstruction(instruction);
+        require(
+            instruction.payerToken != instruction.recipientToken,
+            "use execute() for same-currency"
+        );
+        require(path.length >= 2, "invalid path");
+        require(path[0] == instruction.payerToken, "path must start at payerToken");
+        require(path[path.length - 1] == instruction.recipientToken, "path must end at recipientToken");
+
+        IERC20(instruction.payerToken).safeTransferFrom(instruction.payer, address(this), amountInMax);
+        IERC20(instruction.payerToken).approve(ammRouter, amountInMax);
+
+        uint256[] memory amounts = IUniswapV2RouterMinimal(ammRouter).swapTokensForExactTokens(
+            instruction.amount,
+            amountInMax,
+            path,
+            instruction.recipient,
+            instruction.deadline
+        );
+        uint256 actualIn = amounts[0];
+
+        uint256 leftover = amountInMax - actualIn;
+        if (leftover > 0) {
+            IERC20(instruction.payerToken).safeTransfer(instruction.payer, leftover);
+        }
+        IERC20(instruction.payerToken).approve(ammRouter, 0);
+
+        receiptId = _mintReceipt(instruction);
+
+        emit PaymentSettled(
+            receiptId,
+            instruction.payer,
+            instruction.recipient,
+            instruction.payerToken,
+            instruction.recipientToken,
+            actualIn,
+            instruction.amount,
             instruction.declarationId,
             block.timestamp
         );
@@ -225,6 +309,11 @@ contract ConduitRouter is IConduitRouter, ReentrancyGuard, Ownable {
         emit AtomicSettlerSet(settler);
     }
 
+    function setSettlementPreferenceRegistry(address registry) external onlyOwner {
+        settlementPreferenceRegistry = SettlementPreferenceRegistry(registry);
+        emit SettlementPreferenceRegistrySet(registry);
+    }
+
     function setProtocolFee(uint256 bps) external override onlyOwner {
         require(bps <= MAX_PROTOCOL_FEE_BPS, "fee too high");
         protocolFeeBps = bps;
@@ -254,6 +343,17 @@ contract ConduitRouter is IConduitRouter, ReentrancyGuard, Ownable {
 
             if (decl.amount > 0) {
                 require(instruction.amount == decl.amount, "amount mismatch");
+            }
+        } else if (address(settlementPreferenceRegistry) != address(0)) {
+            // Direct send (no declaration): the recipient's standing settlement
+            // preference, if any, is authoritative. A caller-built instruction
+            // that targets a different token than the recipient's preference is
+            // rejected outright rather than silently honoured — the recipient's
+            // choice of what they hold wins, or the payment fails loudly.
+            (address prefToken, bool prefActive) =
+                settlementPreferenceRegistry.preferenceOf(instruction.recipient);
+            if (prefActive && prefToken != instruction.recipientToken) {
+                revert PreferenceMismatch(instruction.recipient, prefToken, instruction.recipientToken);
             }
         }
     }

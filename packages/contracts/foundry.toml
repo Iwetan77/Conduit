@@ -19,3 +19,7 @@ arc_testnet = { key = "placeholder", url = "https://testnet.arcscan.app/api" }
 
 [fuzz]
 runs = 256
+
+[[profile.default.fs_permissions]]
+access = "read-write"
+path = "/home/iwetan/conduit/deployments"

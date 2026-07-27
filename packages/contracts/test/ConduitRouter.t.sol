@@ -8,7 +8,9 @@ import {DeclarationRegistry} from "../src/DeclarationRegistry.sol";
 import {AtomicSettler} from "../src/AtomicSettler.sol";
 import {StableFXAdapter} from "../src/StableFXAdapter.sol";
 import {IConduitRouter} from "../src/interfaces/IConduitRouter.sol";
+import {SettlementPreferenceRegistry} from "../src/SettlementPreferenceRegistry.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
+import {MockUniswapV2Router} from "./mocks/MockUniswapV2Router.sol";
 
 /// @dev Integration tests for ConduitRouter — uses MockERC20 because Arc
 ///      Testnet's USDC uses native precompiles (0x1800...) that Foundry cannot
@@ -209,5 +211,187 @@ contract ConduitRouterTest is Test {
 
         uint256 q = router.quote(instruction);
         assertEq(q, 50 * 1e6);
+    }
+
+    // ── executeWithAmm ────────────────────────────────────────────────────────
+
+    function test_executeWithAmm_swapsAndDeliversExactAmount() public {
+        MockUniswapV2Router amm = new MockUniswapV2Router();
+        amm.setRate(11, 10); // 1.1 usdc per eurc
+
+        uint256 amountOut = 50 * 1e6; // 50 EURC to recipient
+        uint256 amountInMax = 60 * 1e6; // slippage cap
+
+        vm.prank(PAYER);
+        usdc.approve(address(router), amountInMax);
+
+        address[] memory path = new address[](2);
+        path[0] = address(usdc);
+        path[1] = address(eurc);
+
+        IConduitRouter.PaymentInstruction memory instruction = IConduitRouter.PaymentInstruction({
+            payer: PAYER,
+            recipient: RECIPIENT,
+            payerToken: address(usdc),
+            recipientToken: address(eurc),
+            amount: amountOut,
+            deadline: block.timestamp + 1 hours,
+            declarationId: bytes32(0)
+        });
+
+        uint256 payerUsdcBefore = usdc.balanceOf(PAYER);
+
+        vm.prank(PAYER);
+        bytes32 receiptId = router.executeWithAmm(instruction, path, amountInMax, address(amm));
+
+        assertNotEq(receiptId, bytes32(0));
+        assertEq(eurc.balanceOf(RECIPIENT), amountOut);
+        // actualIn = 50 * 1.1 = 55 USDC; payer should be refunded the unused 5 USDC
+        uint256 expectedIn = (amountOut * 11) / 10;
+        assertEq(payerUsdcBefore - usdc.balanceOf(PAYER), expectedIn);
+    }
+
+    function test_executeWithAmm_revertsOnBadPathEnds() public {
+        MockUniswapV2Router amm = new MockUniswapV2Router();
+
+        vm.prank(PAYER);
+        usdc.approve(address(router), 100 * 1e6);
+
+        address[] memory badPath = new address[](2);
+        badPath[0] = address(eurc); // should be payerToken (usdc)
+        badPath[1] = address(eurc);
+
+        IConduitRouter.PaymentInstruction memory instruction = IConduitRouter.PaymentInstruction({
+            payer: PAYER,
+            recipient: RECIPIENT,
+            payerToken: address(usdc),
+            recipientToken: address(eurc),
+            amount: 10 * 1e6,
+            deadline: block.timestamp + 1 hours,
+            declarationId: bytes32(0)
+        });
+
+        vm.expectRevert("path must start at payerToken");
+        vm.prank(PAYER);
+        router.executeWithAmm(instruction, badPath, 100 * 1e6, address(amm));
+    }
+
+    // ── Settlement preference override ──────────────────────────────────────
+
+    function test_directSend_recipientPreferenceOverride_matchingTokenSucceeds() public {
+        SettlementPreferenceRegistry prefRegistry = new SettlementPreferenceRegistry();
+        vm.prank(OWNER);
+        router.setSettlementPreferenceRegistry(address(prefRegistry));
+
+        vm.prank(RECIPIENT);
+        prefRegistry.setPreference(address(usdc));
+
+        uint256 sendAmount = 10 * 1e6;
+        vm.prank(PAYER);
+        usdc.approve(address(router), sendAmount);
+
+        IConduitRouter.PaymentInstruction memory instruction = IConduitRouter.PaymentInstruction({
+            payer: PAYER,
+            recipient: RECIPIENT,
+            payerToken: address(usdc),
+            recipientToken: address(usdc), // matches preference
+            amount: sendAmount,
+            deadline: block.timestamp + 1 hours,
+            declarationId: bytes32(0)
+        });
+
+        vm.prank(PAYER);
+        bytes32 receiptId = router.execute(instruction);
+        assertNotEq(receiptId, bytes32(0));
+    }
+
+    function test_directSend_recipientPreferenceOverride_mismatchReverts() public {
+        SettlementPreferenceRegistry prefRegistry = new SettlementPreferenceRegistry();
+        vm.prank(OWNER);
+        router.setSettlementPreferenceRegistry(address(prefRegistry));
+
+        // Recipient's standing preference is EURC...
+        vm.prank(RECIPIENT);
+        prefRegistry.setPreference(address(eurc));
+
+        uint256 sendAmount = 10 * 1e6;
+        vm.prank(PAYER);
+        usdc.approve(address(router), sendAmount);
+
+        // ...but this instruction (no declaration) targets USDC — must be rejected,
+        // not silently honoured.
+        IConduitRouter.PaymentInstruction memory instruction = IConduitRouter.PaymentInstruction({
+            payer: PAYER,
+            recipient: RECIPIENT,
+            payerToken: address(usdc),
+            recipientToken: address(usdc),
+            amount: sendAmount,
+            deadline: block.timestamp + 1 hours,
+            declarationId: bytes32(0)
+        });
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                ConduitRouter.PreferenceMismatch.selector, RECIPIENT, address(eurc), address(usdc)
+            )
+        );
+        vm.prank(PAYER);
+        router.execute(instruction);
+    }
+
+    function test_directSend_noPreferenceSet_anyTokenAllowed() public {
+        SettlementPreferenceRegistry prefRegistry = new SettlementPreferenceRegistry();
+        vm.prank(OWNER);
+        router.setSettlementPreferenceRegistry(address(prefRegistry));
+        // RECIPIENT never calls setPreference — behaviour must be unchanged from before.
+
+        uint256 sendAmount = 10 * 1e6;
+        vm.prank(PAYER);
+        usdc.approve(address(router), sendAmount);
+
+        IConduitRouter.PaymentInstruction memory instruction = IConduitRouter.PaymentInstruction({
+            payer: PAYER,
+            recipient: RECIPIENT,
+            payerToken: address(usdc),
+            recipientToken: address(usdc),
+            amount: sendAmount,
+            deadline: block.timestamp + 1 hours,
+            declarationId: bytes32(0)
+        });
+
+        vm.prank(PAYER);
+        bytes32 receiptId = router.execute(instruction);
+        assertNotEq(receiptId, bytes32(0));
+    }
+
+    function test_declarationFlow_ignoresRecipientPreference() public {
+        // Declarations are their own authority — the preference override only
+        // applies to declarationId == 0 (direct sends).
+        SettlementPreferenceRegistry prefRegistry = new SettlementPreferenceRegistry();
+        vm.prank(OWNER);
+        router.setSettlementPreferenceRegistry(address(prefRegistry));
+
+        vm.prank(RECIPIENT);
+        prefRegistry.setPreference(address(eurc)); // prefers EURC
+
+        vm.prank(RECIPIENT);
+        bytes32 declarationId = registry.register(address(usdc), 10 * 1e6); // declares USDC
+
+        vm.prank(PAYER);
+        usdc.approve(address(router), 10 * 1e6);
+
+        IConduitRouter.PaymentInstruction memory instruction = IConduitRouter.PaymentInstruction({
+            payer: PAYER,
+            recipient: RECIPIENT,
+            payerToken: address(usdc),
+            recipientToken: address(usdc),
+            amount: 10 * 1e6,
+            deadline: block.timestamp + 1 hours,
+            declarationId: declarationId
+        });
+
+        vm.prank(PAYER);
+        bytes32 receiptId = router.execute(instruction);
+        assertNotEq(receiptId, bytes32(0));
     }
 }

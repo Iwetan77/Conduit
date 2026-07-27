@@ -39,6 +39,7 @@ interface IConduitRouter {
     event DeclarationRegistrySet(address indexed registry);
     event StableFXAdapterSet(address indexed adapter);
     event AtomicSettlerSet(address indexed settler);
+    event SettlementPreferenceRegistrySet(address indexed registry);
 
     // ── Core Functions ────────────────────────────────────────────────────────
 

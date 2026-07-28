@@ -32,6 +32,8 @@ var registry = []Info{
 	{ISO: "AUD", Symbol: "AUDF", Token: "0xd2a530170D71a9Cfe1651Fb468E2B98F7Ed7456b", Decimals: 6},
 	{ISO: "MXN", Symbol: "MXNB", Token: "0x836F73Fbc370A9329Ba4957E47912DfDBA6BA461", Decimals: 6},
 	{ISO: "CAD", Symbol: "QCAD", Token: "0x23d7CFFd0876f3ABb6B074287ba2aeefBc83825d", Decimals: 6},
+	{ISO: "GBP", Symbol: "GBPA", Token: "0xa42e82b5D25E84d107Cd8549CA432ef489CbaD32", Decimals: 6},
+	{ISO: "ZAR", Symbol: "ZARU", Token: "0x47b025D6002234a5038bCD94767bd82b27C2b96F", Decimals: 18},
 }
 
 func All() []Info { return registry }

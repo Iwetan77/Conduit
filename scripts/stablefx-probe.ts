@@ -33,7 +33,7 @@ const BASE_TOKENS: Record<string, string> = {
 };
 const CANDIDATE_CURRENCIES = [
   "JPYC", "JPY", "BRLA", "BRL", "PHPC", "PHP", "AUDF", "AUD",
-  "MXNB", "QCAD", "KRW1", "KRW",
+  "MXNB", "QCAD", "KRW1", "KRW", "GBPA", "GBP", "ZARU", "ZAR",
 ];
 
 function loadApiKey(): string {

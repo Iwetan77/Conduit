@@ -28,6 +28,8 @@ export const CURRENCIES: Record<Currency, CurrencyDescriptor> = {
   AUDF: { iso: "AUDF", token: "0xd2a530170D71a9Cfe1651Fb468E2B98F7Ed7456b", decimals: 6 },
   MXNB: { iso: "MXNB", token: "0x836F73Fbc370A9329Ba4957E47912DfDBA6BA461", decimals: 6 },
   QCAD: { iso: "QCAD", token: "0x23d7CFFd0876f3ABb6B074287ba2aeefBc83825d", decimals: 6 },
+  GBPA: { iso: "GBPA", token: "0xa42e82b5D25E84d107Cd8549CA432ef489CbaD32", decimals: 6 },
+  ZARU: { iso: "ZARU", token: "0x47b025D6002234a5038bCD94767bd82b27C2b96F", decimals: 18 },
 };
 
 export function resolveCurrency(iso: Currency): CurrencyDescriptor {

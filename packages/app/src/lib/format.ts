@@ -1,7 +1,7 @@
 import type { Currency } from "@conduit/sdk";
 import { toHumanAmount, fromHumanAmount, currencyDecimals } from "@conduit/sdk";
 
-const SYMBOLS: Record<string, string> = { USDC: "$", EURC: "€", BRLA: "R$", AUDF: "A$", MXNB: "MX$", QCAD: "C$" };
+const SYMBOLS: Record<string, string> = { USDC: "$", EURC: "€", BRLA: "R$", AUDF: "A$", MXNB: "MX$", QCAD: "C$", GBPA: "£", ZARU: "R" };
 
 // Format a raw bigint (in `currency`'s own minor units) as a human-readable string
 export function formatAmount(amount: bigint, currency: Currency): string {

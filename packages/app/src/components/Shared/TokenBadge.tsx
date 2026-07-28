@@ -29,6 +29,8 @@ const TOKEN_CONFIG: Record<string, TokenVisual> = {
   AUDF: { symbol: "AUDF", color: "#C99A2E", bg: "rgba(201, 154, 46, 0.12)" },
   MXNB: { symbol: "MXNB", color: "#B3492D", bg: "rgba(179, 73, 45, 0.12)" },
   QCAD: { symbol: "QCAD", color: "#5C4EA6", bg: "rgba(92, 78, 166, 0.12)" },
+  GBPA: { symbol: "GBPA", color: "#7A3E9D", bg: "rgba(122, 62, 157, 0.12)" },
+  ZARU: { symbol: "ZARU", color: "#2E7D9E", bg: "rgba(46, 125, 158, 0.12)" },
 };
 
 function visualFor(currency: Currency): TokenVisual {

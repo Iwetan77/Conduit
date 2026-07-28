@@ -38,6 +38,8 @@ contract Deploy is Script {
     address constant AUDF = 0xd2a530170D71a9Cfe1651Fb468E2B98F7Ed7456b;
     address constant MXNB = 0x836F73Fbc370A9329Ba4957E47912DfDBA6BA461;
     address constant QCAD = 0x23d7CFFd0876f3ABb6B074287ba2aeefBc83825d;
+    address constant GBPA = 0xa42e82b5D25E84d107Cd8549CA432ef489CbaD32;
+    address constant ZARU = 0x47b025D6002234a5038bCD94767bd82b27C2b96F;
 
     function run() external {
         uint256 deployerKey = vm.envUint("PRIVATE_KEY");
@@ -95,6 +97,8 @@ contract Deploy is Script {
         currencyRegistry.registerCurrency("AUD", AUDF, 6);
         currencyRegistry.registerCurrency("MXN", MXNB, 6);
         currencyRegistry.registerCurrency("CAD", QCAD, 6);
+        currencyRegistry.registerCurrency("GBP", GBPA, 6);
+        currencyRegistry.registerCurrency("ZAR", ZARU, 18);
 
         console2.log("");
         console2.log("=== Authorizations + currency registrations set ===");

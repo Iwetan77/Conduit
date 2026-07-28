@@ -1,0 +1,10 @@
+DROP TABLE IF EXISTS indexer_checkpoint;
+DROP TABLE IF EXISTS idempotency_keys;
+DROP TABLE IF EXISTS webhook_deliveries;
+DROP TABLE IF EXISTS webhook_endpoints;
+DROP TABLE IF EXISTS balance_transactions;
+DROP TABLE IF EXISTS settlements;
+DROP TABLE IF EXISTS fx_trades;
+DROP TABLE IF EXISTS settlement_intents;
+DROP TABLE IF EXISTS api_keys;
+DROP TABLE IF EXISTS accounts;

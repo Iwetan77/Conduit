@@ -1,0 +1,194 @@
+// Package auth implements API key generation, hashing, and the bearer-auth
+// middleware. Keys are sk_test_/sk_live_/pk_test_/pk_live_ + 32 random bytes
+// base62. Only the SHA-256 hash and a 4-char display suffix are ever stored —
+// the full key is returned exactly once, at creation.
+package auth
+
+import (
+	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"math/big"
+	"net/http"
+	"strings"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+	apierrors "github.com/kzn-labs/conduit/api/internal/errors"
+)
+
+type KeyType string
+
+const (
+	KeyTypePublishable KeyType = "pk"
+	KeyTypeSecret       KeyType = "sk"
+)
+
+const base62Alphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+
+// GenerateKey returns (fullKey, prefix, suffix, hashHex). fullKey is shown to
+// the caller exactly once and never stored.
+func GenerateKey(keyType KeyType, livemode bool) (fullKey, prefix, suffix, hashHex string, err error) {
+	mode := "test"
+	if livemode {
+		mode = "live"
+	}
+	prefix = fmt.Sprintf("%s_%s_", keyType, mode)
+
+	buf := make([]byte, 32)
+	for i := range buf {
+		n, err := rand.Int(rand.Reader, big.NewInt(int64(len(base62Alphabet))))
+		if err != nil {
+			return "", "", "", "", err
+		}
+		buf[i] = base62Alphabet[n.Int64()]
+	}
+	random := string(buf)
+	fullKey = prefix + random
+	suffix = random[len(random)-4:]
+
+	sum := sha256.Sum256([]byte(fullKey))
+	hashHex = hex.EncodeToString(sum[:])
+	return fullKey, prefix, suffix, hashHex, nil
+}
+
+func HashKey(fullKey string) string {
+	sum := sha256.Sum256([]byte(fullKey))
+	return hex.EncodeToString(sum[:])
+}
+
+type Principal struct {
+	AccountID string
+	KeyID     string
+	KeyType   KeyType
+	Livemode  bool
+}
+
+type ctxKey int
+
+const principalCtxKey ctxKey = 0
+
+func WithPrincipal(ctx context.Context, p Principal) context.Context {
+	return context.WithValue(ctx, principalCtxKey, p)
+}
+
+func FromContext(ctx context.Context) (Principal, bool) {
+	p, ok := ctx.Value(principalCtxKey).(Principal)
+	return p, ok
+}
+
+// pkAllowedPaths: pk_ keys may only reach the hosted-checkout calls. Matched
+// by (method, path-prefix) since these run unauthenticated-adjacent, in a
+// browser, and must not be able to touch anything else.
+var pkAllowedPrefixes = []struct {
+	method string
+	prefix string
+}{
+	{http.MethodGet, "/v1/settlement_intents/"},   // GET /:id (suffix must be exactly the id, checked by caller)
+	{http.MethodPost, "/v1/settlement_intents/"},  // /:id/quote, /:id/prepare, /:id/confirm
+}
+
+func isPkAllowed(method, path string) bool {
+	if !strings.HasPrefix(path, "/v1/settlement_intents/") {
+		return false
+	}
+	for _, a := range pkAllowedPrefixes {
+		if a.method == method {
+			return true
+		}
+	}
+	return false
+}
+
+// Middleware validates the Authorization: Bearer <key> header, looks up the
+// key hash, and (for pk_ keys) restricts which routes are reachable.
+func Middleware(pool *pgxpool.Pool) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			authHeader := r.Header.Get("Authorization")
+			if !strings.HasPrefix(authHeader, "Bearer ") {
+				writeErr(w, apierrors.E(apierrors.CodeUnauthorized, ""))
+				return
+			}
+			key := strings.TrimPrefix(authHeader, "Bearer ")
+			principal, err := lookupKey(r.Context(), pool, key)
+			if err != nil {
+				writeErr(w, apierrors.E(apierrors.CodeUnauthorized, ""))
+				return
+			}
+
+			if principal.KeyType == KeyTypePublishable && !isPkAllowed(r.Method, r.URL.Path) {
+				writeErr(w, apierrors.E(apierrors.CodeForbidden, ""))
+				return
+			}
+
+			// Subaccount switching via Conduit-Account header — only valid if
+			// the key's account IS the parent of the requested subaccount.
+			if sub := r.Header.Get("Conduit-Account"); sub != "" && sub != principal.AccountID {
+				isChild, err := isParentOf(r.Context(), pool, principal.AccountID, sub)
+				if err != nil || !isChild {
+					writeErr(w, apierrors.E(apierrors.CodeForbidden, "Conduit-Account"))
+					return
+				}
+				principal.AccountID = sub
+			}
+
+			ctx := WithPrincipal(r.Context(), principal)
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
+}
+
+func lookupKey(ctx context.Context, pool *pgxpool.Pool, key string) (Principal, error) {
+	if len(key) < 8 {
+		return Principal{}, errors.New("key too short")
+	}
+	hash := HashKey(key)
+
+	var accountID, keyID, prefix string
+	var revoked bool
+	var livemode bool
+	err := pool.QueryRow(ctx,
+		`SELECT account_id, id, prefix, livemode, (revoked_at IS NOT NULL) FROM api_keys WHERE key_hash = $1`,
+		hash,
+	).Scan(&accountID, &keyID, &prefix, &livemode, &revoked)
+	if err != nil {
+		return Principal{}, err
+	}
+	if revoked {
+		return Principal{}, errors.New("key revoked")
+	}
+
+	// Constant-time re-check of the hash to avoid any timing side-channel from
+	// the DB lookup path length (defense in depth; the query above is already
+	// exact-match on a unique index).
+	expected := HashKey(key)
+	if subtle.ConstantTimeCompare([]byte(hash), []byte(expected)) != 1 {
+		return Principal{}, errors.New("hash mismatch")
+	}
+
+	keyType := KeyTypeSecret
+	if strings.HasPrefix(prefix, "pk_") {
+		keyType = KeyTypePublishable
+	}
+
+	return Principal{AccountID: accountID, KeyID: keyID, KeyType: keyType, Livemode: livemode}, nil
+}
+
+func isParentOf(ctx context.Context, pool *pgxpool.Pool, parentID, childID string) (bool, error) {
+	var actualParent *string
+	err := pool.QueryRow(ctx, `SELECT parent_id FROM accounts WHERE id = $1`, childID).Scan(&actualParent)
+	if err != nil {
+		return false, err
+	}
+	return actualParent != nil && *actualParent == parentID, nil
+}
+
+func writeErr(w http.ResponseWriter, e *apierrors.APIError) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(e.Status)
+	fmt.Fprintf(w, `{"error":{"type":%q,"code":%q,"message":%q,"doc_url":%q}}`, e.Type, e.Code, e.Message, e.DocURL)
+}

@@ -42,3 +42,6 @@ Thumbs.db
 .vscode/
 *.swp
 *.swo
+
+# Claude's own resumability notes -- never commit, local scratch only
+whereistopped.md

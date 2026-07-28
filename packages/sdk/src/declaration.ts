@@ -1,5 +1,6 @@
 import { ethers } from "ethers";
 import { ARC_TESTNET, REGISTRY_ABI, DEFAULT_APP_URL } from "./constants.js";
+import { currencyToAddress as resolveCurrencyToAddress, addressToCurrency as resolveAddressToCurrency } from "./currency.js";
 import type {
   Address,
   Bytes32,
@@ -123,16 +124,10 @@ export class DeclarationClient {
   // ── Helpers ───────────────────────────────────────────────────────────────
 
   currencyToAddress(currency: Currency): Address {
-    switch (currency) {
-      case "USDC": return ARC_TESTNET.tokens.USDC;
-      case "EURC": return ARC_TESTNET.tokens.EURC;
-    }
+    return resolveCurrencyToAddress(currency);
   }
 
   addressToCurrency(address: Address): Currency {
-    const lower = address.toLowerCase();
-    if (lower === ARC_TESTNET.tokens.USDC.toLowerCase()) return "USDC";
-    if (lower === ARC_TESTNET.tokens.EURC.toLowerCase()) return "EURC";
-    throw new Error(`Unknown token address: ${address}`);
+    return resolveAddressToCurrency(address);
   }
 }

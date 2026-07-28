@@ -35,7 +35,7 @@ export function CreateForm({ onSuccess }: CreateFormProps) {
       );
       const client = ConduitClient.fromBrowserProvider(browserProvider);
 
-      const amount = createFlow.amount ? parseAmount(createFlow.amount) : 0n;
+      const amount = createFlow.amount ? parseAmount(createFlow.amount, createFlow.currency) : 0n;
 
       const result = await client.createLink({
         amount,

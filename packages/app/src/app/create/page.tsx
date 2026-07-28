@@ -29,8 +29,8 @@ export default function CreatePage() {
     setResult({ declarationId, paymentUrl });
   };
 
-  const amount = createFlow.amount ? parseAmount(createFlow.amount) : 0n;
   const currency = createFlow.currency as Currency;
+  const amount = createFlow.amount ? parseAmount(createFlow.amount, currency) : 0n;
 
   return (
     <div className="min-h-screen bg-brand-black">

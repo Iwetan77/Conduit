@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import type { PaymentDeclaration, PaymentReceipt, Currency } from "@conduit/sdk";
+import { currencyDecimals, toHumanAmount } from "@conduit/sdk";
 import { formatAmount } from "@/lib/format";
 import { ReceiptCard } from "@/components/Shared/ReceiptCard";
 import { QuotePreview } from "./QuotePreview";
@@ -72,7 +73,7 @@ export function PayConfirm({ declaration, payerCurrency, openAmount }: PayConfir
             <QuotePreview
               payerCurrency={payerCurrency}
               recipientCurrency={declaration.currency}
-              recipientAmount={(Number(amount) / 1e6).toFixed(2)}
+              recipientAmount={toHumanAmount(amount, currencyDecimals(declaration.currency))}
             />
           )}
 

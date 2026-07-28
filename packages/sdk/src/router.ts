@@ -1,5 +1,6 @@
 import { ethers } from "ethers";
 import { ARC_TESTNET, ROUTER_ABI, ERC20_ABI } from "./constants.js";
+import { currencyToAddress as resolveCurrencyToAddress } from "./currency.js";
 import type {
   Address,
   Bytes32,
@@ -137,6 +138,6 @@ export class RouterClient {
   // ── Token helpers ─────────────────────────────────────────────────────────
 
   currencyToAddress(currency: Currency): Address {
-    return currency === "USDC" ? ARC_TESTNET.tokens.USDC : ARC_TESTNET.tokens.EURC;
+    return resolveCurrencyToAddress(currency);
   }
 }

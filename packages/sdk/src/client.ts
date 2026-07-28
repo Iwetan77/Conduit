@@ -3,7 +3,9 @@ import { ARC_TESTNET, QUOTE_TTL_SECONDS, DEFAULT_APP_URL } from "./constants.js"
 import { DeclarationClient } from "./declaration.js";
 import { RouterClient } from "./router.js";
 import { ReceiptClient } from "./receipt.js";
-import { swap, swapWithBrowserWallet, toHumanAmount } from "./swap.js";
+import { swap, swapWithBrowserWallet } from "./swap.js";
+import { toHumanAmount, fromHumanAmount } from "./amount.js";
+import { currencyToAddress, currencyDecimals } from "./currency.js";
 import { discover as _discover } from "./discovery.js";
 import type { DiscoveryResult } from "./discovery.js";
 import type {
@@ -129,7 +131,7 @@ export class ConduitClient {
 
     if (payerToken !== recipientToken) {
       // ── Cross-currency: swap via AMM, then transfer ────────────────────────
-      const humanAmount = toHumanAmount(options.amount);
+      const humanAmount = toHumanAmount(options.amount, currencyDecimals(options.currency));
 
       // Detect environment: server (Node.js) vs browser
       const isServer = typeof window === "undefined";
@@ -220,7 +222,7 @@ export class ConduitClient {
 
     if (payerToken !== declaration.recipientToken) {
       // Cross-currency fulfill: swap via AMM, then transfer
-      const humanAmount = toHumanAmount(declaration.amount);
+      const humanAmount = toHumanAmount(declaration.amount, currencyDecimals(declaration.currency));
 
       // Detect environment: server (Node.js) vs browser
       const isServer = typeof window === "undefined";
@@ -444,20 +446,14 @@ export class ConduitClient {
   }
 
   currencyToAddress(currency: Currency): Address {
-    return currency === "USDC" ? ARC_TESTNET.tokens.USDC : ARC_TESTNET.tokens.EURC;
+    return currencyToAddress(currency);
   }
 
   formatAmount(amount: bigint, currency: Currency): string {
-    const divisor = 10n ** 6n;
-    const whole = amount / divisor;
-    const fraction = amount % divisor;
-    const fractionStr = fraction.toString().padStart(6, "0").replace(/0+$/, "");
-    return fractionStr ? `${whole}.${fractionStr} ${currency}` : `${whole} ${currency}`;
+    return `${toHumanAmount(amount, currencyDecimals(currency))} ${currency}`;
   }
 
-  parseAmount(humanAmount: string, _currency: Currency): bigint {
-    const [whole = "0", fraction = "0"] = humanAmount.replace(/[^0-9.]/g, "").split(".");
-    const paddedFraction = fraction.slice(0, 6).padEnd(6, "0");
-    return BigInt(whole) * 10n ** 6n + BigInt(paddedFraction);
+  parseAmount(humanAmount: string, currency: Currency): bigint {
+    return fromHumanAmount(humanAmount, currencyDecimals(currency));
   }
 }

@@ -12,13 +12,12 @@
 
 import { ethers } from "ethers";
 import type { Currency } from "./types.js";
+import { currencyToAddress, currencyDecimals } from "./currency.js";
+import { toHumanAmount as toHumanAmountGeneric, fromHumanAmount as fromHumanAmountGeneric } from "./amount.js";
 
 const ARC_RPC = "https://rpc.testnet.arc.network";
 const ARC_CHAIN_ID = 5042002;
 const ARC_EXPLORER = "https://testnet.arcscan.app";
-
-const USDC = "0x3600000000000000000000000000000000000000";
-const EURC = "0x89B50855Aa3bE2F677cD6303Cec089B5F319D72a";
 
 interface RouterConfig { name: string; address: string }
 
@@ -120,7 +119,7 @@ async function executeSwap(
   return {
     tokenIn,
     tokenOut,
-    amountIn: toHumanAmount(requiredIn),
+    amountIn: toHumanAmountGeneric(requiredIn, currencyDecimals(tokenIn)),
     amountOutRaw: amountOut.toString(),
     txHash: tx.hash,
     explorerUrl: `${ARC_EXPLORER}/tx/${tx.hash}`,
@@ -142,7 +141,9 @@ export async function swap(
   });
   const wallet = new ethers.Wallet(privateKey, provider);
   const signerAddr = await wallet.getAddress();
-  const amountOut = fromHumanAmount(amountIn);
+  // amountIn here is the human-readable amount of tokenOut the recipient must
+  // receive (an exact-output swap) — decimals come from tokenOut, not tokenIn.
+  const amountOut = fromHumanAmountGeneric(amountIn, currencyDecimals(tokenOut));
   const deadline = Math.floor(Date.now() / 1000) + 300;
 
   return executeSwap(wallet, tokenIn, tokenOut, amountOut, signerAddr, deadline);
@@ -161,27 +162,8 @@ export async function swapWithBrowserWallet(
   const provider = new ethers.BrowserProvider(eip1193Provider as ethers.Eip1193Provider);
   const signer = await provider.getSigner();
   const signerAddr = await signer.getAddress();
-  const amountOut = fromHumanAmount(amountIn);
+  const amountOut = fromHumanAmountGeneric(amountIn, currencyDecimals(tokenOut));
   const deadline = Math.floor(Date.now() / 1000) + 300;
 
   return executeSwap(signer, tokenIn, tokenOut, amountOut, signerAddr, deadline);
-}
-
-// ── Amount helpers ────────────────────────────────────────────────────────────
-
-export function toHumanAmount(amount: bigint): string {
-  const divisor = 1_000_000n;
-  const whole = amount / divisor;
-  const frac = (amount % divisor).toString().padStart(6, "0").replace(/0+$/, "");
-  return frac ? `${whole}.${frac}` : `${whole}.00`;
-}
-
-export function fromHumanAmount(amount: string): bigint {
-  const [whole = "0", frac = ""] = amount.split(".");
-  const paddedFrac = frac.slice(0, 6).padEnd(6, "0");
-  return BigInt(whole) * 1_000_000n + BigInt(paddedFrac || "0");
-}
-
-function currencyToAddress(currency: Currency): string {
-  return currency === "USDC" ? USDC : EURC;
 }

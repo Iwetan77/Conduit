@@ -11,6 +11,7 @@ import { RoutePreview } from "@/components/SendFlow/RoutePreview";
 import { SendConfirm } from "@/components/SendFlow/SendConfirm";
 import { WalletConnect } from "@/components/Shared/WalletConnect";
 import type { Currency } from "@conduit/sdk";
+import { CURRENCIES } from "@conduit/sdk";
 import { motion, AnimatePresence } from "framer-motion";
 
 type Step = "input" | "confirm";
@@ -84,7 +85,7 @@ export default function HomePage() {
                     You pay with
                   </label>
                   <div className="flex gap-2">
-                    {(["USDC", "EURC"] as Currency[]).map((c) => (
+                    {(Object.keys(CURRENCIES) as Currency[]).map((c) => (
                       <button
                         key={c}
                         onClick={() => setPayerCurrency(c)}

@@ -9,13 +9,7 @@ import { LinkCard } from "@/components/CreateFlow/LinkOutput/LinkCard";
 import { QRDisplay } from "@/components/CreateFlow/QROutput/QRDisplay";
 import { formatAmount, shortenAddress } from "@/lib/format";
 import { TokenBadge } from "@/components/Shared/TokenBadge";
-import type { Currency } from "@conduit/sdk";
-
-function addressToCurrency(address: string): Currency {
-  return address.toLowerCase() === "0x3600000000000000000000000000000000000000"
-    ? "USDC"
-    : "EURC";
-}
+import { addressToCurrency } from "@conduit/sdk";
 
 export default function LinksPage() {
   const { address, isConnected } = useAccount();

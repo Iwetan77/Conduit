@@ -1,10 +1,26 @@
 // ── Core Types ────────────────────────────────────────────────────────────────
-// All on-chain amounts use bigint (never number).
-// USDC and EURC: always 6-decimal ERC-20 values. Never 18-decimal native.
+// All on-chain amounts use bigint (never number). Decimals vary by currency —
+// USDC/EURC/AUDF/MXNB/QCAD are 6dp, BRLA/KRW1 are 18dp. Never assume 6; resolve
+// via CurrencyDescriptor (see currency.ts). See audit/DECIMAL-AUDIT.md.
 
 export type Address = `0x${string}`;
 export type Bytes32 = `0x${string}`;
-export type Currency = "USDC" | "EURC";
+
+/// An on-chain token symbol (e.g. "USDC", "EURC", "BRLA") — was a closed
+/// "USDC" | "EURC" union, now any symbol registered in currency.ts / eventually
+/// GET /v1/currencies. NOT the same as CurrencyRegistry.sol's 3-letter fiat ISO
+/// code (bytes3 "USD"/"EUR"/"BRL") — see currency.ts's header comment for why
+/// those are deliberately kept distinct.
+export type Currency = string;
+
+/// A currency fully resolved against the on-chain CurrencyRegistry: which token,
+/// how many decimals. `toHumanAmount`/`fromHumanAmount` require `decimals` from
+/// here — never hardcode it.
+export interface CurrencyDescriptor {
+  iso: Currency;
+  token: Address;
+  decimals: number;
+}
 
 // ── Payment Declaration ───────────────────────────────────────────────────────
 
@@ -26,7 +42,7 @@ export interface PaymentInstruction {
   recipient: Address;
   payerToken: Address;
   recipientToken: Address;
-  amount: bigint;        // in recipientToken units (6 decimals)
+  amount: bigint;        // in recipientToken's own minor units (see CurrencyDescriptor.decimals)
   deadline: number;      // unix timestamp
   declarationId: Bytes32;
 }
@@ -36,8 +52,8 @@ export interface PaymentInstruction {
 export interface Quote {
   payerToken: Address;
   recipientToken: Address;
-  payerAmount: bigint;   // what payer sends (6 decimals)
-  recipientAmount: bigint; // what recipient gets (6 decimals)
+  payerAmount: bigint;   // what payer sends, in payerToken's own minor units
+  recipientAmount: bigint; // what recipient gets, in recipientToken's own minor units
   rate: number;          // exchange rate (display only)
   expiresAt: number;     // unix timestamp
 }
@@ -113,7 +129,7 @@ export interface TransactionResponse {
 
 export interface PayOptions {
   recipient: Address;
-  amount: bigint;        // in recipientToken units (6 decimals)
+  amount: bigint;        // in recipientToken's own minor units (see CurrencyDescriptor.decimals)
   currency: Currency;    // recipient's desired currency
   payerToken?: Currency; // payer's currency (defaults to USDC)
 }
@@ -139,9 +155,9 @@ export interface GetHistoryOptions {
 // On-chain AgentRegistry is a v2 feature.
 
 export interface AgentConfig {
-  /** Maximum spend per transaction in USDC equivalent (6 decimals). 0 = unlimited. */
+  /** Maximum spend per transaction, in USDC's minor units (6dp). 0 = unlimited. */
   maxPerTransactionUSDC?: bigint;
-  /** Maximum spend per day in USDC equivalent (6 decimals). 0 = unlimited. */
+  /** Maximum spend per day, in USDC's minor units (6dp). 0 = unlimited. */
   dailyLimitUSDC?: bigint;
   /** Allowed tokens to send. Empty = all supported tokens. */
   allowedTokens?: Currency[];

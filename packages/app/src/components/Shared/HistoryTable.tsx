@@ -1,15 +1,9 @@
 "use client";
 
 import type { PaymentReceipt } from "@conduit/sdk";
+import { addressToCurrency } from "@conduit/sdk";
 import { formatAmount, shortenAddress, formatDate } from "@/lib/format";
-import type { Currency } from "@conduit/sdk";
 import { TokenBadge } from "./TokenBadge";
-
-function addressToCurrency(address: string): Currency {
-  return address.toLowerCase() === "0x3600000000000000000000000000000000000000"
-    ? "USDC"
-    : "EURC";
-}
 
 interface HistoryTableProps {
   receipts: PaymentReceipt[];

@@ -1,33 +1,28 @@
 import type { Currency } from "@conduit/sdk";
+import { toHumanAmount, fromHumanAmount, currencyDecimals } from "@conduit/sdk";
 
-// Format a 6-decimal bigint as human-readable currency string
+const SYMBOLS: Record<string, string> = { USDC: "$", EURC: "€", BRLA: "R$", AUDF: "A$", MXNB: "MX$", QCAD: "C$" };
+
+// Format a raw bigint (in `currency`'s own minor units) as a human-readable string
 export function formatAmount(amount: bigint, currency: Currency): string {
-  const divisor = 1_000_000n;
-  const whole = amount / divisor;
-  const frac = amount % divisor;
-  const fracStr = frac.toString().padStart(6, "0").replace(/0+$/, "");
-  const value = fracStr ? `${whole}.${fracStr}` : whole.toString();
-  return `${currency === "USDC" ? "$" : "€"}${Number(value).toLocaleString("en-US", {
+  const decimals = currencyDecimals(currency);
+  const value = toHumanAmount(amount, decimals);
+  const symbol = SYMBOLS[currency] ?? "";
+  return `${symbol}${Number(value).toLocaleString("en-US", {
     minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
+    maximumFractionDigits: Math.max(2, decimals),
   })} ${currency}`;
 }
 
-// Format for display without currency prefix
-export function formatAmountRaw(amount: bigint): string {
-  const divisor = 1_000_000n;
-  const whole = amount / divisor;
-  const frac = amount % divisor;
-  const fracStr = frac.toString().padStart(6, "0").replace(/0+$/, "");
-  return fracStr ? `${whole}.${fracStr}` : whole.toString();
+// Format for display without currency prefix — decimals must be supplied by
+// the caller (no default: that was audit finding #14, off by 10^12 at 18dp).
+export function formatAmountRaw(amount: bigint, decimals: number): string {
+  return toHumanAmount(amount, decimals);
 }
 
-// Parse human input string to 6-decimal bigint
-export function parseAmount(value: string): bigint {
-  const clean = value.replace(/[^0-9.]/g, "");
-  const [whole = "0", frac = ""] = clean.split(".");
-  const paddedFrac = frac.slice(0, 6).padEnd(6, "0");
-  return BigInt(whole) * 1_000_000n + BigInt(paddedFrac || "0");
+// Parse human input string to a raw bigint in `currency`'s own minor units
+export function parseAmount(value: string, currency: Currency): bigint {
+  return fromHumanAmount(value, currencyDecimals(currency));
 }
 
 // Shorten an address for display

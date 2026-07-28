@@ -1,16 +1,9 @@
 "use client";
 
-import type { PaymentReceipt } from "@conduit/sdk";
+import type { PaymentReceipt, Address } from "@conduit/sdk";
+import { addressToCurrency } from "@conduit/sdk";
 import { formatAmount, shortenAddress, formatDate } from "@/lib/format";
 import { TokenBadge } from "./TokenBadge";
-import type { Currency } from "@conduit/sdk";
-
-function addressToCurrency(address: string): Currency {
-  const lower = address.toLowerCase();
-  if (lower === "0x3600000000000000000000000000000000000000") return "USDC";
-  if (lower === "0x89b50855aa3be2f677cd6303cec089b5f319d72a") return "EURC";
-  return "USDC";
-}
 
 interface ReceiptCardProps {
   receipt: PaymentReceipt;

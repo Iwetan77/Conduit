@@ -31,7 +31,7 @@ export function SendConfirm({
   const [receipt, setReceipt] = useState<PaymentReceipt | null>(null);
   const [error, setError] = useState<string>("");
 
-  const parsedAmount = parseAmount(amount);
+  const parsedAmount = parseAmount(amount, recipientCurrency);
 
   const handleSend = async () => {
     if (!address) return;

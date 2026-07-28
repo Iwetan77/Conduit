@@ -23,6 +23,21 @@ SETTLE_ISO="EUR"   # EURC's fiat code in CurrencyRegistry / internal/currency
 PRIVATE_KEY="$(grep PRIVATE_KEY "$CONTRACTS_DIR/.env" | cut -d= -f2-)"
 PAYER_ADDR="0xf04a181eaB4CfABf7D13CCe64737782737cD0b22"
 
+# Clean up any devserver/embedded-postgres left over from a previous run that
+# didn't shut down gracefully (SIGKILL skips deferred cleanup) -- otherwise
+# the next run's embedded-postgres fails to bind :15999. Also register a trap
+# so THIS run cleans up after itself even on failure.
+cleanup_ports() {
+  pkill -9 -f 'cmd/devserver' 2>/dev/null || true
+  pkill -9 -f 'exe/devserver' 2>/dev/null || true
+  local pg_pid
+  pg_pid=$(lsof -ti :15999 2>/dev/null || true)
+  [[ -n "$pg_pid" ]] && kill -9 $pg_pid 2>/dev/null || true
+  sleep 1
+}
+cleanup_ports
+trap cleanup_ports EXIT
+
 sign() {
   # $1 = typed data JSON on stdin -> prints signature
   (cd "$CONTRACTS_DIR" && node script/sign-typed-data.mjs "$PRIVATE_KEY")
@@ -104,6 +119,12 @@ QUOTE2_JSON=$(curl -sf -X POST "$API_URL/v1/settlement_intents/$INTENT_ID/quote"
   -H "Authorization: Bearer $SK_KEY" -H 'content-type: application/json' \
   -d '{"pay_currency":"'"$PAY_CURRENCY"'"}' || echo '{"error":"already settled, expected"}')
 echo "post-settlement re-quote result (intent already settled, this exercises the already-settled path): $QUOTE2_JSON"
+
+echo "=== [10/10] Fetch CSV export, verify the settlement appears ==="
+CSV=$(curl -sf "$API_URL/v1/balance_transactions/export" -H "Authorization: Bearer $SK_KEY")
+echo "$CSV" | head -3
+echo "$CSV" | grep -q "$SETTLE_ISO" || { echo "FAIL: settlement not found in CSV export"; echo "$CSV"; exit 1; }
+echo "CSV export contains the settlement: OK"
 
 echo ""
 echo "=== GATE 2: PASS ==="

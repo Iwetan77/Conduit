@@ -405,6 +405,34 @@ func (h *SettlementIntents) Confirm(w http.ResponseWriter, r *http.Request) {
 	_, _ = h.Pool.Exec(r.Context(), `UPDATE fx_trades SET state = 'settled', updated_at = now() WHERE id = $1`, tradeID)
 	_, _ = h.Pool.Exec(r.Context(), `UPDATE settlement_intents SET status = 'settled', updated_at = now() WHERE id = $1`, id)
 
+	// Record settlements + balance_transactions so GET /v1/balance_transactions
+	// and the CSV export have something to show for FX-routed settlements
+	// (the indexer only ever sees direct/AMM ConduitRouter events — see its
+	// package doc comment — so this path has to record its own rows).
+	// KNOWN GAP: fee is recorded as 0 here. StableFX's quote response does
+	// carry a real fee figure but Confirm doesn't have it in scope at this
+	// point (would need threading it through from Quote via fx_trades) --
+	// noted in whereistopped.md, not fixed this session.
+	var settleAmount, settleCurrency, payCurrency, payAmount, rate string
+	h.Pool.QueryRow(r.Context(),
+		`SELECT si.amount::text, si.settle_currency, ft.pay_currency, ft.pay_amount::text, COALESCE(ft.rate::text,'')
+		 FROM settlement_intents si JOIN fx_trades ft ON ft.id = $1 WHERE si.id = $2`,
+		tradeID, id,
+	).Scan(&settleAmount, &settleCurrency, &payCurrency, &payAmount, &rate)
+
+	settlementRowID := models.NewID("stl")
+	h.Pool.Exec(r.Context(),
+		`INSERT INTO settlements (id, intent_id, fx_trade_id, tx_hash, receipt_id, pay_currency, pay_amount, settle_amount, rate_applied, fee, block_number, log_index, settled_at)
+		 VALUES ($1,$2,$3,$4,$4,$5,$6,$7,NULLIF($8,'')::numeric,0,0,0,now())`,
+		settlementRowID, id, tradeID, makerTxHash, payCurrency, payAmount, settleAmount, rate,
+	)
+	balanceTxID := models.NewID("btx")
+	h.Pool.Exec(r.Context(),
+		`INSERT INTO balance_transactions (id, account_id, settlement_id, type, gross, fee, net, currency)
+		 VALUES ($1,$2,$3,'settlement',$4,0,$4,$5)`,
+		balanceTxID, principal.AccountID, settlementRowID, settleAmount, settleCurrency,
+	)
+
 	if h.Webhooks != nil {
 		_ = h.Webhooks.Enqueue(r.Context(), principal.AccountID, "settlement.succeeded", map[string]any{
 			"intent_id": id, "tx_hash": makerTxHash, "status": "settled",

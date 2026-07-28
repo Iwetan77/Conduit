@@ -36,6 +36,7 @@ func New(cfg Config) http.Handler {
 	intentsH := &handlers.SettlementIntents{Pool: cfg.Pool, StableFX: stableFX, AppBaseURL: cfg.AppBaseURL, Webhooks: dispatcher}
 	currenciesH := &handlers.Currencies{}
 	webhookEndpointsH := &handlers.WebhookEndpoints{Pool: cfg.Pool, Dispatcher: dispatcher}
+	balanceTxH := &handlers.BalanceTransactions{Pool: cfg.Pool}
 
 	r := chi.NewRouter()
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) })
@@ -69,6 +70,9 @@ func New(cfg Config) http.Handler {
 			r.Get("/webhook_endpoints", webhookEndpointsH.List)
 			r.Get("/webhook_endpoints/{id}/deliveries", webhookEndpointsH.Deliveries)
 			r.Post("/webhook_deliveries/{id}/replay", webhookEndpointsH.ReplayDelivery)
+
+			r.Get("/balance_transactions", balanceTxH.List)
+			r.Get("/balance_transactions/export", balanceTxH.Export)
 		})
 	})
 

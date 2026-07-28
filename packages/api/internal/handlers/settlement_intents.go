@@ -13,12 +13,14 @@ import (
 	apierrors "github.com/kzn-labs/conduit/api/internal/errors"
 	"github.com/kzn-labs/conduit/api/internal/fx"
 	"github.com/kzn-labs/conduit/api/internal/models"
+	"github.com/kzn-labs/conduit/api/internal/webhooks"
 )
 
 type SettlementIntents struct {
 	Pool       *pgxpool.Pool
 	StableFX   *fx.StableFXProvider
 	AppBaseURL string
+	Webhooks   *webhooks.Dispatcher
 }
 
 type createIntentRequest struct {
@@ -402,6 +404,12 @@ func (h *SettlementIntents) Confirm(w http.ResponseWriter, r *http.Request) {
 
 	_, _ = h.Pool.Exec(r.Context(), `UPDATE fx_trades SET state = 'settled', updated_at = now() WHERE id = $1`, tradeID)
 	_, _ = h.Pool.Exec(r.Context(), `UPDATE settlement_intents SET status = 'settled', updated_at = now() WHERE id = $1`, id)
+
+	if h.Webhooks != nil {
+		_ = h.Webhooks.Enqueue(r.Context(), principal.AccountID, "settlement.succeeded", map[string]any{
+			"intent_id": id, "tx_hash": makerTxHash, "status": "settled",
+		})
+	}
 
 	writeJSON(w, http.StatusOK, confirmResponse{Status: "settled", TxHash: makerTxHash})
 }

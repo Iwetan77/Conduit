@@ -4,14 +4,21 @@
 package server
 
 import (
+	"context"
+	"log"
 	"net/http"
+	"time"
 
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/kzn-labs/conduit/api/internal/auth"
 	"github.com/kzn-labs/conduit/api/internal/fx"
 	"github.com/kzn-labs/conduit/api/internal/handlers"
 	"github.com/kzn-labs/conduit/api/internal/idempotency"
+	"github.com/kzn-labs/conduit/api/internal/indexer"
+	"github.com/kzn-labs/conduit/api/internal/webhooks"
 )
 
 type Config struct {
@@ -23,10 +30,12 @@ type Config struct {
 
 func New(cfg Config) http.Handler {
 	stableFX := fx.NewStableFXProvider(cfg.StableFXBase, cfg.StableFXKey)
+	dispatcher := webhooks.NewDispatcher(cfg.Pool)
 
 	accountsH := &handlers.Accounts{Pool: cfg.Pool}
-	intentsH := &handlers.SettlementIntents{Pool: cfg.Pool, StableFX: stableFX, AppBaseURL: cfg.AppBaseURL}
+	intentsH := &handlers.SettlementIntents{Pool: cfg.Pool, StableFX: stableFX, AppBaseURL: cfg.AppBaseURL, Webhooks: dispatcher}
 	currenciesH := &handlers.Currencies{}
+	webhookEndpointsH := &handlers.WebhookEndpoints{Pool: cfg.Pool, Dispatcher: dispatcher}
 
 	r := chi.NewRouter()
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) })
@@ -55,8 +64,53 @@ func New(cfg Config) http.Handler {
 			r.Post("/settlement_intents/{id}/prepare", intentsH.Prepare)
 			r.Post("/settlement_intents/{id}/confirm", intentsH.Confirm)
 			r.Post("/settlement_intents/{id}/cancel", intentsH.Cancel)
+
+			r.Post("/webhook_endpoints", webhookEndpointsH.Create)
+			r.Get("/webhook_endpoints", webhookEndpointsH.List)
+			r.Get("/webhook_endpoints/{id}/deliveries", webhookEndpointsH.Deliveries)
+			r.Post("/webhook_deliveries/{id}/replay", webhookEndpointsH.ReplayDelivery)
 		})
 	})
 
 	return r
+}
+
+// StartBackgroundWorkers runs the webhook retry sweeper (every 10s) and, if
+// arcRPC/routerAddress are provided, the on-chain indexer — both block until
+// ctx is cancelled. Call in a goroutine from cmd/api and cmd/devserver.
+func StartBackgroundWorkers(ctx context.Context, pool *pgxpool.Pool, arcRPC, routerAddress string) {
+	dispatcher := webhooks.NewDispatcher(pool)
+	go func() {
+		ticker := time.NewTicker(10 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if err := dispatcher.RunRetrySweeper(ctx); err != nil {
+					log.Printf("webhooks: retry sweeper error: %v", err)
+				}
+			}
+		}
+	}()
+
+	if arcRPC == "" || routerAddress == "" {
+		return
+	}
+	go func() {
+		client, err := ethclient.Dial(arcRPC)
+		if err != nil {
+			log.Printf("indexer: dial %s: %v — indexer disabled", arcRPC, err)
+			return
+		}
+		ix, err := indexer.New(pool, client, common.HexToAddress(routerAddress))
+		if err != nil {
+			log.Printf("indexer: init: %v — indexer disabled", err)
+			return
+		}
+		if err := ix.Run(ctx); err != nil && ctx.Err() == nil {
+			log.Printf("indexer: Run exited: %v", err)
+		}
+	}()
 }

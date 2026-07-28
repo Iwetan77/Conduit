@@ -36,6 +36,8 @@ func main() {
 		AppBaseURL:   envOr("CONDUIT_APP_BASE_URL", "http://localhost:3000"),
 	})
 
+	server.StartBackgroundWorkers(ctx, pool, envOr("ARC_RPC", "https://rpc.testnet.arc.network"), os.Getenv("CONDUIT_ROUTER_ADDRESS"))
+
 	addr := ":" + envOr("PORT", "8080")
 	srv := &http.Server{Addr: addr, Handler: handler, ReadHeaderTimeout: 5 * time.Second}
 

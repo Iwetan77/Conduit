@@ -37,6 +37,8 @@ func main() {
 		Pool: pool, StableFXKey: stableFXKey, StableFXBase: stableFXBase, AppBaseURL: appBaseURL,
 	})
 
+	server.StartBackgroundWorkers(ctx, pool, envOr("ARC_RPC", "https://rpc.testnet.arc.network"), os.Getenv("CONDUIT_ROUTER_ADDRESS"))
+
 	log.Printf("conduit-api listening on :%s", addr)
 	srv := &http.Server{Addr: ":" + addr, Handler: handler, ReadHeaderTimeout: 5 * time.Second}
 	log.Fatal(srv.ListenAndServe())

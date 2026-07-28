@@ -63,7 +63,9 @@ func TestFullFlow_AccountToQuote(t *testing.T) {
 	}
 	var acct struct {
 		ID     string `json:"id"`
-		APIKey struct{ Key string `json:"key"` } `json:"api_key"`
+		APIKey struct {
+			Key string `json:"key"`
+		} `json:"api_key"`
 	}
 	if err := json.Unmarshal([]byte(resp.body), &acct); err != nil {
 		t.Fatalf("unmarshal account: %v (body: %s)", err, resp.body)
@@ -147,7 +149,9 @@ func TestFullFlow_AccountToQuote(t *testing.T) {
 	// 6. Cross-tenant isolation: a second account's key must not see the first account's intent
 	resp = doJSON(t, srv.URL, "POST", "/v1/accounts", "", `{"name":"Other Co","settle_currency":"USDC","settle_address":"0x0000000000000000000000000000000000000002"}`, "")
 	var acct2 struct {
-		APIKey struct{ Key string `json:"key"` } `json:"api_key"`
+		APIKey struct {
+			Key string `json:"key"`
+		} `json:"api_key"`
 	}
 	json.Unmarshal([]byte(resp.body), &acct2)
 	resp = doJSON(t, srv.URL, "GET", "/v1/settlement_intents/"+intent1.ID, acct2.APIKey.Key, "", "")

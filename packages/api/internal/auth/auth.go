@@ -24,7 +24,7 @@ type KeyType string
 
 const (
 	KeyTypePublishable KeyType = "pk"
-	KeyTypeSecret       KeyType = "sk"
+	KeyTypeSecret      KeyType = "sk"
 )
 
 const base62Alphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
@@ -87,8 +87,8 @@ var pkAllowedPrefixes = []struct {
 	method string
 	prefix string
 }{
-	{http.MethodGet, "/v1/settlement_intents/"},   // GET /:id (suffix must be exactly the id, checked by caller)
-	{http.MethodPost, "/v1/settlement_intents/"},  // /:id/quote, /:id/prepare, /:id/confirm
+	{http.MethodGet, "/v1/settlement_intents/"},  // GET /:id (suffix must be exactly the id, checked by caller)
+	{http.MethodPost, "/v1/settlement_intents/"}, // /:id/quote, /:id/prepare, /:id/confirm
 }
 
 func isPkAllowed(method, path string) bool {

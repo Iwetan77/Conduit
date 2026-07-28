@@ -11,15 +11,15 @@ import (
 )
 
 type Quote struct {
-	Provider       string // "stablefx" | "amm" | "direct"
-	QuoteID        string // provider's own quote identifier, empty for amm/direct
-	FromCurrency   string // token symbol
-	ToCurrency     string // token symbol
-	FromAmount     *big.Int
-	ToAmount       *big.Int
-	Rate           string
-	ExpiresAt      int64 // unix seconds
-	RawTypedData   []byte
+	Provider     string // "stablefx" | "amm" | "direct"
+	QuoteID      string // provider's own quote identifier, empty for amm/direct
+	FromCurrency string // token symbol
+	ToCurrency   string // token symbol
+	FromAmount   *big.Int
+	ToAmount     *big.Int
+	Rate         string
+	ExpiresAt    int64 // unix seconds
+	RawTypedData []byte
 }
 
 type Preparation struct {
@@ -28,6 +28,19 @@ type Preparation struct {
 	Witness           string // bytes32 hex
 	WitnessTypeString string
 	FundingTypedData  []byte // EIP-712 typed data for the PAYER to sign
+
+	// StableFX-specific fields Submit needs to replay the exact signed permit
+	// back to Circle's /fund endpoint. Not used by AMM/direct providers, which
+	// have no funding step to replay. See stablefx.go's Submit doc comment for
+	// why this exists (Circle's relayer, not our contracts, redeems the
+	// signature — there is no on-chain call for Conduit to construct here).
+	StableFXTradeID         string
+	StableFXPermittedToken  string
+	StableFXPermittedAmount string
+	StableFXSpender         string
+	StableFXNonce           string
+	StableFXDeadline        string
+	StableFXWitnessMessage  []byte
 }
 
 // Provider is implemented per FX rail. Quote and Prepare never move funds —

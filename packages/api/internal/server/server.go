@@ -15,10 +15,10 @@ import (
 )
 
 type Config struct {
-	Pool          *pgxpool.Pool
-	StableFXKey   string
-	StableFXBase  string
-	AppBaseURL    string
+	Pool         *pgxpool.Pool
+	StableFXKey  string
+	StableFXBase string
+	AppBaseURL   string
 }
 
 func New(cfg Config) http.Handler {
@@ -52,6 +52,8 @@ func New(cfg Config) http.Handler {
 			r.Post("/settlement_intents", intentsH.Create)
 			r.Get("/settlement_intents/{id}", intentsH.Get)
 			r.Post("/settlement_intents/{id}/quote", intentsH.Quote)
+			r.Post("/settlement_intents/{id}/prepare", intentsH.Prepare)
+			r.Post("/settlement_intents/{id}/confirm", intentsH.Confirm)
 			r.Post("/settlement_intents/{id}/cancel", intentsH.Cancel)
 		})
 	})

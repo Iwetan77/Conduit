@@ -16,19 +16,19 @@ import (
 )
 
 type SettlementIntents struct {
-	Pool        *pgxpool.Pool
-	StableFX    *fx.StableFXProvider
-	AppBaseURL  string
+	Pool       *pgxpool.Pool
+	StableFX   *fx.StableFXProvider
+	AppBaseURL string
 }
 
 type createIntentRequest struct {
-	Amount           *big.Int          `json:"amount"`
-	SettleCurrency   string            `json:"settle_currency"`
-	SettleAddress    string            `json:"settle_address"`
-	AcceptCurrencies []string          `json:"accept_currencies"`
-	Reference        string            `json:"reference"`
-	ExpiresIn        int64             `json:"expires_in"`
-	Metadata         map[string]any    `json:"metadata"`
+	Amount           *big.Int       `json:"amount"`
+	SettleCurrency   string         `json:"settle_currency"`
+	SettleAddress    string         `json:"settle_address"`
+	AcceptCurrencies []string       `json:"accept_currencies"`
+	Reference        string         `json:"reference"`
+	ExpiresIn        int64          `json:"expires_in"`
+	Metadata         map[string]any `json:"metadata"`
 }
 
 type intentResponse struct {
@@ -152,12 +152,12 @@ func (h *SettlementIntents) Cancel(w http.ResponseWriter, r *http.Request) {
 }
 
 type quoteResponse struct {
-	Provider  string `json:"provider"`
-	Rate      string `json:"rate"`
-	PayAmount string `json:"pay_amount"`
-	PayCurrency string `json:"pay_currency"`
-	ExpiresAt int64  `json:"expires_at"`
-	TypedData json.RawMessage `json:"typed_data,omitempty"`
+	Provider    string          `json:"provider"`
+	Rate        string          `json:"rate"`
+	PayAmount   string          `json:"pay_amount"`
+	PayCurrency string          `json:"pay_currency"`
+	ExpiresAt   int64           `json:"expires_at"`
+	TypedData   json.RawMessage `json:"typed_data,omitempty"`
 }
 
 // Quote implements POST /:id/quote. Per the v2 spec §2.2: this is deliberately
@@ -230,10 +230,180 @@ func (h *SettlementIntents) Quote(w http.ResponseWriter, r *http.Request) {
 
 	_, _ = h.Pool.Exec(r.Context(), `UPDATE settlement_intents SET status = 'quoted', updated_at = now() WHERE id = $1 AND status = 'created'`, id)
 
+	// Persist the fx_trade row in 'quoted' state so /prepare can find the
+	// exact quote (and its signable typed data) that /confirm's caller is
+	// about to authorize. Direct (same-currency) quotes don't need this —
+	// there's no StableFX trade to create for them.
+	if q.Provider == "stablefx" {
+		tradeID := models.NewID("fxt")
+		expiresAt := time.Unix(q.ExpiresAt, 0)
+		_, err = h.Pool.Exec(r.Context(),
+			`INSERT INTO fx_trades (id, intent_id, provider, state, pay_currency, pay_amount, pay_address, rate, quote_id, quote_expires_at, quote_typed_data)
+			 VALUES ($1,$2,'stablefx','quoted',$3,$4,$5,$6,$7,$8,$9)`,
+			tradeID, id, payInfo.Symbol, q.FromAmount.String(), settleAddress, q.Rate, q.QuoteID, expiresAt, q.RawTypedData,
+		)
+		if err != nil {
+			writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
+			return
+		}
+	}
+
 	writeJSON(w, http.StatusOK, quoteResponse{
 		Provider: q.Provider, Rate: q.Rate, PayAmount: q.FromAmount.String(),
 		PayCurrency: payInfo.Symbol, ExpiresAt: q.ExpiresAt, TypedData: q.RawTypedData,
 	})
+}
+
+type prepareRequest struct {
+	QuoteMessage   json.RawMessage `json:"quote_message"`
+	QuoteSignature string          `json:"quote_signature"`
+}
+type prepareResponse struct {
+	FundingTypedData json.RawMessage `json:"funding_typed_data"`
+}
+
+// Prepare implements POST /:id/prepare — accepts the payer's signature over
+// the quote's own typed data (sig #1, see stablefx.go's PrepareWithSignature
+// doc comment for why this exists), creates the StableFX trade, and returns
+// the funding typed data for the payer to sign next (sig #2, -> /confirm).
+func (h *SettlementIntents) Prepare(w http.ResponseWriter, r *http.Request) {
+	id := pathParam(r, "id")
+	principal, _ := auth.FromContext(r.Context())
+
+	var req prepareRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.QuoteSignature == "" {
+		writeErr(w, apierrors.E(apierrors.CodeInvalidRequest, "quote_message, quote_signature"))
+		return
+	}
+
+	var trade struct {
+		id, payCurrency, payAmount, settleCurrencyISO, payAddress string
+		rate                                                      string
+		quoteID                                                   string
+		quoteExpiresAt                                            time.Time
+	}
+	err := h.Pool.QueryRow(r.Context(),
+		`SELECT ft.id, ft.pay_currency, ft.pay_amount::text, si.settle_currency, ft.pay_address, ft.rate, ft.quote_id, ft.quote_expires_at
+		 FROM fx_trades ft JOIN settlement_intents si ON si.id = ft.intent_id
+		 WHERE ft.intent_id = $1 AND si.account_id = $2 AND ft.state = 'quoted'
+		 ORDER BY ft.created_at DESC LIMIT 1`,
+		id, principal.AccountID,
+	).Scan(&trade.id, &trade.payCurrency, &trade.payAmount, &trade.settleCurrencyISO, &trade.payAddress, &trade.rate, &trade.quoteID, &trade.quoteExpiresAt)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			writeErr(w, apierrors.E(apierrors.CodeNotFound, "id"))
+			return
+		}
+		writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
+		return
+	}
+	if time.Now().After(trade.quoteExpiresAt) {
+		writeErr(w, apierrors.E(apierrors.CodeFxQuoteExpired, ""))
+		return
+	}
+
+	settleInfo, _ := currency.ByISO(trade.settleCurrencyISO)
+	payAmount, _ := new(big.Int).SetString(trade.payAmount, 10)
+	q := fx.Quote{Provider: "stablefx", QuoteID: trade.quoteID, FromCurrency: trade.payCurrency, ToCurrency: settleInfo.Symbol, FromAmount: payAmount, Rate: trade.rate}
+
+	prep, err := h.StableFX.PrepareWithSignature(r.Context(), q, trade.payAddress, req.QuoteMessage, req.QuoteSignature)
+	if err != nil {
+		if apiErr, ok := err.(*apierrors.APIError); ok {
+			writeErr(w, apiErr)
+			return
+		}
+		writeErr(w, apierrors.E(apierrors.CodeFxProviderUnavailable, ""))
+		return
+	}
+
+	_, err = h.Pool.Exec(r.Context(),
+		`UPDATE fx_trades SET state = 'presigned', contract_trade_id = $1, stablefx_trade_uuid = $2, funding_typed_data = $3, updated_at = now() WHERE id = $4`,
+		prep.ContractTradeID, prep.StableFXTradeID, prep.FundingTypedData, trade.id,
+	)
+	if err != nil {
+		writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
+		return
+	}
+	_, _ = h.Pool.Exec(r.Context(), `UPDATE settlement_intents SET status = 'funding', updated_at = now() WHERE id = $1`, id)
+
+	// Stash the fields Submit() needs, so /confirm doesn't have to re-derive
+	// them from funding_typed_data JSON. Reuses the witness/witness_type_string
+	// columns for the Permit2 fields Submit actually needs (spender/nonce/
+	// deadline/token/amount packed as JSON) since this provider never
+	// constructs an on-chain Permit2 call itself — see stablefx.go.
+	permit2JSON, _ := json.Marshal(map[string]string{
+		"token": prep.StableFXPermittedToken, "amount": prep.StableFXPermittedAmount,
+		"spender": prep.StableFXSpender, "nonce": prep.StableFXNonce, "deadline": prep.StableFXDeadline,
+	})
+	_, _ = h.Pool.Exec(r.Context(),
+		`UPDATE fx_trades SET witness = $1, witness_type_string = $2 WHERE id = $3`,
+		string(permit2JSON), string(prep.StableFXWitnessMessage), trade.id,
+	)
+
+	writeJSON(w, http.StatusOK, prepareResponse{FundingTypedData: prep.FundingTypedData})
+}
+
+type confirmRequest struct {
+	FundingSignature string `json:"funding_signature"`
+}
+type confirmResponse struct {
+	Status string `json:"status"`
+	TxHash string `json:"tx_hash,omitempty"`
+}
+
+// Confirm implements POST /:id/confirm — accepts the payer's signature over
+// the funding typed data (sig #2) and hands it to Circle's relayer. See
+// stablefx.go's Submit doc comment for why this is a REST call to Circle, not
+// an on-chain transaction Conduit constructs itself.
+func (h *SettlementIntents) Confirm(w http.ResponseWriter, r *http.Request) {
+	id := pathParam(r, "id")
+	principal, _ := auth.FromContext(r.Context())
+
+	var req confirmRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.FundingSignature == "" {
+		writeErr(w, apierrors.E(apierrors.CodeInvalidRequest, "funding_signature"))
+		return
+	}
+
+	var tradeID, tradeUUID, permit2JSON, witnessMessage string
+	err := h.Pool.QueryRow(r.Context(),
+		`SELECT ft.id, ft.stablefx_trade_uuid, ft.witness, ft.witness_type_string
+		 FROM fx_trades ft JOIN settlement_intents si ON si.id = ft.intent_id
+		 WHERE ft.intent_id = $1 AND si.account_id = $2 AND ft.state = 'presigned'
+		 ORDER BY ft.created_at DESC LIMIT 1`,
+		id, principal.AccountID,
+	).Scan(&tradeID, &tradeUUID, &permit2JSON, &witnessMessage)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			writeErr(w, apierrors.E(apierrors.CodeNotFound, "id"))
+			return
+		}
+		writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
+		return
+	}
+
+	var permit2 struct{ Token, Amount, Spender, Nonce, Deadline string }
+	json.Unmarshal([]byte(permit2JSON), &permit2)
+
+	prep := fx.Preparation{
+		StableFXTradeID: tradeUUID, StableFXPermittedToken: permit2.Token, StableFXPermittedAmount: permit2.Amount,
+		StableFXSpender: permit2.Spender, StableFXNonce: permit2.Nonce, StableFXDeadline: permit2.Deadline,
+		StableFXWitnessMessage: []byte(witnessMessage),
+	}
+
+	_, _ = h.Pool.Exec(r.Context(), `UPDATE fx_trades SET state = 'submitted', funding_signature = $1, updated_at = now() WHERE id = $2`, req.FundingSignature, tradeID)
+
+	makerTxHash, err := h.StableFX.Submit(r.Context(), prep, req.FundingSignature)
+	if err != nil {
+		_, _ = h.Pool.Exec(r.Context(), `UPDATE fx_trades SET state = 'failed', updated_at = now() WHERE id = $1`, tradeID)
+		writeErr(w, apierrors.E(apierrors.CodeFxProviderUnavailable, ""))
+		return
+	}
+
+	_, _ = h.Pool.Exec(r.Context(), `UPDATE fx_trades SET state = 'settled', updated_at = now() WHERE id = $1`, tradeID)
+	_, _ = h.Pool.Exec(r.Context(), `UPDATE settlement_intents SET status = 'settled', updated_at = now() WHERE id = $1`, id)
+
+	writeJSON(w, http.StatusOK, confirmResponse{Status: "settled", TxHash: makerTxHash})
 }
 
 func (h *SettlementIntents) toResponse(id, amount, status, settleCurrency, settleAddress string,

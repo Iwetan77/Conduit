@@ -82,7 +82,11 @@ importers:
         specifier: ^5.4.0
         version: 5.9.3
 
-  packages/contracts: {}
+  packages/contracts:
+    dependencies:
+      ethers:
+        specifier: ^6.11.0
+        version: 6.16.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)
 
   packages/docs:
     dependencies:
@@ -5036,7 +5040,7 @@ snapshots:
 
   '@scure/bip32@1.7.0':
     dependencies:
-      '@noble/curves': 1.9.1
+      '@noble/curves': 1.9.7
       '@noble/hashes': 1.8.0
       '@scure/base': 1.2.6
 
@@ -7278,8 +7282,8 @@ snapshots:
   ox@0.6.7(typescript@5.9.3)(zod@4.4.3):
     dependencies:
       '@adraffy/ens-normalize': 1.11.1
-      '@noble/curves': 1.8.1
-      '@noble/hashes': 1.7.1
+      '@noble/curves': 1.9.7
+      '@noble/hashes': 1.8.0
       '@scure/bip32': 1.6.2
       '@scure/bip39': 1.5.4
       abitype: 1.0.8(typescript@5.9.3)(zod@4.4.3)

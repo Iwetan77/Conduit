@@ -52,13 +52,13 @@ type quoteResponseEnvelope struct {
 	Message string `json:"message"`
 }
 type quoteResponseData struct {
-	ID        string      `json:"id"`
-	Rate      string      `json:"rate"`
-	From      quoteAmount `json:"from"`
-	To        quoteAmount `json:"to"`
-	CreatedAt time.Time   `json:"createdAt"`
-	ExpiresAt time.Time   `json:"expiresAt"`
-	Fee       string      `json:"fee"`
+	ID        string          `json:"id"`
+	Rate      string          `json:"rate"`
+	From      quoteAmount     `json:"from"`
+	To        quoteAmount     `json:"to"`
+	CreatedAt time.Time       `json:"createdAt"`
+	ExpiresAt time.Time       `json:"expiresAt"`
+	Fee       string          `json:"fee"`
 	TypedData json.RawMessage `json:"typedData"`
 }
 
@@ -167,9 +167,11 @@ func (p *StableFXProvider) Prepare(ctx context.Context, q Quote, payer, recipien
 // `quoteMessage` below, sig #1. Only once StableFX has that does it hand back
 // the SEPARATE funding-presign typed data (sig #2, what the caller passes on
 // to /confirm). So the full signable-moments count is two, not one:
-//   POST /:id/quote    -> returns Quote.RawTypedData            (sig #1 target)
-//   POST /:id/prepare  -> takes sig #1, returns FundingTypedData (sig #2 target)
-//   POST /:id/confirm  -> takes sig #2, submits on-chain
+//
+//	POST /:id/quote    -> returns Quote.RawTypedData            (sig #1 target)
+//	POST /:id/prepare  -> takes sig #1, returns FundingTypedData (sig #2 target)
+//	POST /:id/confirm  -> takes sig #2, submits on-chain
+//
 // This still fits the spec's 3-endpoint shape exactly — no new endpoint
 // needed, just one more field on the /prepare request (quoteSignature).
 func (p *StableFXProvider) PrepareWithSignature(ctx context.Context, q Quote, payer string, quoteMessage json.RawMessage, quoteSignature string) (Preparation, error) {
@@ -189,8 +191,31 @@ func (p *StableFXProvider) PrepareWithSignature(ctx context.Context, q Quote, pa
 		return Preparation{}, fmt.Errorf("stablefx trade creation failed (%d): %s", tradeEnv.Code, tradeEnv.Message)
 	}
 
+	// Trade creation is async: Circle's relayer calls FxEscrow.recordTrade() on
+	// -chain (needs both taker+maker signed permits) before a contractTradeId
+	// exists. Poll GET /trades/:id until it appears (observed live: status
+	// moves "pending" -> "pending_settlement" within a few seconds). Not
+	// documented anywhere; found by testing.
+	contractTradeID := tradeEnv.Data.ContractTradeID
+	tradeID := tradeEnv.Data.ID
+	for i := 0; i < 20 && contractTradeID == ""; i++ {
+		time.Sleep(500 * time.Millisecond)
+		var getEnv struct {
+			Data *struct {
+				ContractTradeID string `json:"contractTradeId"`
+				Status          string `json:"status"`
+			} `json:"data"`
+		}
+		if _, err := p.get(ctx, "/v1/exchange/stablefx/trades/"+tradeID, &getEnv); err == nil && getEnv.Data != nil {
+			contractTradeID = getEnv.Data.ContractTradeID
+		}
+	}
+	if contractTradeID == "" {
+		return Preparation{}, fmt.Errorf("stablefx trade %s never got a contractTradeId after polling", tradeID)
+	}
+
 	var presignEnv presignResponseEnvelope
-	presignReq := presignRequest{ContractTradeIDs: []string{tradeEnv.Data.ContractTradeID}, Type: "taker"}
+	presignReq := presignRequest{ContractTradeIDs: []string{contractTradeID}, Type: "taker"}
 	status, err = p.post(ctx, "/v1/exchange/stablefx/signatures/funding/presign", presignReq, &presignEnv)
 	if err != nil {
 		return Preparation{}, apierrors.E(apierrors.CodeFxProviderUnavailable, "")
@@ -199,24 +224,150 @@ func (p *StableFXProvider) PrepareWithSignature(ctx context.Context, q Quote, pa
 		return Preparation{}, fmt.Errorf("stablefx presign failed (%d): %s", presignEnv.Code, presignEnv.Message)
 	}
 
-	// witness = keccak256(abi.encode(SingleTradeWitness{ id: contractTradeId })).
-	// Computed on-chain by ConduitRouter's caller (handlers layer), not here —
-	// this method only returns what StableFX gave us; witness hashing needs the
-	// ABI encoder, kept in internal/onchain to avoid importing go-ethereum's abi
-	// package into every fx provider.
+	var ftd struct {
+		Message struct {
+			Permitted struct {
+				Token  string `json:"token"`
+				Amount string `json:"amount"`
+			} `json:"permitted"`
+			Spender  string          `json:"spender"`
+			Nonce    string          `json:"nonce"`
+			Deadline string          `json:"deadline"`
+			Witness  json.RawMessage `json:"witness"`
+		} `json:"message"`
+	}
+	if err := json.Unmarshal(presignEnv.Data.TypedData, &ftd); err != nil {
+		return Preparation{}, fmt.Errorf("stablefx: unmarshal presign typedData: %w", err)
+	}
+
 	return Preparation{
-		Provider:         p.Name(),
-		ContractTradeID:  tradeEnv.Data.ContractTradeID,
-		FundingTypedData: presignEnv.Data.TypedData,
+		Provider:                p.Name(),
+		ContractTradeID:         contractTradeID,
+		FundingTypedData:        presignEnv.Data.TypedData,
+		StableFXTradeID:         tradeID,
+		StableFXPermittedToken:  ftd.Message.Permitted.Token,
+		StableFXPermittedAmount: ftd.Message.Permitted.Amount,
+		StableFXSpender:         ftd.Message.Spender,
+		StableFXNonce:           ftd.Message.Nonce,
+		StableFXDeadline:        ftd.Message.Deadline,
+		StableFXWitnessMessage:  ftd.Message.Witness,
 	}, nil
 }
 
-func (p *StableFXProvider) Submit(ctx context.Context, prep Preparation, signature string) (string, error) {
-	// Real on-chain submission lives in internal/onchain.SubmitFX — this method
-	// is intentionally NOT implemented here to keep the fx package free of
-	// go-ethereum tx-signing concerns; handlers wire onchain.SubmitFX directly.
-	// Kept as a documented no-op so StableFXProvider still satisfies Provider.
-	return "", fmt.Errorf("fx: use internal/onchain.SubmitFX directly, not StableFXProvider.Submit")
+// fundRequest / fundPermit2 mirror POST /v1/exchange/stablefx/fund's real body
+// shape (found by testing — not documented). This is NOT an on-chain call:
+// per the DISCOVERY below, our own contracts can never redeem this signature,
+// so "submission" here means handing it to Circle, whose relayer settles on
+// FxEscrow directly.
+type fundRequest struct {
+	Type      string      `json:"type"`
+	Signature string      `json:"signature"`
+	Permit2   fundPermit2 `json:"permit2"`
+}
+type fundPermit2 struct {
+	Permitted fundTokenPermissions `json:"permitted"`
+	Spender   string               `json:"spender"`
+	Nonce     string               `json:"nonce"`
+	Deadline  string               `json:"deadline"`
+	Witness   json.RawMessage      `json:"witness"`
+}
+type fundTokenPermissions struct {
+	Token  string `json:"token"`
+	Amount string `json:"amount"`
+}
+
+// Submit hands the payer's funding signature to Circle's OWN relayer via
+// POST /v1/exchange/stablefx/fund, then polls trade status until it reaches a
+// terminal state. Returns the maker-delivery leg's tx hash — the on-chain
+// transaction that actually paid the recipient — for the caller to record as
+// this settlement's tx_hash.
+//
+// DISCOVERY (verified live on Arc testnet, real signature, real balance delta
+// confirmed exact): the funding permit StableFX's presign endpoint returns is
+// signed with `spender` = Circle's own relayer contract, not our
+// AtomicSettler. Permit2.permitWitnessTransferFrom authenticates the caller as
+// msg.sender and requires it to equal the signed spender — a call from our own
+// contract (as ConduitRouter.executeWithFX attempts) always reverts on
+// signature verification; only Circle's relayer can ever redeem this
+// signature. There is no on-chain call for Conduit to make here at all —
+// submission IS this REST call. See ConduitRouter.sol's executeWithFX doc
+// comment for the full writeup; that function is consequently dead code for
+// the StableFX rail.
+//
+// Also verified live: the recipient receives EXACTLY the `settleAmount`
+// requested in Quote() — despite the quote response's own `to.amount` field
+// echoing back a grossed-up (requested+fee) figure. Trust the on-chain
+// delivery, not that echoed number; the fee comes out of the payer's side
+// (their `from.amount`/pay_amount), never out of what the recipient nets.
+// This resolves the "fee gross-up" open question from earlier live testing.
+func (p *StableFXProvider) Submit(ctx context.Context, prep Preparation, fundingSignature string) (makerDeliverTxHash string, err error) {
+	req := fundRequest{
+		Type:      "taker",
+		Signature: fundingSignature,
+		Permit2: fundPermit2{
+			Permitted: fundTokenPermissions{Token: prep.StableFXPermittedToken, Amount: prep.StableFXPermittedAmount},
+			Spender:   prep.StableFXSpender,
+			Nonce:     prep.StableFXNonce,
+			Deadline:  prep.StableFXDeadline,
+			Witness:   prep.StableFXWitnessMessage,
+		},
+	}
+	var empty json.RawMessage
+	status, err := p.post(ctx, "/v1/exchange/stablefx/fund", req, &empty)
+	if err != nil {
+		return "", apierrors.E(apierrors.CodeFxProviderUnavailable, "")
+	}
+	if status != http.StatusOK && status != http.StatusCreated {
+		return "", fmt.Errorf("stablefx fund submission failed (%d)", status)
+	}
+
+	deadline := time.Now().Add(60 * time.Second)
+	for time.Now().Before(deadline) {
+		time.Sleep(1 * time.Second)
+		var tradeEnv struct {
+			Data *struct {
+				Status               string `json:"status"`
+				ContractTransactions struct {
+					MakerDeliver struct {
+						Status string `json:"status"`
+						TxHash string `json:"txHash"`
+					} `json:"makerDeliver"`
+				} `json:"contractTransactions"`
+			} `json:"data"`
+		}
+		st, err := p.get(ctx, "/v1/exchange/stablefx/trades/"+prep.StableFXTradeID, &tradeEnv)
+		if err != nil || st != http.StatusOK || tradeEnv.Data == nil {
+			continue
+		}
+		if tradeEnv.Data.Status == "settled" || tradeEnv.Data.Status == "complete" {
+			return tradeEnv.Data.ContractTransactions.MakerDeliver.TxHash, nil
+		}
+		if tradeEnv.Data.Status == "failed" || tradeEnv.Data.Status == "breached" {
+			return "", fmt.Errorf("stablefx trade %s ended in status %s", prep.StableFXTradeID, tradeEnv.Data.Status)
+		}
+	}
+	return "", fmt.Errorf("stablefx trade %s did not settle within 60s", prep.StableFXTradeID)
+}
+
+func (p *StableFXProvider) get(ctx context.Context, path string, out any) (int, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.baseURL+path, nil)
+	if err != nil {
+		return 0, err
+	}
+	req.Header.Set("Authorization", "Bearer "+p.apiKey)
+	resp, err := p.httpClient.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return 0, err
+	}
+	if err := json.Unmarshal(body, out); err != nil {
+		return resp.StatusCode, fmt.Errorf("stablefx: unmarshal response: %w", err)
+	}
+	return resp.StatusCode, nil
 }
 
 func (p *StableFXProvider) post(ctx context.Context, path string, body, out any) (int, error) {

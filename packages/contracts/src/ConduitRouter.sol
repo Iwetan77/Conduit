@@ -144,6 +144,32 @@ contract ConduitRouter is IConduitRouter, ReentrancyGuard, Ownable {
     // ── Path 2: Cross-currency execute via Circle StableFX + Permit2 ──────────
 
     /// @notice Execute a cross-currency payment.
+    /// @dev NON-FUNCTIONAL AGAINST REAL STABLEFX SIGNATURES — kept for reference,
+    ///      do not wire the API layer to call this for StableFX-routed payments.
+    ///      Verified empirically (real signature, real Arc testnet call): the
+    ///      funding permit StableFX's presign endpoint returns is an EIP-712
+    ///      Permit2 witness-transfer signed with `spender` = Circle's own relayer
+    ///      contract (observed: 0xd68256f4d69c6bbecb873d8588ae0dc6b8e22e10 on Arc
+    ///      testnet), not this router or AtomicSettler. Permit2.permitWitnessTransferFrom
+    ///      authenticates the caller as `msg.sender` and requires it to equal the
+    ///      signed `spender` — so a call originating from AtomicSettler (as this
+    ///      function is wired to do, via settleViaFX) always reverts on signature
+    ///      verification. There is no way to make OUR contract the valid caller
+    ///      for a signature Circle's presign endpoint issued; only Circle's own
+    ///      relayer can redeem it. Confirmed the actual working flow instead:
+    ///      submit the funding signature to Circle's own
+    ///      `POST /v1/exchange/stablefx/fund` REST endpoint; their relayer settles
+    ///      on FxEscrow directly (recordTrade → takerDeliver → makerDeliver, all
+    ///      real on-chain txs, none of them calling this router). The Go API
+    ///      layer (packages/api/internal/fx) implements this correct path — see
+    ///      its package doc comment. This function and the on-chain
+    ///      AtomicSettler.settleViaFX / StableFXAdapter.submitFXFunding path it
+    ///      depends on are consequently dead code for the StableFX rail; left in
+    ///      place rather than deleted since removing them is a larger, separate
+    ///      change (would also touch AtomicSettler/StableFXAdapter/tests) and
+    ///      this is a documentation-first flag, not a rewrite, given how late in
+    ///      the build this was discovered. Flagged in STATUS.md.
+    ///
     /// @dev The SDK calls the Circle StableFX API off-chain before invoking this:
     ///        POST /v1/exchange/stablefx/quotes      → quote + EIP-712 typedData
     ///        POST /v1/exchange/stablefx/trades       → contractTradeId

@@ -12,5 +12,6 @@ Generated from a live `GET /v1/currencies` call — this is what's actually rout
 | CAD | QCAD | `0x23d7CFFd0876f3ABb6B074287ba2aeefBc83825d` | 6 |
 | GBP | GBPA | `0xa42e82b5D25E84d107Cd8549CA432ef489CbaD32` | 6 |
 | ZAR | ZARU | `0x47b025D6002234a5038bCD94767bd82b27C2b96F` | 18 |
+| KRW | KRW1 | `0xC5bD9EBB09446F5F94E3b3D899072fC2eC5d3a1a` | 18 |
 
 Not every pair above is routable against every other — see [docs/fx-capability.md](./fx-capability.md) for the hub-and-spoke constraint (StableFX quotes go through USDC on one leg) and current AMM fallback coverage.

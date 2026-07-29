@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { listAccounts, createSubAccount, type Account, ConduitApiError } from "@/lib/conduit-api";
 
-const CURRENCIES = ["EUR", "USD", "BRL", "AUD", "MXN", "CAD", "GBP", "ZAR"];
+const CURRENCIES = ["EUR", "USD", "BRL", "AUD", "MXN", "CAD", "GBP", "ZAR", "KRW"];
 
 function DownloadableQR({ value, filename }: { value: string; filename: string }) {
   const svgRef = useRef<SVGSVGElement>(null);

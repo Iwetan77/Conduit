@@ -69,7 +69,7 @@ function OnboardingGate({ onReady }: { onReady: () => void }) {
             value={settleCurrency}
             onChange={(e) => setSettleCurrency(e.target.value)}
           >
-            {["EUR", "USD", "BRL", "AUD", "MXN", "CAD", "GBP", "ZAR"].map((c) => (
+            {["EUR", "USD", "BRL", "AUD", "MXN", "CAD", "GBP", "ZAR", "KRW"].map((c) => (
               <option key={c} value={c}>{c}</option>
             ))}
           </select>

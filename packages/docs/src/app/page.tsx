@@ -1,8 +1,11 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 
 export const metadata: Metadata = {
   title: "Quickstart",
 };
+
+const APP_URL = process.env["NEXT_PUBLIC_APP_URL"] ?? "http://localhost:3000";
 
 export default function QuickstartPage() {
   return (
@@ -152,10 +155,14 @@ CCTP Domain:  26`}</code></pre>
           <a href="/reference">SDK Reference</a> — full API surface, every method and parameter
         </li>
         <li>
-          <a href="https://app.conduit.xyz" target="_blank" rel="noopener noreferrer">
-            Open the app
+          <a href={`${APP_URL}/dashboard`} target="_blank" rel="noopener noreferrer">
+            Open the dashboard
           </a>{" "}
-          — create payment links, QR codes, and view history
+          — settlements, request payment, locations, developers, reconciliation
+        </li>
+        <li>
+          <Link href="/guides/quickstart">API quickstart</Link> — the actual
+          B2B settlement API this content predates; real curl to a settled payment
         </li>
       </ul>
     </article>

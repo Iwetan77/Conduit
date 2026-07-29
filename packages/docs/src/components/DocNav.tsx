@@ -1,11 +1,17 @@
 import Link from "next/link";
 import Image from "next/image";
 
+// Local dev: app runs on :3000 (default `next dev` port, see packages/app's
+// package.json) — `pnpm dev` at the repo root runs marketing/docs/app together
+// via turbo. Production falls back to the real subdomain.
+const APP_URL = process.env["NEXT_PUBLIC_APP_URL"] ?? "http://localhost:3000";
+
 const NAV_LINKS = [
   { label: "Quickstart",  href: "/" },
+  { label: "Guides",      href: "/guides" },
   { label: "Relay",       href: "/relay" },
   { label: "Reference",   href: "/reference" },
-  { label: "App →",       href: "https://app.conduit.xyz", external: true },
+  { label: "Dashboard →", href: `${APP_URL}/dashboard`, external: true },
 ];
 
 export function DocNav() {

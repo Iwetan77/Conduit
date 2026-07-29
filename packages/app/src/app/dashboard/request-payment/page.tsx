@@ -4,7 +4,7 @@ import { useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { createSettlementIntent, type SettlementIntent, ConduitApiError } from "@/lib/conduit-api";
 
-const CURRENCIES = ["EUR", "USD", "BRL", "AUD", "MXN", "CAD", "GBP", "ZAR"];
+const CURRENCIES = ["EUR", "USD", "BRL", "AUD", "MXN", "CAD", "GBP", "ZAR", "KRW"];
 
 // This form's amount input assumes 6 fractional digits max for simplicity;
 // the API stores minor units per the settle currency's real decimals

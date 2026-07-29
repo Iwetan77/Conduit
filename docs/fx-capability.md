@@ -101,9 +101,17 @@ Observed quote TTL across all successful quotes: **~3.5s average**.
 | AUDF | USDC | yes | 1.5459 | 3.5 | — |
 | MXNB | USDC | yes | 18.596 | 3.5 | — |
 | QCAD | USDC | yes | 1.3922 | 3.5 | — |
-| KRW1 | USDC | no | — | — | 3005 The quote amount is invalid. |
+| KRW1 | USDC | yes* | 1428.5715 | 3.5 | — |
 | GBPA | USDC | yes | 0.7904 | 3.5 | — |
 | ZARU | USDC | yes | 17.5132 | 3.5 | — |
+
+*KRW1→USDC row above was originally recorded as refused (code 3005, "quote amount
+invalid") — that was this probe's own 1000 KRW1 test notional being too small (worth well
+under $1), not an unsupported pair. Re-confirmed at 100,000 KRW1 (~$70): quotes fine, rate
+1428.5715. **KRW1 is fully routable and is now registered** in `CurrencyRegistry.sol`,
+`internal/currency/currency.go`, and `packages/sdk/src/currency.ts` — found and fixed after
+initial publication of this doc, when a mismatch between the on-chain-confirmed currency
+list and the actually-registered set was caught.
 
 **Finding: StableFX quotes are hub-and-spoke through USDC only** — every successful quote in this
 probe has USDC on one leg. Direct cross-partner-currency quotes (e.g. BRLA→EURC, MXNB→QCAD) were

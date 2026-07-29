@@ -5,6 +5,11 @@ import { motion, useInView, useScroll, useTransform } from 'framer-motion'
 import Image from 'next/image'
 import Link from 'next/link'
 
+// Local dev: docs runs on :3002 (see packages/docs' package.json script) —
+// `pnpm dev` at the repo root runs marketing/docs/app together via turbo.
+// Production falls back to the real subdomain.
+const DOCS_URL = process.env['NEXT_PUBLIC_DOCS_URL'] ?? 'http://localhost:3002'
+
 // ─────────────────────────────────────────────────────────────────────────────
 // AMBIENT BACKGROUND
 // ─────────────────────────────────────────────────────────────────────────────
@@ -131,7 +136,7 @@ function Nav() {
 
         <nav className="hidden md:flex items-center gap-8">
           {[
-            { label: 'Docs', href: 'https://docs.conduit.xyz' },
+            { label: 'Docs', href: DOCS_URL },
             { label: 'Arc Ecosystem', href: 'https://arc.network' },
           ].map(({ label, href }) => (
             <a
@@ -321,7 +326,7 @@ function Hero() {
         >
           <WaitlistForm />
           <a
-            href="https://docs.conduit.xyz"
+            href={DOCS_URL}
             className="font-mono text-[11px] text-[#444] hover:text-[#B2F55A] transition-colors uppercase tracking-widest"
           >
             Read the docs →
@@ -568,7 +573,7 @@ function BuildPanel() {
         </div>
       </div>
 
-      <a href="https://docs.conduit.xyz" className="font-mono text-[11px] text-[#B2F55A] hover:underline mt-auto transition-opacity group-hover:opacity-100 opacity-60">
+      <a href={DOCS_URL} className="font-mono text-[11px] text-[#B2F55A] hover:underline mt-auto transition-opacity group-hover:opacity-100 opacity-60">
         Read the docs →
       </a>
     </PanelShell>
@@ -767,7 +772,7 @@ function Footer() {
 
         <div className="flex flex-col gap-2.5">
           {[
-            { label: 'Docs', href: 'https://docs.conduit.xyz' },
+            { label: 'Docs', href: DOCS_URL },
             { label: 'X / Twitter', href: 'https://x.com/conduit' },
             { label: 'Arc', href: 'https://arc.network' },
           ].map(({ label, href }) => (

@@ -40,6 +40,7 @@ contract Deploy is Script {
     address constant QCAD = 0x23d7CFFd0876f3ABb6B074287ba2aeefBc83825d;
     address constant GBPA = 0xa42e82b5D25E84d107Cd8549CA432ef489CbaD32;
     address constant ZARU = 0x47b025D6002234a5038bCD94767bd82b27C2b96F;
+    address constant KRW1 = 0xC5bD9EBB09446F5F94E3b3D899072fC2eC5d3a1a; // 18dp
 
     function run() external {
         uint256 deployerKey = vm.envUint("PRIVATE_KEY");
@@ -99,6 +100,7 @@ contract Deploy is Script {
         currencyRegistry.registerCurrency("CAD", QCAD, 6);
         currencyRegistry.registerCurrency("GBP", GBPA, 6);
         currencyRegistry.registerCurrency("ZAR", ZARU, 18);
+        currencyRegistry.registerCurrency("KRW", KRW1, 18);
 
         console2.log("");
         console2.log("=== Authorizations + currency registrations set ===");
@@ -120,7 +122,10 @@ contract Deploy is Script {
         vm.serializeAddress(json, "brla", BRLA);
         vm.serializeAddress(json, "audf", AUDF);
         vm.serializeAddress(json, "mxnb", MXNB);
-        string memory finalJson = vm.serializeAddress(json, "qcad", QCAD);
+        vm.serializeAddress(json, "qcad", QCAD);
+        vm.serializeAddress(json, "gbpa", GBPA);
+        vm.serializeAddress(json, "zaru", ZARU);
+        string memory finalJson = vm.serializeAddress(json, "krw1", KRW1);
 
         // Foundry's fs_permissions check is a literal path-prefix match — it does not
         // canonicalize ".." segments — so this must be the real absolute path, not

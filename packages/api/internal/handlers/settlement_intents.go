@@ -133,6 +133,42 @@ func (h *SettlementIntents) Get(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// List implements GET /v1/settlement_intents — the dashboard's Settlements
+// screen (v2 spec §3.1) lists off this. Not in the original spec's endpoint
+// table (only GET /:id was listed) but needed for the dashboard to have
+// anything to show; a reasonable, minimal addition.
+func (h *SettlementIntents) List(w http.ResponseWriter, r *http.Request) {
+	principal, _ := auth.FromContext(r.Context())
+
+	res, qErr := h.Pool.Query(r.Context(),
+		`SELECT id, amount::text, status, settle_currency, settle_address, accept_currencies,
+		        COALESCE(reference,''), metadata, expires_at, created_at
+		 FROM settlement_intents WHERE account_id = $1 ORDER BY created_at DESC LIMIT 100`,
+		principal.AccountID,
+	)
+	if qErr != nil {
+		writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
+		return
+	}
+	defer res.Close()
+
+	var results []intentResponse
+	for res.Next() {
+		var id, amount, status, settleCurrency, settleAddress, reference string
+		var acceptCurrencies []string
+		var metadataJSON []byte
+		var expiresAt, created time.Time
+		if err := res.Scan(&id, &amount, &status, &settleCurrency, &settleAddress, &acceptCurrencies, &reference, &metadataJSON, &expiresAt, &created); err != nil {
+			writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
+			return
+		}
+		var metadata map[string]any
+		json.Unmarshal(metadataJSON, &metadata)
+		results = append(results, h.toResponse(id, amount, status, settleCurrency, settleAddress, acceptCurrencies, reference, metadata, expiresAt, created))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": results})
+}
+
 func (h *SettlementIntents) Cancel(w http.ResponseWriter, r *http.Request) {
 	id := pathParam(r, "id")
 	principal, _ := auth.FromContext(r.Context())
@@ -170,13 +206,14 @@ func (h *SettlementIntents) Quote(w http.ResponseWriter, r *http.Request) {
 	id := pathParam(r, "id")
 	principal, _ := auth.FromContext(r.Context())
 
-	var payCurrency string
-	if err := json.NewDecoder(r.Body).Decode(&struct {
-		PayCurrency *string `json:"pay_currency"`
-	}{&payCurrency}); err != nil {
+	var quoteBody struct {
+		PayCurrency string `json:"pay_currency"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&quoteBody); err != nil {
 		writeErr(w, apierrors.E(apierrors.CodeInvalidRequest, "body"))
 		return
 	}
+	payCurrency := quoteBody.PayCurrency
 
 	var amountStr, settleCurrencyISO, settleAddress, status string
 	err := h.Pool.QueryRow(r.Context(),

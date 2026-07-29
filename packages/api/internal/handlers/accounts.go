@@ -124,3 +124,44 @@ func (h *Accounts) List(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": results})
 }
+
+// ── API keys (list only — the full secret is only ever returned once, at
+//    creation time inside Accounts.Create; this never re-exposes it) ──────────
+
+type ApiKeys struct{ Pool *pgxpool.Pool }
+
+type apiKeyResponse struct {
+	ID        string  `json:"id"`
+	Prefix    string  `json:"prefix"`
+	Suffix    string  `json:"suffix"`
+	Type      string  `json:"type"`
+	Livemode  bool    `json:"livemode"`
+	RevokedAt *string `json:"revoked_at,omitempty"`
+}
+
+func (h *ApiKeys) List(w http.ResponseWriter, r *http.Request) {
+	principal, _ := auth.FromContext(r.Context())
+	rows, err := h.Pool.Query(r.Context(),
+		`SELECT id, prefix, suffix, type, livemode, revoked_at::text
+		 FROM api_keys WHERE account_id = $1 ORDER BY created_at DESC`,
+		principal.AccountID,
+	)
+	if err != nil {
+		writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
+		return
+	}
+	defer rows.Close()
+
+	var results []apiKeyResponse
+	for rows.Next() {
+		var k apiKeyResponse
+		var revokedAt *string
+		if err := rows.Scan(&k.ID, &k.Prefix, &k.Suffix, &k.Type, &k.Livemode, &revokedAt); err != nil {
+			writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
+			return
+		}
+		k.RevokedAt = revokedAt
+		results = append(results, k)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": results})
+}

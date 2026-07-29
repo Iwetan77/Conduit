@@ -33,6 +33,7 @@ func New(cfg Config) http.Handler {
 	dispatcher := webhooks.NewDispatcher(cfg.Pool)
 
 	accountsH := &handlers.Accounts{Pool: cfg.Pool}
+	apiKeysH := &handlers.ApiKeys{Pool: cfg.Pool}
 	intentsH := &handlers.SettlementIntents{Pool: cfg.Pool, StableFX: stableFX, AppBaseURL: cfg.AppBaseURL, Webhooks: dispatcher}
 	currenciesH := &handlers.Currencies{}
 	webhookEndpointsH := &handlers.WebhookEndpoints{Pool: cfg.Pool, Dispatcher: dispatcher}
@@ -58,8 +59,10 @@ func New(cfg Config) http.Handler {
 
 			r.Get("/accounts", accountsH.List)
 			r.Get("/accounts/{id}", accountsH.Get)
+			r.Get("/api_keys", apiKeysH.List)
 
 			r.Post("/settlement_intents", intentsH.Create)
+			r.Get("/settlement_intents", intentsH.List)
 			r.Get("/settlement_intents/{id}", intentsH.Get)
 			r.Post("/settlement_intents/{id}/quote", intentsH.Quote)
 			r.Post("/settlement_intents/{id}/prepare", intentsH.Prepare)

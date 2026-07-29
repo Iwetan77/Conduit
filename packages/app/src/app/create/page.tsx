@@ -1,12 +1,11 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useAccount } from "wagmi";
 import { Nav, MobileNav } from "@/components/Shared/Nav";
 import { CreateForm } from "@/components/CreateFlow/CreateForm";
 import { LinkCard } from "@/components/CreateFlow/LinkOutput/LinkCard";
 import { QRDisplay } from "@/components/CreateFlow/QROutput/QRDisplay";
-import { useConduitStore } from "@/store/useConduitStore";
 import { parseAmount } from "@/lib/format";
 import { motion } from "framer-motion";
 import type { Currency } from "@conduit/sdk";
@@ -15,22 +14,21 @@ type OutputTab = "link" | "qr";
 
 export default function CreatePage() {
   const { address } = useAccount();
-  const { createFlow, resetCreateFlow } = useConduitStore();
   const [activeTab, setActiveTab] = useState<OutputTab>("link");
   const [result, setResult] = useState<{
     declarationId: string;
     paymentUrl: string;
+    amount: string;
+    currency: Currency;
+    label: string;
   } | null>(null);
 
-  // Clear stale form values from previous sessions on mount
-  useEffect(() => { resetCreateFlow(); }, []);
-
-  const handleSuccess = (declarationId: string, paymentUrl: string) => {
-    setResult({ declarationId, paymentUrl });
+  const handleSuccess = (declarationId: string, paymentUrl: string, amount: string, currency: Currency, label: string) => {
+    setResult({ declarationId, paymentUrl, amount, currency, label });
   };
 
-  const currency = createFlow.currency as Currency;
-  const amount = createFlow.amount ? parseAmount(createFlow.amount, currency) : 0n;
+  const currency = result?.currency ?? "USDC";
+  const amount = result?.amount ? parseAmount(result.amount, currency) : 0n;
 
   return (
     <div className="min-h-screen bg-brand-black">
@@ -92,7 +90,7 @@ export default function CreatePage() {
                   amount={amount}
                   currency={currency}
                   recipientAddress={address ?? "0x"}
-                  label={createFlow.label || undefined}
+                  label={result?.label || undefined}
                 />
               </div>
 
@@ -105,7 +103,7 @@ export default function CreatePage() {
                   paymentUrl={result.paymentUrl}
                   amount={amount}
                   currency={currency}
-                  label={createFlow.label || undefined}
+                  label={result?.label || undefined}
                 />
               </div>
             </div>
@@ -124,7 +122,6 @@ export default function CreatePage() {
               <button
                 onClick={() => {
                   setResult(null);
-                  resetCreateFlow();
                 }}
                 className="flex-1 py-3 rounded-xl bg-brand-green text-brand-black
                            text-sm font-mono hover:bg-brand-green/90 transition-colors"

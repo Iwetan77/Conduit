@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useAccount } from "wagmi";
 import type { Currency, PaymentReceipt } from "@conduit/sdk";
+import type { Eip1193Provider } from "ethers";
 import { parseAmount, formatAmount, shortenAddress } from "@/lib/format";
 import { RoutePreview } from "./RoutePreview";
 import { ReceiptCard } from "@/components/Shared/ReceiptCard";
@@ -44,7 +45,7 @@ export function SendConfirm({
 
       // Use browser provider
       const browserProvider = new ethers.BrowserProvider(
-        (window as unknown as { ethereum: unknown }).ethereum
+        (window as unknown as { ethereum: Eip1193Provider }).ethereum
       );
       const client = ConduitClient.fromBrowserProvider(browserProvider, "");
 

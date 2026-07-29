@@ -134,7 +134,7 @@ const NETWORK_PARAMS = [
   { key: "EURC",               value: ARC_TESTNET.tokens.EURC },
   { key: "Permit2",            value: ARC_TESTNET.contracts.permit2 },
   { key: "ConduitRouter",      value: process.env["NEXT_PUBLIC_CONDUIT_ROUTER"] ?? "(deploy first)" },
-  { key: "DeclarationRegistry", value: process.env["NEXT_PUBLIC_DECLARATION_REGISTRY"] ?? "(deploy first)" },
+  { key: "Declaration Registry", value: process.env["NEXT_PUBLIC_DECLARATION_REGISTRY"] ?? "(deploy first)" },
 ];
 
 // ── Page ──────────────────────────────────────────────────────────────────────

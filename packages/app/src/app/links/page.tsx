@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useAccount } from "wagmi";
 import type { PaymentDeclaration } from "@conduit/sdk";
+import type { Eip1193Provider } from "ethers";
 import { Nav, MobileNav } from "@/components/Shared/Nav";
 import { WalletConnect } from "@/components/Shared/WalletConnect";
 import { LinkCard } from "@/components/CreateFlow/LinkOutput/LinkCard";
@@ -77,7 +78,7 @@ export default function LinksPage() {
       const { ConduitClient } = await import("@conduit/sdk");
       const { ethers } = await import("ethers");
       const browserProvider = new ethers.BrowserProvider(
-        (window as unknown as { ethereum: unknown }).ethereum
+        (window as unknown as { ethereum: Eip1193Provider }).ethereum
       );
       const client = ConduitClient.fromBrowserProvider(browserProvider, "");
       await client.deactivateLink(declarationId as `0x${string}`);

@@ -3,17 +3,22 @@
 import { useState, useEffect } from "react";
 import { useAccount } from "wagmi";
 import type { Currency } from "@conduit/sdk";
+import type { Eip1193Provider } from "ethers";
 import { AmountInput } from "@/components/SendFlow/AmountInput";
-import { useConduitStore } from "@/store/useConduitStore";
 import { WalletConnect } from "@/components/Shared/WalletConnect";
 
 interface CreateFormProps {
-  onSuccess: (declarationId: string, paymentUrl: string) => void;
+  onSuccess: (declarationId: string, paymentUrl: string, amount: string, currency: Currency, label: string) => void;
 }
 
 export function CreateForm({ onSuccess }: CreateFormProps) {
   const { address, isConnected } = useAccount();
-  const { createFlow, setCreateFlow } = useConduitStore();
+  const [createFlow, setCreateFlowState] = useState<{ amount: string; currency: Currency; label: string }>({
+    amount: "",
+    currency: "USDC",
+    label: "",
+  });
+  const setCreateFlow = (patch: Partial<typeof createFlow>) => setCreateFlowState((s) => ({ ...s, ...patch }));
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string>("");
   const [mounted, setMounted] = useState(false);
@@ -31,9 +36,9 @@ export function CreateForm({ onSuccess }: CreateFormProps) {
       const { parseAmount } = await import("@/lib/format");
 
       const browserProvider = new ethers.BrowserProvider(
-        (window as unknown as { ethereum: unknown }).ethereum
+        (window as unknown as { ethereum: Eip1193Provider }).ethereum
       );
-      const client = ConduitClient.fromBrowserProvider(browserProvider);
+      const client = ConduitClient.fromBrowserProvider(browserProvider, "");
 
       const amount = createFlow.amount ? parseAmount(createFlow.amount, createFlow.currency) : 0n;
 
@@ -44,7 +49,7 @@ export function CreateForm({ onSuccess }: CreateFormProps) {
         label: createFlow.label || undefined,
       });
 
-      onSuccess(result.declarationId, result.paymentUrl);
+      onSuccess(result.declarationId, result.paymentUrl, createFlow.amount, createFlow.currency, createFlow.label);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create payment link");
     } finally {

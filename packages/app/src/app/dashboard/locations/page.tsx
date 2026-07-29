@@ -1,0 +1,148 @@
+"use client";
+
+import { useEffect, useRef, useState } from "react";
+import { QRCodeSVG } from "qrcode.react";
+import { listAccounts, createSubAccount, type Account, ConduitApiError } from "@/lib/conduit-api";
+
+const CURRENCIES = ["EUR", "USD", "BRL", "AUD", "MXN", "CAD", "GBP", "ZAR"];
+
+function DownloadableQR({ value, filename }: { value: string; filename: string }) {
+  const svgRef = useRef<SVGSVGElement>(null);
+
+  const download = () => {
+    const svg = svgRef.current;
+    if (!svg) return;
+    const serializer = new XMLSerializer();
+    const svgStr = serializer.serializeToString(svg);
+    const canvas = document.createElement("canvas");
+    // ~300dpi at a 1.5in print size = 450px; render well above that and let
+    // the browser/printer downscale rather than upscale a blurry source.
+    canvas.width = 900;
+    canvas.height = 900;
+    const ctx = canvas.getContext("2d")!;
+    const img = new Image();
+    img.onload = () => {
+      ctx.fillStyle = "#000000";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      canvas.toBlob((blob) => {
+        if (!blob) return;
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        a.click();
+        URL.revokeObjectURL(url);
+      });
+    };
+    img.src = "data:image/svg+xml;base64," + btoa(unescape(encodeURIComponent(svgStr)));
+  };
+
+  return (
+    <div className="flex flex-col items-center gap-2">
+      <div style={{ background: "#000", padding: 8, borderRadius: 8 }}>
+        <QRCodeSVG ref={svgRef} value={value} size={120} bgColor="#000000" fgColor="#B2F55A" level="H" />
+      </div>
+      <button onClick={download} className="text-brand-green text-xs hover:underline">Download print-ready</button>
+    </div>
+  );
+}
+
+export default function LocationsPage() {
+  const [accounts, setAccounts] = useState<Account[] | null>(null);
+  const [showForm, setShowForm] = useState(false);
+  const [name, setName] = useState("");
+  const [settleCurrency, setSettleCurrency] = useState("EUR");
+  const [settleAddress, setSettleAddress] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const refresh = () => { listAccounts().then((r) => setAccounts(r.data ?? [])).catch(() => {}); };
+  useEffect(refresh, []);
+
+  const handleCreate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError("");
+    setBusy(true);
+    try {
+      await createSubAccount({ name, settle_currency: settleCurrency, settle_address: settleAddress });
+      setShowForm(false);
+      setName("");
+      setSettleAddress("");
+      refresh();
+    } catch (err) {
+      setError(err instanceof ConduitApiError ? err.message : "Failed to create location");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="max-w-4xl">
+      <div className="flex items-center justify-between mb-6">
+        <h1 className="font-display text-3xl font-bold">Locations</h1>
+        <button
+          onClick={() => setShowForm((s) => !s)}
+          className="border border-brand-border rounded px-4 py-2 text-sm"
+        >
+          {showForm ? "Cancel" : "Add location"}
+        </button>
+      </div>
+
+      {showForm && (
+        <form onSubmit={handleCreate} className="border border-brand-border rounded-lg p-4 mb-6 space-y-3 max-w-md">
+          <input
+            className="w-full bg-brand-surface border border-brand-border rounded px-3 py-2 text-sm"
+            placeholder="Location name (e.g. Shibuya store)"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            required
+          />
+          <select
+            className="w-full bg-brand-surface border border-brand-border rounded px-3 py-2 text-sm"
+            value={settleCurrency}
+            onChange={(e) => setSettleCurrency(e.target.value)}
+          >
+            {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
+          <input
+            className="w-full bg-brand-surface border border-brand-border rounded px-3 py-2 text-sm font-mono"
+            placeholder="0x... settle address"
+            value={settleAddress}
+            onChange={(e) => setSettleAddress(e.target.value)}
+            required
+          />
+          {error && <p className="text-red-400 text-xs">{error}</p>}
+          <button
+            type="submit"
+            disabled={busy}
+            className="w-full bg-brand-green text-brand-black font-medium rounded py-2 text-sm disabled:opacity-50"
+          >
+            {busy ? "Creating..." : "Create location"}
+          </button>
+        </form>
+      )}
+
+      {accounts === null && <p className="text-brand-muted text-sm">Loading...</p>}
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        {accounts?.map((a) => (
+          <div key={a.id} className="border border-brand-border rounded-lg p-4 flex flex-col items-center gap-3">
+            <div className="text-center">
+              <p className="font-medium text-sm">{a.name}</p>
+              <p className="text-brand-muted text-xs">{a.settle_currency}</p>
+              <p className="text-brand-muted text-[10px] font-mono">{a.settle_address}</p>
+            </div>
+            <DownloadableQR value={a.settle_address} filename={`${a.name.replace(/\s+/g, "-")}-qr.png`} />
+          </div>
+        ))}
+      </div>
+
+      {accounts?.length === 1 && !showForm && (
+        <p className="text-brand-muted text-sm mt-4">
+          No locations yet beyond your main account — click &quot;Add location&quot; to create one.
+        </p>
+      )}
+    </div>
+  );
+}

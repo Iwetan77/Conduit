@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import type { PaymentDeclaration, PaymentReceipt, Currency } from "@conduit/sdk";
+import type { Eip1193Provider } from "ethers";
 import { currencyDecimals, toHumanAmount } from "@conduit/sdk";
 import { formatAmount } from "@/lib/format";
 import { ReceiptCard } from "@/components/Shared/ReceiptCard";
@@ -34,7 +35,7 @@ export function PayConfirm({ declaration, payerCurrency, openAmount }: PayConfir
       const { ethers } = await import("ethers");
 
       const browserProvider = new ethers.BrowserProvider(
-        (window as unknown as { ethereum: unknown }).ethereum
+        (window as unknown as { ethereum: Eip1193Provider }).ethereum
       );
       const client = ConduitClient.fromBrowserProvider(browserProvider, "");
 

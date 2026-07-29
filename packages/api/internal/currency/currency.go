@@ -16,7 +16,10 @@
 // else exists yet to read it from).
 package currency
 
-import "strings"
+import (
+	"math/big"
+	"strings"
+)
 
 type Info struct {
 	ISO      string // 3-letter fiat code, CurrencyRegistry.sol's bytes3 key
@@ -56,4 +59,36 @@ func BySymbol(symbol string) (Info, bool) {
 		}
 	}
 	return Info{}, false
+}
+
+// FormatMinorUnits converts a raw minor-unit integer string (what
+// NUMERIC(78,0) columns hold — e.g. "3339000") into a human decimal string
+// at the given precision ("3.339000"), with pure big.Int arithmetic — no
+// float64 anywhere, so an 18-decimal amount never loses precision the way it
+// would if this went through a float. Used only at display/export boundaries
+// (CSV, dashboard); the API's own JSON responses keep raw minor units, same
+// as Stripe's amount convention.
+func FormatMinorUnits(raw string, decimals int) string {
+	n, ok := new(big.Int).SetString(raw, 10)
+	if !ok {
+		return raw // not a valid integer string — pass through rather than silently mangle it
+	}
+	if decimals == 0 {
+		return n.String()
+	}
+	neg := n.Sign() < 0
+	abs := new(big.Int).Abs(n)
+	divisor := new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(decimals)), nil)
+	whole := new(big.Int)
+	frac := new(big.Int)
+	whole.DivMod(abs, divisor, frac)
+
+	fracStr := frac.String()
+	fracStr = strings.Repeat("0", decimals-len(fracStr)) + fracStr
+
+	sign := ""
+	if neg {
+		sign = "-"
+	}
+	return sign + whole.String() + "." + fracStr
 }

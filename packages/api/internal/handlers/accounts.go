@@ -101,6 +101,60 @@ func (h *Accounts) Get(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// CreateSub creates a subaccount (a "location" in dashboard terms) under the
+// authenticated caller's account — its own settle_currency/settle_address and
+// its own sk_ key, but parent_id set so Accounts.List/Get and the
+// Conduit-Account header switch (auth.go) recognize it as a child. This
+// endpoint isn't in the original spec's table (only bare POST /v1/accounts
+// is) but the Locations dashboard screen has nothing to create rows with
+// otherwise, and the schema already carries accounts.parent_id for exactly
+// this.
+func (h *Accounts) CreateSub(w http.ResponseWriter, r *http.Request) {
+	principal, _ := auth.FromContext(r.Context())
+
+	var req createAccountRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, apierrors.E(apierrors.CodeInvalidRequest, "body"))
+		return
+	}
+	if req.Name == "" || req.SettleCurrency == "" || req.SettleAddress == "" {
+		writeErr(w, apierrors.E(apierrors.CodeInvalidRequest, "name, settle_currency, settle_address are required"))
+		return
+	}
+
+	ctx := r.Context()
+	accountID := models.NewID("acct")
+	_, err := h.Pool.Exec(ctx,
+		`INSERT INTO accounts (id, parent_id, name, settle_currency, settle_address, livemode) VALUES ($1,$2,$3,$4,$5,$6)`,
+		accountID, principal.AccountID, req.Name, req.SettleCurrency, req.SettleAddress, req.Livemode,
+	)
+	if err != nil {
+		writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
+		return
+	}
+
+	fullKey, prefix, suffix, hash, err := auth.GenerateKey(auth.KeyTypeSecret, req.Livemode)
+	if err != nil {
+		writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
+		return
+	}
+	keyID := models.NewID("key")
+	_, err = h.Pool.Exec(ctx,
+		`INSERT INTO api_keys (id, account_id, key_hash, prefix, suffix, type, livemode) VALUES ($1,$2,$3,$4,$5,'sk',$6)`,
+		keyID, accountID, hash, prefix, suffix, req.Livemode,
+	)
+	if err != nil {
+		writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, accountResponse{
+		ID: accountID, Name: req.Name, SettleCurrency: req.SettleCurrency,
+		SettleAddress: req.SettleAddress, Livemode: req.Livemode,
+		APIKey: &createdKey{Key: fullKey, Prefix: prefix, Suffix: suffix},
+	})
+}
+
 func (h *Accounts) List(w http.ResponseWriter, r *http.Request) {
 	principal, _ := auth.FromContext(r.Context())
 	rows, err := h.Pool.Query(r.Context(),

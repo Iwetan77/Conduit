@@ -96,10 +96,17 @@ func (p *StableFXProvider) Quote(ctx context.Context, from, to string, settleAmo
 		return Quote{}, apierrors.E(apierrors.CodeFxProviderUnavailable, "")
 	}
 	if status != http.StatusOK && status != http.StatusCreated {
-		if env.Code == 3008 {
+		switch env.Code {
+		case 3008: // "At least one of the quote currencies is invalid."
 			return Quote{}, apierrors.E(apierrors.CodeFxNoRoute, "")
+		case 3005: // "The quote amount is invalid." — below/above StableFX's quotable range
+			return Quote{}, apierrors.E(apierrors.CodeFxInvalidAmount, "amount")
+		default:
+			// Genuinely unrecognized upstream error — internal is honest here (we
+			// don't have a mapped code for it) but log-worthy; the raw code/message
+			// never reaches the client per spec §2.6, only this generic fallback.
+			return Quote{}, apierrors.E(apierrors.CodeFxProviderUnavailable, "")
 		}
-		return Quote{}, fmt.Errorf("stablefx quote failed (%d): %s", env.Code, env.Message)
 	}
 
 	fromAmt, _ := parseHumanAmount(env.Data.From.Amount, fromInfo.Decimals)
@@ -321,6 +328,17 @@ func (p *StableFXProvider) Submit(ctx context.Context, prep Preparation, funding
 		return "", fmt.Errorf("stablefx fund submission failed (%d)", status)
 	}
 
+	// Discovered live (2026-07-29): the top-level trade `status` field does not
+	// reliably reach "settled"/"complete" even when the maker leg has already
+	// delivered funds — it can sit at an intermediate value like
+	// "maker_funded" indefinitely if the OTHER leg (taker, i.e. our payer)
+	// fails, e.g. TRANSFER_FROM_FAILED on insufficient balance. Waiting on the
+	// top-level status alone means a failed taker leg just silently burns the
+	// full 60s timeout instead of surfacing the real error. Check both legs'
+	// individual status directly instead: makerDeliver.status=="success" with
+	// a populated txHash is the real completion signal (that's the money the
+	// recipient actually received); a "failed" on either leg is reported
+	// immediately with StableFX's own errorDetails, not a generic timeout.
 	deadline := time.Now().Add(60 * time.Second)
 	for time.Now().Before(deadline) {
 		time.Sleep(1 * time.Second)
@@ -328,19 +346,36 @@ func (p *StableFXProvider) Submit(ctx context.Context, prep Preparation, funding
 			Data *struct {
 				Status               string `json:"status"`
 				ContractTransactions struct {
+					TakerDeliver struct {
+						Status       string `json:"status"`
+						TxHash       string `json:"txHash"`
+						ErrorDetails string `json:"errorDetails"`
+					} `json:"takerDeliver"`
 					MakerDeliver struct {
-						Status string `json:"status"`
-						TxHash string `json:"txHash"`
+						Status       string `json:"status"`
+						TxHash       string `json:"txHash"`
+						ErrorDetails string `json:"errorDetails"`
 					} `json:"makerDeliver"`
 				} `json:"contractTransactions"`
 			} `json:"data"`
 		}
-		st, err := p.get(ctx, "/v1/exchange/stablefx/trades/"+prep.StableFXTradeID, &tradeEnv)
-		if err != nil || st != http.StatusOK || tradeEnv.Data == nil {
+		var raw json.RawMessage
+		st, err := p.get(ctx, "/v1/exchange/stablefx/trades/"+prep.StableFXTradeID, &raw)
+		if err != nil || st != http.StatusOK || raw == nil {
 			continue
 		}
-		if tradeEnv.Data.Status == "settled" || tradeEnv.Data.Status == "complete" {
-			return tradeEnv.Data.ContractTransactions.MakerDeliver.TxHash, nil
+		if err := json.Unmarshal(raw, &tradeEnv); err != nil || tradeEnv.Data == nil {
+			continue
+		}
+		ct := tradeEnv.Data.ContractTransactions
+		if ct.MakerDeliver.Status == "success" && ct.MakerDeliver.TxHash != "" {
+			return ct.MakerDeliver.TxHash, nil
+		}
+		if ct.TakerDeliver.Status == "failed" {
+			return "", fmt.Errorf("stablefx trade %s: taker funding failed: %s", prep.StableFXTradeID, ct.TakerDeliver.ErrorDetails)
+		}
+		if ct.MakerDeliver.Status == "failed" {
+			return "", fmt.Errorf("stablefx trade %s: maker delivery failed: %s", prep.StableFXTradeID, ct.MakerDeliver.ErrorDetails)
 		}
 		if tradeEnv.Data.Status == "failed" || tradeEnv.Data.Status == "breached" {
 			return "", fmt.Errorf("stablefx trade %s ended in status %s", prep.StableFXTradeID, tradeEnv.Data.Status)

@@ -11,6 +11,7 @@ type Code string
 const (
 	CodeFxQuoteExpired        Code = "fx_quote_expired"
 	CodeFxNoRoute             Code = "fx_no_route"
+	CodeFxInvalidAmount       Code = "fx_invalid_amount"
 	CodeFxProviderUnavailable Code = "fx_provider_unavailable"
 	CodeCurrencyNotSupported  Code = "currency_not_supported"
 	CodeIntentExpired         Code = "intent_expired"
@@ -33,6 +34,7 @@ type entry struct {
 var registry = map[Code]entry{
 	CodeFxQuoteExpired:        {http.StatusConflict, "The FX quote has expired. Request a new quote."},
 	CodeFxNoRoute:             {http.StatusUnprocessableEntity, "No route exists between these currencies right now."},
+	CodeFxInvalidAmount:       {http.StatusUnprocessableEntity, "This amount is outside the FX provider's quotable range (too small or too large)."},
 	CodeFxProviderUnavailable: {http.StatusServiceUnavailable, "The FX provider is temporarily unavailable."},
 	CodeCurrencyNotSupported:  {http.StatusUnprocessableEntity, "This currency is not currently supported."},
 	CodeIntentExpired:         {http.StatusConflict, "This settlement intent has expired."},

@@ -6,6 +6,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/kzn-labs/conduit/api/internal/auth"
+	"github.com/kzn-labs/conduit/api/internal/currency"
 	apierrors "github.com/kzn-labs/conduit/api/internal/errors"
 )
 
@@ -80,6 +81,30 @@ func (h *BalanceTransactions) Export(w http.ResponseWriter, r *http.Request) {
 		if err := rows.Scan(&date, &intentID, &reference, &payCurrency, &payAmount, &settleCurrency, &settleAmount, &rateApplied, &fee, &net, &txHash); err != nil {
 			return // partial CSV already streamed; can't recover mid-stream
 		}
+
+		// Raw columns are minor-unit integers (NUMERIC(78,0) cast to text).
+		// Spec §2.9: "Amounts as decimal strings at each currency's real
+		// precision. No floats anywhere in the export path." Resolve each
+		// amount's own currency decimals (pay_currency is a token SYMBOL,
+		// settle_currency/fee/net are the intent's ISO code) and convert with
+		// pure big.Int math — never a float64.
+		if payAmount != "" {
+			if info, ok := currency.BySymbol(payCurrency); ok {
+				payAmount = currency.FormatMinorUnits(payAmount, info.Decimals)
+			}
+		}
+		if settleInfo, ok := currency.ByISO(settleCurrency); ok {
+			if settleAmount != "" {
+				settleAmount = currency.FormatMinorUnits(settleAmount, settleInfo.Decimals)
+			}
+			if fee != "" {
+				fee = currency.FormatMinorUnits(fee, settleInfo.Decimals)
+			}
+			if net != "" {
+				net = currency.FormatMinorUnits(net, settleInfo.Decimals)
+			}
+		}
+
 		cw.Write([]string{date, intentID, reference, payCurrency, payAmount, settleCurrency, settleAmount, rateApplied, fee, net, txHash})
 	}
 	cw.Flush()

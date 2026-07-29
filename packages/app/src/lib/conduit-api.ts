@@ -91,6 +91,14 @@ export function listApiKeys() {
   return request<{ data: ApiKeySummary[] }>("/v1/api_keys");
 }
 
+export function createSubAccount(body: { name: string; settle_currency: string; settle_address: string }) {
+  return request<AccountWithKey>("/v1/accounts/sub", { method: "POST", body });
+}
+
+export function listAccounts() {
+  return request<{ data: Account[] }>("/v1/accounts");
+}
+
 // ── Settlement intents ───────────────────────────────────────────────────────
 
 export interface SettlementIntent {
@@ -137,6 +145,27 @@ export function quoteSettlementIntent(id: string, payCurrency: string, apiKey?: 
     `/v1/settlement_intents/${id}/quote`,
     { method: "POST", body: { pay_currency: payCurrency }, apiKey }
   );
+}
+
+// ── Settlements (per-payment view: paid, received, rate, fee, tx link) ──────
+
+export interface Settlement {
+  id: string;
+  intent_id: string;
+  reference?: string;
+  settle_address: string;
+  pay_currency: string;
+  pay_amount: string;
+  settle_currency: string;
+  settle_amount: string;
+  rate_applied?: string;
+  fee: string;
+  tx_hash: string;
+  settled_at: string;
+}
+
+export function listSettlements() {
+  return request<{ data: Settlement[] }>("/v1/settlements");
 }
 
 // ── Balance transactions ─────────────────────────────────────────────────────

@@ -14,10 +14,10 @@ export function WalletConnect() {
 
   if (isConnected && address) {
     return (
-      <div className="flex items-center gap-2 px-3 py-2 rounded-lg
-                      bg-brand-surface border border-brand-border">
-        <span className="w-2 h-2 rounded-full bg-brand-green animate-pulse" />
-        <span className="text-sm font-mono text-brand-white">{shortenAddress(address)}</span>
+      <div className="flex items-center gap-2 px-3 py-2
+                      bg-surface border border-border">
+        <span className="w-2 h-2 bg-signal animate-pulse" />
+        <span className="text-scale-2 font-mono text-ink">{shortenAddress(address)}</span>
       </div>
     );
   }
@@ -31,8 +31,8 @@ export function WalletConnect() {
         <button
           onClick={() => connect({ connector: injected })}
           disabled={isPending}
-          className="px-4 py-2 rounded-lg text-sm font-mono bg-brand-green text-brand-black
-                     hover:bg-brand-green/90 transition-colors disabled:opacity-50"
+          className="px-4 py-2 text-scale-2 font-mono bg-signal text-signal-ink
+                     hover:bg-signal/90 transition-colors disabled:opacity-50"
         >
           {isPending ? "Connecting..." : "Connect Wallet"}
         </button>
@@ -41,8 +41,8 @@ export function WalletConnect() {
         <button
           onClick={() => connect({ connector: wc })}
           disabled={isPending}
-          className="px-3 py-2 rounded-lg text-sm font-mono border border-brand-border
-                     text-brand-muted hover:text-brand-white hover:border-brand-white/20
+          className="px-3 py-2 text-scale-2 font-mono border border-border
+                     text-ink-dim hover:text-ink hover:border-ink-dim
                      transition-colors disabled:opacity-50"
         >
           WalletConnect
@@ -62,10 +62,10 @@ export function WalletConnectCompact() {
 
   if (isConnected && address) {
     return (
-      <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full
-                      bg-brand-surface border border-brand-border">
-        <span className="w-1.5 h-1.5 rounded-full bg-brand-green" />
-        <span className="text-xs font-mono">{shortenAddress(address, 3)}</span>
+      <div className="flex items-center gap-1.5 px-3 py-1.5
+                      bg-surface border border-border">
+        <span className="w-1.5 h-1.5 bg-signal" />
+        <span className="text-scale-1 font-mono text-ink">{shortenAddress(address, 3)}</span>
       </div>
     );
   }
@@ -76,8 +76,8 @@ export function WalletConnectCompact() {
     <button
       onClick={() => connector && connect({ connector })}
       disabled={isPending}
-      className="px-4 py-2 rounded-lg text-sm font-medium bg-brand-green text-brand-black
-                 w-full hover:bg-brand-green/90 transition-colors disabled:opacity-50"
+      className="px-4 py-2 text-scale-2 font-medium font-mono bg-signal text-signal-ink
+                 w-full hover:bg-signal/90 transition-colors disabled:opacity-50"
     >
       {isPending ? "Connecting..." : "Connect Wallet"}
     </button>

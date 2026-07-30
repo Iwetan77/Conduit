@@ -14,11 +14,11 @@ interface HistoryTableProps {
 export function HistoryTable({ receipts, walletAddress, isLoading }: HistoryTableProps) {
   if (isLoading) {
     return (
-      <div className="space-y-3">
+      <div className="space-y-2">
         {[...Array(3)].map((_, i) => (
           <div
             key={i}
-            className="h-16 rounded-xl bg-brand-surface animate-pulse border border-brand-border"
+            className="h-16 bg-surface animate-pulse border border-border"
           />
         ))}
       </div>
@@ -27,70 +27,75 @@ export function HistoryTable({ receipts, walletAddress, isLoading }: HistoryTabl
 
   if (receipts.length === 0) {
     return (
-      <div className="text-center py-16 text-brand-muted">
-        <p className="text-brand-muted font-mono text-sm">No transactions yet.</p>
-        <p className="text-brand-muted text-sm mt-1">Your settled payments will appear here.</p>
+      <div className="text-center py-16 text-ink-dim">
+        <p className="font-mono text-scale-2">No transactions yet.</p>
+        <p className="text-scale-2 mt-1">Your settled payments will appear here.</p>
       </div>
     );
   }
 
   return (
-    <div className="space-y-2">
-      {receipts.map((receipt) => {
-        const isSender =
-          walletAddress &&
-          receipt.payer.toLowerCase() === walletAddress.toLowerCase();
-        const currency = addressToCurrency(
-          isSender ? receipt.payerToken : receipt.recipientToken
-        );
-        const amount = isSender ? receipt.payerAmount : receipt.recipientAmount;
+    <div className="border border-border">
+      <div className="hidden sm:grid grid-cols-[1fr_auto_auto_auto] gap-4 px-4 py-2 border-b border-border">
+        <span className="text-scale-1 font-mono text-ink-dim uppercase tracking-wider">Counterparty</span>
+        <span className="text-scale-1 font-mono text-ink-dim uppercase tracking-wider">Date</span>
+        <span className="text-scale-1 font-mono text-ink-dim uppercase tracking-wider text-right">Amount</span>
+        <span className="text-scale-1 font-mono text-ink-dim uppercase tracking-wider text-right">Tx</span>
+      </div>
+      <div className="divide-y divide-border overflow-x-auto">
+        {receipts.map((receipt) => {
+          const isSender =
+            walletAddress &&
+            receipt.payer.toLowerCase() === walletAddress.toLowerCase();
+          const currency = addressToCurrency(
+            isSender ? receipt.payerToken : receipt.recipientToken
+          );
+          const amount = isSender ? receipt.payerAmount : receipt.recipientAmount;
+          const txShort = `${receipt.txHash.slice(0, 6)}…${receipt.txHash.slice(-4)}`;
 
-        return (
-          <a
-            key={receipt.receiptId}
-            href={receipt.explorerUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center justify-between p-4 rounded-xl
-                       bg-brand-surface border border-brand-border
-                       hover:border-brand-green/30 transition-all group"
-          >
-            <div className="flex items-center gap-3">
-              <div
-                className={`w-8 h-8 rounded-full flex items-center justify-center text-sm
-                             ${isSender ? "bg-red-500/10 text-red-400" : "bg-brand-green/10 text-brand-green"}`}
-              >
-                {isSender ? "↑" : "↓"}
+          return (
+            <a
+              key={receipt.receiptId}
+              href={receipt.explorerUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="grid grid-cols-[1fr_auto_auto_auto] gap-4 items-center px-4 py-3
+                         hover:bg-surface transition-colors group min-w-[560px] sm:min-w-0"
+            >
+              <div className="flex items-center gap-3">
+                <span className={`font-mono text-scale-2 ${isSender ? "text-ink-dim" : "text-signal"}`}>
+                  {isSender ? "↑" : "↓"}
+                </span>
+                <div className="flex flex-col">
+                  <span className="text-scale-2 font-mono text-ink">
+                    {isSender
+                      ? `To ${shortenAddress(receipt.recipient)}`
+                      : `From ${shortenAddress(receipt.payer)}`}
+                  </span>
+                  <TokenBadge currency={currency} size="sm" />
+                </div>
               </div>
-              <div>
-                <p className="text-sm font-anton text-brand-white">
-                  {isSender
-                    ? `To ${shortenAddress(receipt.recipient)}`
-                    : `From ${shortenAddress(receipt.payer)}`}
-                </p>
-                <p className="text-xs text-brand-muted font-mono">
-                  {formatDate(receipt.settledAt)}
-                </p>
-              </div>
-            </div>
 
-            <div className="flex items-center gap-3">
-              <TokenBadge currency={currency} size="sm" />
+              <span className="text-scale-1 font-mono text-ink-dim whitespace-nowrap">
+                {formatDate(receipt.settledAt)}
+              </span>
+
               <span
-                className={`text-sm font-mono font-medium ${
-                  isSender ? "text-red-400" : "text-brand-green"
+                className={`text-scale-2 font-mono font-medium text-right whitespace-nowrap ${
+                  isSender ? "text-ink" : "text-signal"
                 }`}
               >
                 {isSender ? "-" : "+"}
                 {formatAmount(amount, currency)}
               </span>
-              <span className="text-brand-border group-hover:text-brand-muted transition-colors text-xs">
-                →
+
+              <span className="text-scale-1 font-mono text-ink-dim group-hover:text-ink transition-colors whitespace-nowrap">
+                {txShort}
               </span>
-            </div>
-          </a>
-        );
-      })}
+            </a>
+          );
+        })}
+      </div>
     </div>
   );
 }

@@ -37,22 +37,22 @@ export function ChainGuard({ children }: ChainGuardProps) {
   const isCCTPSupported = chain.id in SUPPORTED_EXTERNAL_CHAINS;
 
   return (
-    <div className="min-h-screen bg-brand-black flex items-center justify-center px-4">
-      <div className="max-w-sm w-full bg-brand-surface border border-brand-border
-                      rounded-2xl p-8 space-y-6 text-center">
+    <div className="min-h-screen bg-bg flex items-center justify-center px-4">
+      <div className="max-w-sm w-full bg-surface border border-border
+                      p-8 space-y-6 text-center">
         {/* Network indicator */}
         <div className="flex items-center justify-center gap-2">
-          <span className="w-2 h-2 rounded-full bg-yellow-400" />
-          <span className="text-xs font-mono text-brand-muted uppercase tracking-wider">
+          <span className="w-2 h-2 bg-danger" />
+          <span className="text-scale-1 font-mono text-ink-dim uppercase tracking-wider">
             Wrong Network
           </span>
         </div>
 
         <div className="space-y-2">
-          <p className="text-brand-white font-semibold text-lg">
+          <p className="text-ink font-semibold text-scale-4">
             You&apos;re on {chainName}
           </p>
-          <p className="text-brand-muted text-sm leading-relaxed">
+          <p className="text-ink-dim text-scale-2 leading-relaxed">
             Conduit runs on Arc Testnet (Chain ID 5042002).
             Switch your wallet to Arc to continue.
           </p>
@@ -61,7 +61,7 @@ export function ChainGuard({ children }: ChainGuardProps) {
         {/* Switch network button */}
         <button
           onClick={() => switchChain({ chainId: arcTestnet.id })}
-          className="w-full py-3 rounded-xl bg-brand-green text-brand-black
+          className="w-full py-3 bg-signal text-signal-ink
                      font-mono hover:opacity-90 transition-opacity"
         >
           Switch to Arc Testnet
@@ -69,15 +69,15 @@ export function ChainGuard({ children }: ChainGuardProps) {
 
         {/* Bridge hint for CCTP-supported chains */}
         {isCCTPSupported && (
-          <div className="pt-2 border-t border-brand-border space-y-2">
-            <p className="text-xs text-brand-muted">
+          <div className="pt-2 border-t border-border space-y-2">
+            <p className="text-scale-1 text-ink-dim">
               Need to move USDC from {chainName} to Arc?
             </p>
             <a
               href="https://www.circle.com/en/multichain-usdc"
               target="_blank"
               rel="noopener noreferrer"
-              className="text-xs text-brand-green hover:underline"
+              className="text-scale-1 text-signal hover:underline"
             >
               Bridge via Circle →
             </a>
@@ -85,13 +85,13 @@ export function ChainGuard({ children }: ChainGuardProps) {
         )}
 
         {/* Faucet link */}
-        <p className="text-xs text-brand-muted">
+        <p className="text-scale-1 text-ink-dim">
           Need Arc testnet tokens?{" "}
           <a
             href="https://faucet.circle.com"
             target="_blank"
             rel="noopener noreferrer"
-            className="text-brand-green hover:underline"
+            className="text-signal hover:underline"
           >
             Get from faucet →
           </a>

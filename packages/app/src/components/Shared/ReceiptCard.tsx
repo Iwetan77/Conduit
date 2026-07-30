@@ -16,20 +16,20 @@ export function ReceiptCard({ receipt, onClose }: ReceiptCardProps) {
   const isCrossChain = payerCurrency !== recipientCurrency;
 
   return (
-    <div className="bg-brand-surface border border-brand-border rounded-2xl overflow-hidden">
+    <div className="bg-surface border border-border">
       {/* Header */}
-      <div className="p-6 border-b border-brand-border">
+      <div className="p-6 border-b border-border">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
-            <span className="w-3 h-3 rounded-full bg-brand-green" />
-            <span className="text-sm font-mono text-brand-green uppercase tracking-wider">
+            <span className="w-3 h-3 bg-signal" />
+            <span className="text-scale-2 font-mono text-signal uppercase tracking-wider">
               Payment Settled
             </span>
           </div>
           {onClose && (
             <button
               onClick={onClose}
-              className="text-brand-muted hover:text-brand-white transition-colors text-xl"
+              className="text-ink-dim hover:text-ink transition-colors text-xl"
             >
               ×
             </button>
@@ -37,14 +37,14 @@ export function ReceiptCard({ receipt, onClose }: ReceiptCardProps) {
         </div>
 
         <div className="text-center py-4">
-          <p className="text-brand-muted text-sm mb-1">Amount sent</p>
-          <p className="text-4xl font-anton text-brand-white">
+          <p className="text-ink-dim text-scale-2 mb-1">Amount sent</p>
+          <p className="text-scale-6 font-anton text-ink">
             {formatAmount(receipt.payerAmount, payerCurrency)}
           </p>
           {isCrossChain && (
-            <p className="text-brand-muted text-sm mt-2">
+            <p className="text-ink-dim text-scale-2 mt-2">
               Recipient received {formatAmount(receipt.recipientAmount, recipientCurrency)} ·{" "}
-              <span className="text-brand-green">Rate secured</span>
+              <span className="text-signal">Rate secured</span>
             </p>
           )}
         </div>
@@ -72,9 +72,9 @@ export function ReceiptCard({ receipt, onClose }: ReceiptCardProps) {
           href={receipt.explorerUrl}
           target="_blank"
           rel="noopener noreferrer"
-          className="block w-full py-3 text-center text-sm font-mono
-                     border border-brand-border rounded-xl text-brand-muted
-                     hover:text-brand-white hover:border-brand-white/20 transition-colors"
+          className="block w-full py-3 text-center text-scale-2 font-mono
+                     border border-border text-ink-dim
+                     hover:text-ink hover:border-ink-dim transition-colors"
         >
           View on ArcScan →
         </a>
@@ -94,9 +94,9 @@ function DetailRow({
 }) {
   return (
     <div className="flex items-center justify-between py-1">
-      <span className="text-sm text-brand-muted">{label}</span>
+      <span className="text-scale-2 text-ink-dim">{label}</span>
       {typeof value === "string" ? (
-        <span className={`text-sm text-brand-white ${mono ? "font-mono" : ""}`}>
+        <span className={`text-scale-2 text-ink ${mono ? "font-mono" : ""}`}>
           {value}
         </span>
       ) : (

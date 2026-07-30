@@ -12,40 +12,36 @@ interface TokenBadgeProps {
 interface TokenVisual {
   symbol: string;
   logo?: string; // undefined = no artwork yet, render a monogram instead
-  color: string;
-  bg: string;
 }
 
 // Visual styling for every currency in CURRENCIES (@conduit/sdk). Only USDC and
 // EURC have real logo artwork today (public/usdc.svg, public/eurc.svg) — the
-// rest render a colored monogram rather than an <Image> pointing at a file that
-// doesn't exist. This was a closed Record<Currency,...> keyed to exactly USDC
-// and EURC before (audit finding #20: TOKEN_CONFIG[currency] was undefined —
-// and crashed on `.symbol` — for any third currency).
+// rest render a monogram. One accent system: no per-currency hues (that was
+// audit finding — 8 distinct colors, the "third hue" the design spec bans).
 const TOKEN_CONFIG: Record<string, TokenVisual> = {
-  USDC: { symbol: "USDC", logo: "/usdc.svg", color: "#2775CA", bg: "rgba(39, 117, 202, 0.15)" },
-  EURC: { symbol: "EURC", logo: "/eurc.svg", color: "#2775CA", bg: "rgba(39, 117, 202, 0.10)" },
-  BRLA: { symbol: "BRLA", color: "#2E9E5B", bg: "rgba(46, 158, 91, 0.12)" },
-  AUDF: { symbol: "AUDF", color: "#C99A2E", bg: "rgba(201, 154, 46, 0.12)" },
-  MXNB: { symbol: "MXNB", color: "#B3492D", bg: "rgba(179, 73, 45, 0.12)" },
-  QCAD: { symbol: "QCAD", color: "#5C4EA6", bg: "rgba(92, 78, 166, 0.12)" },
-  GBPA: { symbol: "GBPA", color: "#7A3E9D", bg: "rgba(122, 62, 157, 0.12)" },
-  ZARU: { symbol: "ZARU", color: "#2E7D9E", bg: "rgba(46, 125, 158, 0.12)" },
+  USDC: { symbol: "USDC", logo: "/usdc.svg" },
+  EURC: { symbol: "EURC", logo: "/eurc.svg" },
+  BRLA: { symbol: "BRLA" },
+  AUDF: { symbol: "AUDF" },
+  MXNB: { symbol: "MXNB" },
+  QCAD: { symbol: "QCAD" },
+  GBPA: { symbol: "GBPA" },
+  ZARU: { symbol: "ZARU" },
 };
 
 function visualFor(currency: Currency): TokenVisual {
-  return TOKEN_CONFIG[currency] ?? { symbol: currency, color: "#888", bg: "rgba(136,136,136,0.12)" };
+  return TOKEN_CONFIG[currency] ?? { symbol: currency };
 }
 
 function TokenIcon({ currency, px }: { currency: Currency; px: number }) {
   const config = visualFor(currency);
   if (config.logo) {
-    return <Image src={config.logo} alt={config.symbol} width={px} height={px} className="rounded-full" />;
+    return <Image src={config.logo} alt={config.symbol} width={px} height={px} />;
   }
   return (
     <span
-      className="flex items-center justify-center rounded-full font-mono font-bold shrink-0"
-      style={{ width: px, height: px, fontSize: px * 0.4, color: config.color, backgroundColor: config.bg }}
+      className="flex items-center justify-center font-mono font-bold shrink-0 border border-border text-ink-dim"
+      style={{ width: px, height: px, fontSize: px * 0.4 }}
     >
       {config.symbol.slice(0, 1)}
     </span>
@@ -55,16 +51,15 @@ function TokenIcon({ currency, px }: { currency: Currency; px: number }) {
 export function TokenBadge({ currency, size = "md" }: TokenBadgeProps) {
   const config = visualFor(currency);
   const sizes = {
-    sm: "px-2 py-0.5 text-xs",
-    md: "px-3 py-1 text-sm",
-    lg: "px-4 py-1.5 text-base",
+    sm: "px-2 py-0.5 text-scale-1",
+    md: "px-3 py-1 text-scale-2",
+    lg: "px-4 py-1.5 text-scale-3",
   };
   const px = { sm: 20, md: 26, lg: 32 }[size];
 
   return (
     <span
-      className={`inline-flex items-center gap-1.5 rounded-full font-mono font-medium ${sizes[size]}`}
-      style={{ color: config.color, backgroundColor: config.bg }}
+      className={`inline-flex items-center gap-1.5 font-mono font-medium border border-border text-ink ${sizes[size]}`}
     >
       <TokenIcon currency={currency} px={px} />
       {config.symbol}
@@ -85,7 +80,7 @@ export function TokenSelector({ value, onChange, label }: TokenSelectorProps) {
   return (
     <div className="flex flex-col gap-1.5">
       {label && (
-        <label className="text-xs font-mono text-brand-muted uppercase tracking-wider">
+        <label className="text-scale-1 font-mono text-ink-dim uppercase tracking-wider">
           {label}
         </label>
       )}
@@ -96,11 +91,11 @@ export function TokenSelector({ value, onChange, label }: TokenSelectorProps) {
             <button
               key={currency}
               onClick={() => onChange(currency)}
-              className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-mono
-                          border transition-all ${
+              className={`flex items-center gap-2 px-3 py-2 text-scale-2 font-mono
+                          border transition-colors ${
                             isSelected
-                              ? "border-brand-green/50 bg-brand-green/5 text-brand-white"
-                              : "border-brand-border text-brand-muted hover:border-brand-white/20"
+                              ? "border-signal text-ink"
+                              : "border-border text-ink-dim hover:border-ink-dim"
                           }`}
             >
               <TokenIcon currency={currency} px={22} />

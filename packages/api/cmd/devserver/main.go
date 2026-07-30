@@ -11,10 +11,12 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/kzn-labs/conduit/api/internal/db"
 	"github.com/kzn-labs/conduit/api/internal/server"
 )
@@ -23,20 +25,46 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	pool, cleanup, err := db.StartTestDB(ctx, 15999)
+	// CONDUIT_DB_DATA_DIR, if set, points at a fixed (non-random,
+	// not-removed-on-exit) Postgres data directory instead of a fresh
+	// temp one. scripts/e2e-crosschain.sh uses this to hard-kill devserver
+	// mid-bridge and restart it against the SAME database, so the orphan
+	// reconciler has something real to recover -- see db.StartTestDBAt's
+	// doc comment.
+	var pool *pgxpool.Pool
+	var cleanup func()
+	var err error
+	if dataDir := os.Getenv("CONDUIT_DB_DATA_DIR"); dataDir != "" {
+		pool, cleanup, err = db.StartTestDBAt(ctx, 15999, dataDir)
+	} else {
+		pool, cleanup, err = db.StartTestDB(ctx, 15999)
+	}
 	if err != nil {
 		log.Fatalf("start embedded postgres: %v", err)
 	}
 	defer cleanup()
 
-	handler := server.New(server.Config{
-		Pool:         pool,
-		StableFXKey:  loadStableFXKey(),
-		StableFXBase: envOr("STABLEFX_BASE_URL", "https://api-sandbox.circle.com"),
-		AppBaseURL:   envOr("CONDUIT_APP_BASE_URL", "http://localhost:3000"),
-	})
+	staleAfter := 45 * time.Second
+	if v := os.Getenv("CONDUIT_BRIDGE_STALE_AFTER_SECONDS"); v != "" {
+		if secs, convErr := strconv.Atoi(v); convErr == nil {
+			staleAfter = time.Duration(secs) * time.Second
+		}
+	}
 
-	server.StartBackgroundWorkers(ctx, pool, envOr("ARC_RPC", "https://rpc.testnet.arc.network"), os.Getenv("CONDUIT_ROUTER_ADDRESS"))
+	cfg := server.Config{
+		Pool:             pool,
+		StableFXKey:      loadStableFXKey(),
+		StableFXBase:     envOr("STABLEFX_BASE_URL", "https://api-sandbox.circle.com"),
+		AppBaseURL:       envOr("CONDUIT_APP_BASE_URL", "http://localhost:3000"),
+		ArcRPC:           envOr("ARC_RPC", "https://rpc.testnet.arc.network"),
+		SolanaRPC:        envOr("SOLANA_RPC", "https://api.devnet.solana.com"),
+		SolanaWS:         envOr("SOLANA_WS", "wss://api.devnet.solana.com"),
+		ArcRelayerKey:    os.Getenv("ARC_RELAYER_KEY"),
+		BridgeStaleAfter: staleAfter,
+	}
+	handler := server.New(cfg)
+
+	server.StartBackgroundWorkers(ctx, pool, cfg.ArcRPC, os.Getenv("CONDUIT_ROUTER_ADDRESS"), cfg)
 
 	addr := ":" + envOr("PORT", "8080")
 	srv := &http.Server{Addr: addr, Handler: handler, ReadHeaderTimeout: 5 * time.Second}

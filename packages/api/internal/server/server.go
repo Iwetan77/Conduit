@@ -5,15 +5,19 @@ package server
 
 import (
 	"context"
+	"errors"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/kzn-labs/conduit/api/internal/auth"
+	bridgepkg "github.com/kzn-labs/conduit/api/internal/bridge"
 	"github.com/kzn-labs/conduit/api/internal/fx"
 	"github.com/kzn-labs/conduit/api/internal/handlers"
 	"github.com/kzn-labs/conduit/api/internal/idempotency"
@@ -26,6 +30,16 @@ type Config struct {
 	StableFXKey  string
 	StableFXBase string
 	AppBaseURL   string
+
+	// CCTP cross-chain inbound config. All optional -- if ArcRelayerKey is
+	// empty, the bridge routes are not registered (same as before this
+	// feature existed) rather than panicking on missing config.
+	ArcRPC           string
+	SolanaRPC        string
+	SolanaWS         string
+	ArcChainID       int64
+	ArcRelayerKey    string
+	BridgeStaleAfter time.Duration
 }
 
 func New(cfg Config) http.Handler {
@@ -39,6 +53,10 @@ func New(cfg Config) http.Handler {
 	webhookEndpointsH := &handlers.WebhookEndpoints{Pool: cfg.Pool, Dispatcher: dispatcher}
 	balanceTxH := &handlers.BalanceTransactions{Pool: cfg.Pool}
 	settlementsH := &handlers.Settlements{Pool: cfg.Pool}
+	bridgeH, err := newBridgeHandler(cfg, stableFX, dispatcher)
+	if err != nil {
+		log.Printf("bridge: CCTP cross-chain inbound disabled: %v", err)
+	}
 
 	r := chi.NewRouter()
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) })
@@ -53,6 +71,15 @@ func New(cfg Config) http.Handler {
 		// account key — this only covers creating a brand new top-level account.
 		r.Get("/currencies", currenciesH.List)
 		r.Post("/accounts", accountsH.Create)
+
+		// Cross-chain bridge endpoints are deliberately unauthenticated: this
+		// is the payer surface (see spec), and a Solana-side payer has no
+		// Conduit API key or Arc wallet at all. Only registered when
+		// ArcRelayerKey is configured -- see newBridgeHandler.
+		if bridgeH != nil {
+			r.Post("/settlement_intents/{id}/bridge/initiate", bridgeH.Initiate)
+			r.Get("/settlement_intents/{id}/bridge/status", bridgeH.Status)
+		}
 
 		r.Group(func(r chi.Router) {
 			r.Use(auth.Middleware(cfg.Pool))
@@ -86,10 +113,63 @@ func New(cfg Config) http.Handler {
 	return r
 }
 
-// StartBackgroundWorkers runs the webhook retry sweeper (every 10s) and, if
-// arcRPC/routerAddress are provided, the on-chain indexer — both block until
+// NewBridgeHandler is newBridgeHandler exported for cmd/e2e-reconcile-once,
+// which needs to build the exact same Bridge handler this package uses
+// internally without spinning up a full HTTP server -- it only calls
+// ReconcileOrphanedBridges once and exits. Builds its own StableFXProvider
+// and Dispatcher from cfg rather than requiring the caller to construct them.
+func NewBridgeHandler(cfg Config) (*handlers.Bridge, error) {
+	stableFX := fx.NewStableFXProvider(cfg.StableFXBase, cfg.StableFXKey)
+	dispatcher := webhooks.NewDispatcher(cfg.Pool)
+	return newBridgeHandler(cfg, stableFX, dispatcher)
+}
+
+// newBridgeHandler builds the CCTP Solana->Arc bridge handler. Returns a nil
+// handler (and a descriptive error, logged not fatal) if ArcRelayerKey isn't
+// configured -- cross-chain inbound is opt-in infrastructure, not required
+// for the rest of the API to run.
+func newBridgeHandler(cfg Config, stableFX *fx.StableFXProvider, dispatcher *webhooks.Dispatcher) (*handlers.Bridge, error) {
+	if cfg.ArcRelayerKey == "" {
+		return nil, errNoRelayerKey
+	}
+	key, err := crypto.HexToECDSA(strings.TrimPrefix(cfg.ArcRelayerKey, "0x"))
+	if err != nil {
+		return nil, err
+	}
+	arcRPC := cfg.ArcRPC
+	if arcRPC == "" {
+		arcRPC = "https://rpc.testnet.arc.network"
+	}
+	solanaRPC := cfg.SolanaRPC
+	if solanaRPC == "" {
+		solanaRPC = "https://api.devnet.solana.com"
+	}
+	solanaWS := cfg.SolanaWS
+	if solanaWS == "" {
+		solanaWS = "wss://api.devnet.solana.com"
+	}
+	chainID := cfg.ArcChainID
+	if chainID == 0 {
+		chainID = 5042002 // Arc testnet, deployments/arc-testnet.json
+	}
+	provider, err := bridgepkg.NewSolanaArcProvider(solanaRPC, solanaWS, arcRPC, chainID, cfg.ArcRelayerKey)
+	if err != nil {
+		return nil, err
+	}
+	return &handlers.Bridge{
+		Pool: cfg.Pool, Provider: provider, StableFX: stableFX, Webhooks: dispatcher,
+		RelayerKey: key, RelayerAddr: crypto.PubkeyToAddress(key.PublicKey),
+		StaleAfter: cfg.BridgeStaleAfter,
+	}, nil
+}
+
+var errNoRelayerKey = errors.New("ARC_RELAYER_KEY not configured")
+
+// StartBackgroundWorkers runs the webhook retry sweeper (every 10s), the CCTP
+// orphan reconciler (every 10s, if bridging is configured), and, if
+// arcRPC/routerAddress are provided, the on-chain indexer — all block until
 // ctx is cancelled. Call in a goroutine from cmd/api and cmd/devserver.
-func StartBackgroundWorkers(ctx context.Context, pool *pgxpool.Pool, arcRPC, routerAddress string) {
+func StartBackgroundWorkers(ctx context.Context, pool *pgxpool.Pool, arcRPC, routerAddress string, bridgeCfg Config) {
 	dispatcher := webhooks.NewDispatcher(pool)
 	go func() {
 		ticker := time.NewTicker(10 * time.Second)
@@ -105,6 +185,21 @@ func StartBackgroundWorkers(ctx context.Context, pool *pgxpool.Pool, arcRPC, rou
 			}
 		}
 	}()
+
+	if bridgeH, err := newBridgeHandler(bridgeCfg, fx.NewStableFXProvider(bridgeCfg.StableFXBase, bridgeCfg.StableFXKey), dispatcher); err == nil {
+		go func() {
+			ticker := time.NewTicker(10 * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					bridgeH.ReconcileOrphanedBridges(ctx)
+				}
+			}
+		}()
+	}
 
 	if arcRPC == "" || routerAddress == "" {
 		return

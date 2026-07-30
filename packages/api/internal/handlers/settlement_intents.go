@@ -31,6 +31,11 @@ type createIntentRequest struct {
 	Reference        string         `json:"reference"`
 	ExpiresIn        int64          `json:"expires_in"`
 	Metadata         map[string]any `json:"metadata"`
+	// SourceChain: "arc" (default, today's behavior, no bridge) or a CCTP
+	// source domain name like "solana". Non-"arc" runs a bridging pre-stage
+	// (internal/bridge) before the existing quote/settle path -- see
+	// internal/bridge/README.md.
+	SourceChain string `json:"source_chain"`
 }
 
 type intentResponse struct {
@@ -46,6 +51,7 @@ type intentResponse struct {
 	Created          time.Time      `json:"created"`
 	HostedURL        string         `json:"hosted_url"`
 	QRPayload        string         `json:"qr_payload"`
+	SourceChain      string         `json:"source_chain"`
 }
 
 func (h *SettlementIntents) Create(w http.ResponseWriter, r *http.Request) {
@@ -75,6 +81,9 @@ func (h *SettlementIntents) Create(w http.ResponseWriter, r *http.Request) {
 	if req.AcceptCurrencies == nil {
 		req.AcceptCurrencies = []string{}
 	}
+	if req.SourceChain == "" {
+		req.SourceChain = "arc"
+	}
 
 	ctx := r.Context()
 	q := queryable(ctx, h.Pool)
@@ -88,10 +97,10 @@ func (h *SettlementIntents) Create(w http.ResponseWriter, r *http.Request) {
 
 	_, err := q.Exec(ctx,
 		`INSERT INTO settlement_intents
-		 (id, account_id, amount, settle_currency, settle_address, accept_currencies, status, reference, metadata, expires_at, livemode)
-		 VALUES ($1,$2,$3,$4,$5,$6,'created',$7,$8,$9,$10)`,
+		 (id, account_id, amount, settle_currency, settle_address, accept_currencies, status, reference, metadata, expires_at, livemode, source_chain)
+		 VALUES ($1,$2,$3,$4,$5,$6,'created',$7,$8,$9,$10,$11)`,
 		id, principal.AccountID, req.Amount.String(), req.SettleCurrency, req.SettleAddress,
-		req.AcceptCurrencies, nullIfEmpty(req.Reference), metadataJSON, expiresAt, principal.Livemode,
+		req.AcceptCurrencies, nullIfEmpty(req.Reference), metadataJSON, expiresAt, principal.Livemode, req.SourceChain,
 	)
 	if err != nil {
 		writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
@@ -99,24 +108,24 @@ func (h *SettlementIntents) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusCreated, h.toResponse(id, req.Amount.String(), "created", req.SettleCurrency,
-		req.SettleAddress, req.AcceptCurrencies, req.Reference, req.Metadata, expiresAt, time.Now()))
+		req.SettleAddress, req.AcceptCurrencies, req.Reference, req.Metadata, expiresAt, time.Now(), req.SourceChain))
 }
 
 func (h *SettlementIntents) Get(w http.ResponseWriter, r *http.Request) {
 	id := pathParam(r, "id")
 	principal, _ := auth.FromContext(r.Context())
 
-	var amount, status, settleCurrency, settleAddress, reference string
+	var amount, status, settleCurrency, settleAddress, reference, sourceChain string
 	var acceptCurrencies []string
 	var metadataJSON []byte
 	var expiresAt, created time.Time
 
 	err := h.Pool.QueryRow(r.Context(),
 		`SELECT amount::text, status, settle_currency, settle_address, accept_currencies,
-		        COALESCE(reference,''), metadata, expires_at, created_at
+		        COALESCE(reference,''), metadata, expires_at, created_at, source_chain
 		 FROM settlement_intents WHERE id = $1 AND account_id = $2`,
 		id, principal.AccountID,
-	).Scan(&amount, &status, &settleCurrency, &settleAddress, &acceptCurrencies, &reference, &metadataJSON, &expiresAt, &created)
+	).Scan(&amount, &status, &settleCurrency, &settleAddress, &acceptCurrencies, &reference, &metadataJSON, &expiresAt, &created, &sourceChain)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			writeErr(w, apierrors.E(apierrors.CodeNotFound, "id"))
@@ -129,7 +138,7 @@ func (h *SettlementIntents) Get(w http.ResponseWriter, r *http.Request) {
 	var metadata map[string]any
 	json.Unmarshal(metadataJSON, &metadata)
 
-	resp := h.toResponse(id, amount, status, settleCurrency, settleAddress, acceptCurrencies, reference, metadata, expiresAt, created)
+	resp := h.toResponse(id, amount, status, settleCurrency, settleAddress, acceptCurrencies, reference, metadata, expiresAt, created, sourceChain)
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -142,7 +151,7 @@ func (h *SettlementIntents) List(w http.ResponseWriter, r *http.Request) {
 
 	res, qErr := h.Pool.Query(r.Context(),
 		`SELECT id, amount::text, status, settle_currency, settle_address, accept_currencies,
-		        COALESCE(reference,''), metadata, expires_at, created_at
+		        COALESCE(reference,''), metadata, expires_at, created_at, source_chain
 		 FROM settlement_intents WHERE account_id = $1 ORDER BY created_at DESC LIMIT 100`,
 		principal.AccountID,
 	)
@@ -154,17 +163,17 @@ func (h *SettlementIntents) List(w http.ResponseWriter, r *http.Request) {
 
 	var results []intentResponse
 	for res.Next() {
-		var id, amount, status, settleCurrency, settleAddress, reference string
+		var id, amount, status, settleCurrency, settleAddress, reference, sourceChain string
 		var acceptCurrencies []string
 		var metadataJSON []byte
 		var expiresAt, created time.Time
-		if err := res.Scan(&id, &amount, &status, &settleCurrency, &settleAddress, &acceptCurrencies, &reference, &metadataJSON, &expiresAt, &created); err != nil {
+		if err := res.Scan(&id, &amount, &status, &settleCurrency, &settleAddress, &acceptCurrencies, &reference, &metadataJSON, &expiresAt, &created, &sourceChain); err != nil {
 			writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
 			return
 		}
 		var metadata map[string]any
 		json.Unmarshal(metadataJSON, &metadata)
-		results = append(results, h.toResponse(id, amount, status, settleCurrency, settleAddress, acceptCurrencies, reference, metadata, expiresAt, created))
+		results = append(results, h.toResponse(id, amount, status, settleCurrency, settleAddress, acceptCurrencies, reference, metadata, expiresAt, created, sourceChain))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": results})
 }
@@ -480,13 +489,14 @@ func (h *SettlementIntents) Confirm(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *SettlementIntents) toResponse(id, amount, status, settleCurrency, settleAddress string,
-	acceptCurrencies []string, reference string, metadata map[string]any, expiresAt, created time.Time) intentResponse {
+	acceptCurrencies []string, reference string, metadata map[string]any, expiresAt, created time.Time, sourceChain string) intentResponse {
 	return intentResponse{
 		ID: id, Status: status, Amount: amount, SettleCurrency: settleCurrency, SettleAddress: settleAddress,
 		AcceptCurrencies: acceptCurrencies, Reference: reference, Metadata: metadata,
 		ExpiresAt: expiresAt, Created: created,
-		HostedURL: h.AppBaseURL + "/pay/" + id,
-		QRPayload: id,
+		HostedURL:   h.AppBaseURL + "/pay/" + id,
+		QRPayload:   id,
+		SourceChain: sourceChain,
 	}
 }
 

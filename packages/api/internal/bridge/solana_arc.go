@@ -52,13 +52,13 @@ const receiveMessageABIJSON = `[{
 // comes from config.go, sourced from the live-verified facts in
 // docs/cctp-capability.md.
 type SolanaArcProvider struct {
-	solanaRPC  *rpc.Client
+	solanaRPC   *rpc.Client
 	solanaWSURL string
-	arcClient  *ethclient.Client
-	arcChainID *big.Int
-	arcSigner  *ecdsa.PrivateKey
-	httpClient *http.Client
-	mintABI    abi.ABI
+	arcClient   *ethclient.Client
+	arcChainID  *big.Int
+	arcSigner   *ecdsa.PrivateKey
+	httpClient  *http.Client
+	mintABI     abi.ABI
 }
 
 func NewSolanaArcProvider(solanaRPCURL, solanaWSURL, arcRPCURL string, arcChainID int64, arcSignerHexKey string) (*SolanaArcProvider, error) {
@@ -85,8 +85,8 @@ func NewSolanaArcProvider(solanaRPCURL, solanaWSURL, arcRPCURL string, arcChainI
 	}, nil
 }
 
-func (p *SolanaArcProvider) Name() string          { return "solana-arc" }
-func (p *SolanaArcProvider) SourceDomain() uint32   { return SolanaDomain }
+func (p *SolanaArcProvider) Name() string         { return "solana-arc" }
+func (p *SolanaArcProvider) SourceDomain() uint32 { return SolanaDomain }
 
 // InitiateBurn builds the depositForBurn instruction and returns an unsigned
 // (payer signature missing) transaction for the payer's own wallet to

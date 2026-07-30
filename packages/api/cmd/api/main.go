@@ -33,11 +33,16 @@ func main() {
 	}
 	defer pool.Close()
 
-	handler := server.New(server.Config{
+	cfg := server.Config{
 		Pool: pool, StableFXKey: stableFXKey, StableFXBase: stableFXBase, AppBaseURL: appBaseURL,
-	})
+		ArcRPC:        envOr("ARC_RPC", "https://rpc.testnet.arc.network"),
+		SolanaRPC:     envOr("SOLANA_RPC", "https://api.devnet.solana.com"),
+		SolanaWS:      envOr("SOLANA_WS", "wss://api.devnet.solana.com"),
+		ArcRelayerKey: os.Getenv("ARC_RELAYER_KEY"),
+	}
+	handler := server.New(cfg)
 
-	server.StartBackgroundWorkers(ctx, pool, envOr("ARC_RPC", "https://rpc.testnet.arc.network"), os.Getenv("CONDUIT_ROUTER_ADDRESS"))
+	server.StartBackgroundWorkers(ctx, pool, cfg.ArcRPC, os.Getenv("CONDUIT_ROUTER_ADDRESS"), cfg)
 
 	log.Printf("conduit-api listening on :%s", addr)
 	srv := &http.Server{Addr: ":" + addr, Handler: handler, ReadHeaderTimeout: 5 * time.Second}

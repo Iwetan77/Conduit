@@ -22,7 +22,7 @@ function renderInline(text: string, keyPrefix: string): ReactNode[] {
       nodes.push(<strong key={`${keyPrefix}-${i++}`}>{match[2]}</strong>);
     } else if (match[3]) {
       nodes.push(
-        <code key={`${keyPrefix}-${i++}`} className="px-1 py-0.5 rounded bg-[#141414] text-[#B2F55A] text-[0.9em]">
+        <code key={`${keyPrefix}-${i++}`} className="px-1 py-0.5 bg-surface text-signal text-[0.9em]">
           {match[4]}
         </code>
       );
@@ -35,7 +35,7 @@ function renderInline(text: string, keyPrefix: string): ReactNode[] {
           href={href}
           target={isExternal ? "_blank" : undefined}
           rel={isExternal ? "noopener noreferrer" : undefined}
-          className="text-[#B2F55A] hover:underline"
+          className="text-signal hover:underline"
         >
           {match[6]}
         </a>
@@ -67,15 +67,15 @@ export function renderMarkdown(source: string): ReactNode {
       blocks.push(
         <div key={key++} className="my-4">
           {lang && lang !== "mermaid" && (
-            <div className="text-[10px] uppercase tracking-widest text-[#555] font-mono mb-1">{lang}</div>
+            <div className="text-[10px] uppercase tracking-widest text-ink-dim font-mono mb-1">{lang}</div>
           )}
           {lang === "mermaid" && (
-            <div className="text-[10px] uppercase tracking-widest text-[#555] font-mono mb-1">
+            <div className="text-[10px] uppercase tracking-widest text-ink-dim font-mono mb-1">
               diagram (mermaid source — render with any mermaid-compatible viewer)
             </div>
           )}
-          <pre className="p-4 rounded-lg overflow-x-auto text-[12px] leading-relaxed" style={{ background: "#0a0a0a", border: "1px solid #1F1F1F" }}>
-            <code className="text-[#ddd] font-mono">{codeLines.join("\n")}</code>
+          <pre className="p-4 overflow-x-auto text-[12px] leading-relaxed border border-border bg-surface">
+            <code className="text-ink font-mono">{codeLines.join("\n")}</code>
           </pre>
         </div>
       );
@@ -96,9 +96,9 @@ export function renderMarkdown(source: string): ReactNode {
         <div key={key++} className="my-4 overflow-x-auto">
           <table className="w-full text-[13px] border-collapse">
             <thead>
-              <tr className="border-b" style={{ borderColor: "#1F1F1F" }}>
+              <tr className="border-b border-border">
                 {header?.map((h, ci) => (
-                  <th key={ci} className="text-left px-3 py-2 text-[#888] font-mono text-[11px] uppercase tracking-wider">
+                  <th key={ci} className="text-left px-3 py-2 text-ink-dim font-mono text-[11px] uppercase tracking-wider">
                     {renderInline(h, `th-${key}-${ci}`)}
                   </th>
                 ))}
@@ -106,9 +106,9 @@ export function renderMarkdown(source: string): ReactNode {
             </thead>
             <tbody>
               {body.map((row, ri) => (
-                <tr key={ri} className="border-b" style={{ borderColor: "#141414" }}>
+                <tr key={ri} className="border-b border-border">
                   {row.map((c, ci) => (
-                    <td key={ci} className="px-3 py-2 text-[#ccc] align-top">
+                    <td key={ci} className="px-3 py-2 text-ink-dim align-top">
                       {renderInline(c, `td-${key}-${ri}-${ci}`)}
                     </td>
                   ))}
@@ -122,17 +122,17 @@ export function renderMarkdown(source: string): ReactNode {
     }
 
     if (line.startsWith("### ")) {
-      blocks.push(<h3 key={key++} className="text-lg font-semibold text-white mt-8 mb-2">{renderInline(line.slice(4), `h3-${key}`)}</h3>);
+      blocks.push(<h3 key={key++} className="text-lg font-semibold text-ink mt-8 mb-2">{renderInline(line.slice(4), `h3-${key}`)}</h3>);
       i++;
       continue;
     }
     if (line.startsWith("## ")) {
-      blocks.push(<h2 key={key++} className="text-2xl font-semibold text-white mt-10 mb-3">{renderInline(line.slice(3), `h2-${key}`)}</h2>);
+      blocks.push(<h2 key={key++} className="text-2xl font-semibold text-ink mt-10 mb-3">{renderInline(line.slice(3), `h2-${key}`)}</h2>);
       i++;
       continue;
     }
     if (line.startsWith("# ")) {
-      blocks.push(<h1 key={key++} className="text-3xl font-bold text-white mb-4">{renderInline(line.slice(2), `h1-${key}`)}</h1>);
+      blocks.push(<h1 key={key++} className="text-3xl font-bold text-ink mb-4">{renderInline(line.slice(2), `h1-${key}`)}</h1>);
       i++;
       continue;
     }
@@ -144,7 +144,7 @@ export function renderMarkdown(source: string): ReactNode {
         i++;
       }
       blocks.push(
-        <ul key={key++} className="list-disc list-inside space-y-1 my-3 text-[#ccc]">
+        <ul key={key++} className="list-disc list-inside space-y-1 my-3 text-ink-dim">
           {items.map((it, idx) => (
             <li key={idx}>{renderInline(it, `li-${key}-${idx}`)}</li>
           ))}
@@ -160,7 +160,7 @@ export function renderMarkdown(source: string): ReactNode {
         i++;
       }
       blocks.push(
-        <ol key={key++} className="list-decimal list-inside space-y-1 my-3 text-[#ccc]">
+        <ol key={key++} className="list-decimal list-inside space-y-1 my-3 text-ink-dim">
           {items.map((it, idx) => (
             <li key={idx}>{renderInline(it, `oli-${key}-${idx}`)}</li>
           ))}
@@ -189,7 +189,7 @@ export function renderMarkdown(source: string): ReactNode {
       i++;
     }
     blocks.push(
-      <p key={key++} className="text-[#ccc] leading-relaxed my-3">
+      <p key={key++} className="text-ink-dim leading-relaxed my-3">
         {renderInline(paraLines.join(" "), `p-${key}`)}
       </p>
     );

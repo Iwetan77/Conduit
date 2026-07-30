@@ -13,11 +13,11 @@ const GUIDES: { slug: string; title: string; description: string }[] = [
 
 export default function GuidesIndexPage() {
   return (
-    <div className="min-h-screen bg-black">
+    <div className="min-h-screen bg-bg">
       <DocNav />
-      <main className="max-w-3xl mx-auto px-6 pt-28 pb-24">
-        <h1 className="text-3xl font-bold text-white mb-2">Guides</h1>
-        <p className="text-[#888] mb-10">
+      <main className="relative max-w-3xl mx-auto px-6 pt-28 pb-24">
+        <h1 className="text-3xl font-bold text-ink mb-2">Guides</h1>
+        <p className="text-ink-dim mb-10">
           Real docs generated alongside the build — not written separately from what actually
           shipped.
         </p>
@@ -26,11 +26,10 @@ export default function GuidesIndexPage() {
             <Link
               key={g.slug}
               href={`/guides/${g.slug}`}
-              className="block p-5 rounded-lg border transition-colors hover:border-[#B2F55A]/40"
-              style={{ borderColor: "#1F1F1F", background: "#0a0a0a" }}
+              className="block p-5 border border-border bg-surface transition-colors hover:border-signal/40"
             >
-              <div className="font-mono text-sm text-white mb-1">{g.title}</div>
-              <div className="text-[13px] text-[#888]">{g.description}</div>
+              <div className="font-mono text-sm text-ink mb-1">{g.title}</div>
+              <div className="text-[13px] text-ink-dim">{g.description}</div>
             </Link>
           ))}
         </div>

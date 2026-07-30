@@ -5,16 +5,34 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        green: "#B2F55A",
-        surface: "#111111",
-        border: "#1F1F1F",
-        muted: "#555555",
+        // Graph-paper tokens — same names/values as packages/app and
+        // packages/marketing. See CONDUIT design system spec.
+        bg: "var(--bg)",
+        "grid-line": "var(--grid-line)",
+        "grid-line-lit": "var(--grid-line-lit)",
+        surface: "var(--surface)",
+        border: "var(--border)",
+        ink: "var(--ink)",
+        "ink-dim": "var(--ink-dim)",
+        signal: "var(--signal)",
+        "signal-ink": "var(--signal-ink)",
+        danger: "var(--danger)",
       },
       fontFamily: {
         mono: ["var(--font-mono)", "monospace"],
         display: ["var(--font-anton)", "sans-serif"],
         anton: ["var(--font-anton)", "sans-serif"],
-        body: ["var(--font-barlow)", "sans-serif"],
+        body: ["var(--font-mono)", "monospace"],
+      },
+      borderRadius: {
+        DEFAULT: "0",
+        none: "0",
+        sm: "0",
+        md: "0",
+        lg: "0",
+        xl: "0",
+        "2xl": "0",
+        full: "0",
       },
     },
   },

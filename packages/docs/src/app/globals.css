@@ -2,45 +2,74 @@
 @tailwind components;
 @tailwind utilities;
 
+
 :root {
-  --green: #B2F55A;
-  --surface: #111111;
-  --border: #1F1F1F;
-  --muted: #555555;
+  /* Graph-paper token set — engineer's grid, one accent, sharp corners.
+     See CONDUIT design system spec. Same variable names/values as
+     packages/app and packages/marketing. */
+  --bg: #050505;
+  --grid-line: #12140F;
+  --grid-line-lit: #1C1F16;
+  --surface: #0C0D0A;
+  --border: #1F241A;
+  --ink: #E8EAE0;
+  --ink-dim: #6B7060;
+  --signal: #B2F55A;
+  --signal-ink: #050505;
+  --danger: #F5655A;
 }
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-html { scroll-behavior: smooth; background: #000; }
+html { scroll-behavior: smooth; background: var(--bg); }
 
 body {
-  background: #000;
-  color: #fff;
-  font-family: var(--font-barlow), sans-serif;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-mono), ui-monospace, "SF Mono", Menlo, monospace;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   overflow-x: hidden;
 }
 
-::-webkit-scrollbar { width: 3px; }
-::-webkit-scrollbar-track { background: #000; }
-::-webkit-scrollbar-thumb { background: #1F1F1F; border-radius: 2px; }
-::-webkit-scrollbar-thumb:hover { background: #B2F55A; }
+/* Fixed grid background — the signature. Two square grids (24px minor,
+   120px/every-5th major) superimposed, stationary behind scrolling content. */
+.conduit-grid {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-image:
+    repeating-linear-gradient(to right, var(--grid-line-lit) 0 1px, transparent 1px 120px),
+    repeating-linear-gradient(to bottom, var(--grid-line-lit) 0 1px, transparent 1px 120px),
+    repeating-linear-gradient(to right, var(--grid-line) 0 1px, transparent 1px 24px),
+    repeating-linear-gradient(to bottom, var(--grid-line) 0 1px, transparent 1px 24px);
+}
 
-::selection { background: #B2F55A; color: #000; }
+::-webkit-scrollbar { width: 3px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 0; }
+::-webkit-scrollbar-thumb:hover { background: var(--signal); }
+
+::selection { background: var(--signal); color: var(--signal-ink); }
+
+:focus-visible {
+  outline: 1px solid var(--signal);
+  outline-offset: 1px;
+}
 
 /* Prose utilities */
-.prose-conduit h1 { font-family: var(--font-anton), sans-serif; font-size: 2.5rem; color: #fff; line-height: 1.1; margin-bottom: 1rem; letter-spacing: 0.01em; }
-.prose-conduit h2 { font-family: var(--font-anton), sans-serif; font-size: 1.5rem; color: #fff; margin-top: 2.5rem; margin-bottom: 0.75rem; letter-spacing: 0.01em; }
-.prose-conduit h3 { font-family: var(--font-mono), monospace; font-size: 0.85rem; color: #B2F55A; text-transform: uppercase; letter-spacing: 0.12em; margin-top: 2rem; margin-bottom: 0.5rem; }
-.prose-conduit p  { color: #555; font-size: 0.9rem; line-height: 1.8; margin-bottom: 1rem; }
-.prose-conduit a  { color: #B2F55A; text-decoration: none; }
+.prose-conduit h1 { font-family: var(--font-anton), sans-serif; font-size: 2.5rem; color: var(--ink); line-height: 1.1; margin-bottom: 1rem; letter-spacing: 0.01em; }
+.prose-conduit h2 { font-family: var(--font-anton), sans-serif; font-size: 1.5rem; color: var(--ink); margin-top: 2.5rem; margin-bottom: 0.75rem; letter-spacing: 0.01em; }
+.prose-conduit h3 { font-family: var(--font-mono), monospace; font-size: 0.85rem; color: var(--signal); text-transform: uppercase; letter-spacing: 0.12em; margin-top: 2rem; margin-bottom: 0.5rem; }
+.prose-conduit p  { color: var(--ink-dim); font-size: 0.9rem; line-height: 1.8; margin-bottom: 1rem; }
+.prose-conduit a  { color: var(--signal); text-decoration: none; }
 .prose-conduit a:hover { text-decoration: underline; }
-.prose-conduit code { font-family: var(--font-mono), monospace; font-size: 0.78rem; color: #B2F55A; background: #111; padding: 0.1em 0.35em; border-radius: 4px; }
-.prose-conduit pre { background: #0A0A0A; border: 1px solid #1F1F1F; border-radius: 12px; padding: 1.25rem; overflow-x: auto; margin-bottom: 1.25rem; }
-.prose-conduit pre code { background: none; padding: 0; color: #ccc; }
+.prose-conduit code { font-family: var(--font-mono), monospace; font-size: 0.78rem; color: var(--signal); background: var(--surface); padding: 0.1em 0.35em; border-radius: 0; }
+.prose-conduit pre { background: var(--surface); border: 1px solid var(--border); border-radius: 0; padding: 1.25rem; overflow-x: auto; margin-bottom: 1.25rem; }
+.prose-conduit pre code { background: none; padding: 0; color: var(--ink); }
 .prose-conduit ul { list-style: none; padding: 0; margin-bottom: 1rem; }
-.prose-conduit ul li { padding-left: 1.2rem; position: relative; color: #555; font-size: 0.9rem; line-height: 1.8; }
-.prose-conduit ul li::before { content: '→'; position: absolute; left: 0; color: #B2F55A; }
-.prose-conduit strong { color: #fff; font-weight: 600; }
-.prose-conduit hr { border: none; border-top: 1px solid #1F1F1F; margin: 2rem 0; }
+.prose-conduit ul li { padding-left: 1.2rem; position: relative; color: var(--ink-dim); font-size: 0.9rem; line-height: 1.8; }
+.prose-conduit ul li::before { content: '→'; position: absolute; left: 0; color: var(--signal); }
+.prose-conduit strong { color: var(--ink); font-weight: 600; }
+.prose-conduit hr { border: none; border-top: 1px solid var(--border); margin: 2rem 0; }

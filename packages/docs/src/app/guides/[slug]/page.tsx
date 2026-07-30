@@ -24,9 +24,9 @@ export default async function GuidePage({ params }: { params: Promise<{ slug: st
   const source = readFileSync(path, "utf8");
 
   return (
-    <div className="min-h-screen bg-black">
+    <div className="min-h-screen bg-bg">
       <DocNav />
-      <main className="max-w-3xl mx-auto px-6 pt-28 pb-24">{renderMarkdown(source)}</main>
+      <main className="relative max-w-3xl mx-auto px-6 pt-28 pb-24">{renderMarkdown(source)}</main>
     </div>
   );
 }

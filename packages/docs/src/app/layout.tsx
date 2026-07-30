@@ -1,11 +1,10 @@
 import type { Metadata } from "next";
 import "./globals.css";
-import { Anton, Barlow, IBM_Plex_Mono } from "next/font/google";
+import { Anton, JetBrains_Mono } from "next/font/google";
 import { DocNav } from "@/components/DocNav";
 
 const anton = Anton({ weight: "400", subsets: ["latin"], variable: "--font-anton" });
-const barlow = Barlow({ weight: ["400", "500", "600"], subsets: ["latin"], variable: "--font-barlow" });
-const mono = IBM_Plex_Mono({ weight: ["400", "500"], subsets: ["latin"], variable: "--font-mono" });
+const mono = JetBrains_Mono({ weight: ["400", "500", "600"], subsets: ["latin"], variable: "--font-mono" });
 
 export const metadata: Metadata = {
   title: { default: "Conduit Docs", template: "%s — Conduit Docs" },
@@ -15,10 +14,11 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${anton.variable} ${barlow.variable} ${mono.variable}`}>
+    <html lang="en" className={`${anton.variable} ${mono.variable}`}>
       <body>
+        <div className="conduit-grid" aria-hidden="true" />
         <DocNav />
-        <div className="max-w-3xl mx-auto px-6 pt-24 pb-32">
+        <div className="relative max-w-3xl mx-auto px-6 pt-24 pb-32">
           {children}
         </div>
       </body>

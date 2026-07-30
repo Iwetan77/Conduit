@@ -138,9 +138,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   if (!ready) return <OnboardingGate onReady={() => setReady(true)} />;
 
   return (
-    <div className="min-h-screen bg-bg text-ink flex">
+    <div className="min-h-screen bg-bg text-ink flex flex-col md:flex-row">
       <GridSignature />
-      <aside className="w-56 border-r border-border p-4 flex flex-col shrink-0">
+
+      {/* Desktop sidebar — hidden below md, replaced by the horizontal strip below */}
+      <aside className="hidden md:flex w-56 border-r border-border p-4 flex-col shrink-0">
         <Link href="/" className="font-display text-xl font-bold mb-8">Conduit</Link>
         <nav className="flex flex-col gap-1">
           {NAV.map((item) => (
@@ -167,7 +169,35 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           Sign out
         </button>
       </aside>
-      <main className="flex-1 p-8 max-w-6xl">{children}</main>
+
+      {/* Mobile: horizontal scrollable nav strip instead of a sidebar */}
+      <nav className="md:hidden flex items-center gap-1 border-b border-border px-3 py-2 overflow-x-auto shrink-0">
+        <Link href="/" className="font-display text-base font-bold mr-2 shrink-0">Conduit</Link>
+        {NAV.map((item) => (
+          <Link
+            key={item.href}
+            href={item.href}
+            className={`px-2.5 py-1.5 text-xs whitespace-nowrap shrink-0 ${
+              pathname?.startsWith(item.href)
+                ? "bg-surface text-signal"
+                : "text-ink-dim hover:text-ink"
+            }`}
+          >
+            {item.label}
+          </Link>
+        ))}
+        <button
+          className="ml-auto shrink-0 text-xs text-ink-dim hover:text-ink"
+          onClick={() => {
+            clearApiKey();
+            setReady(false);
+          }}
+        >
+          Sign out
+        </button>
+      </nav>
+
+      <main className="flex-1 p-4 md:p-8 max-w-6xl overflow-x-hidden">{children}</main>
     </div>
   );
 }

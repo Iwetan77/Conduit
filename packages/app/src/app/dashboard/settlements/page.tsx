@@ -57,7 +57,7 @@ export default function SettlementsPage() {
         <h1 className="font-display text-3xl font-bold">Settlements</h1>
       </div>
 
-      <div className="flex gap-3 mb-4">
+      <div className="flex flex-col sm:flex-row gap-3 mb-4">
         <input
           className="bg-surface border border-border px-3 py-1.5 text-sm flex-1"
           placeholder="Search reference or address..."

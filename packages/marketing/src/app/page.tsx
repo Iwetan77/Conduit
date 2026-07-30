@@ -300,9 +300,9 @@ function Hero() {
             <motion.span variants={wordVariant} className="inline-block text-white">RECEIVE.</motion.span>
           </div>
           <div className="overflow-hidden">
-            <motion.span variants={wordVariant} className="inline-block text-white">LET AGENTS</motion.span>
+            <motion.span variants={wordVariant} className="inline-block text-white">SETTLE IN</motion.span>
             {' '}
-            <motion.span variants={wordVariant} className="inline-block" style={{ color: '#B2F55A' }}>PAY.</motion.span>
+            <motion.span variants={wordVariant} className="inline-block" style={{ color: '#B2F55A' }}>YOURS.</motion.span>
           </div>
         </motion.h1>
 
@@ -313,8 +313,8 @@ function Hero() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.7, delay: 0.9 }}
         >
-          Paste an address. Share a link. Add one header.{' '}
-          Conduit converts, routes, and settles — in any currency, in under a second.
+          Accept any stablecoin, settle in yours.{' '}
+          Conduit routes and settles B2B payments atomically, in under a second.
         </motion.p>
 
         {/* Waitlist form */}
@@ -508,11 +508,11 @@ function BuildPanel() {
   return (
     <PanelShell delay={0.2}>
       <div className="space-y-2">
-        <PanelLabel>For Developers &amp; Agents</PanelLabel>
-        <PanelTitle>Conduit Relay</PanelTitle>
+        <PanelLabel>For Developers</PanelLabel>
+        <PanelTitle>Conduit API</PanelTitle>
         <PanelDesc>
-          Add one header to your service. Any agent with the Conduit SDK discovers your payment
-          requirement and fulfills it automatically — in any currency, without human input.
+          Create a settlement intent in whatever currency you want to receive. Your counterparty
+          pays in whatever they hold. Conduit routes the FX and settles atomically on-chain.
         </PanelDesc>
       </div>
 
@@ -521,25 +521,23 @@ function BuildPanel() {
           <div className="w-2 h-2 rounded-full bg-[#FF5F57]" />
           <div className="w-2 h-2 rounded-full bg-[#FEBC2E]" />
           <div className="w-2 h-2 rounded-full bg-[#28C840]" />
-          <span className="font-mono text-[9px] text-[#333] ml-1">conduit-sdk</span>
+          <span className="font-mono text-[9px] text-[#333] ml-1">conduit-node</span>
         </div>
 
         <div className="p-5 font-mono text-[11px] leading-[1.9] space-y-0">
           {[
-            { delay: 0.3, content: <span key="c0" className="text-[#444]">{'// Agent discovers and pays automatically'}</span> },
+            { delay: 0.3, content: <span key="c0" className="text-[#444]">{'// Request payment in EUR, get paid in whatever they hold'}</span> },
             { delay: 0.6, content: <>
               <span className="text-[#B2F55A]">const </span>
-              <span className="text-white">req </span>
+              <span className="text-white">intent </span>
               <span className="text-[#555]">= await </span>
               <span className="text-[#B2F55A]">conduit</span>
-              <span className="text-white">.discover(endpoint)</span>
+              <span className="text-white">.settlementIntents.create({'{'}</span>
             </> },
-            { delay: 0.9, content: <>
-              <span className="text-[#555]">await </span>
-              <span className="text-[#B2F55A]">conduit</span>
-              <span className="text-white">.fulfill(req)</span>
-            </> },
-            { delay: 1.3, content: <span key="c3" className="text-[#B2F55A]">{'// ✓ Settled. No human involved.'}</span> },
+            { delay: 0.8, content: <span className="text-[#555] pl-4">{'amount: 1_000_00, settle_currency: "EUR",'}</span> },
+            { delay: 1.0, content: <span className="text-[#555] pl-4">{'accept_currencies: ["USDC", "BRLA", "GBPA"],'}</span> },
+            { delay: 1.2, content: <span className="text-white">{'})'}</span> },
+            { delay: 1.5, content: <span key="c3" className="text-[#B2F55A]">{'// -> hosted_url, qr_payload — send either one'}</span> },
           ].map(({ delay, content }, i) => (
             <motion.div
               key={i}
@@ -550,26 +548,6 @@ function BuildPanel() {
               {content}
             </motion.div>
           ))}
-
-          <div className="mt-4 pt-4 border-t border-[#111]">
-            {[
-              { delay: 1.6, content: <span key="d0" className="text-[#333]">{'// Or direct'}</span> },
-              { delay: 1.8, content: <>
-                <span className="text-[#555]">await </span>
-                <span className="text-[#B2F55A]">conduit</span>
-                <span className="text-white">.pay{'({ recipient, amount, currency })'}</span>
-              </> },
-            ].map(({ delay, content }, i) => (
-              <motion.div
-                key={i}
-                initial={{ opacity: 0 }}
-                animate={inView ? { opacity: 1 } : {}}
-                transition={{ duration: 0.35, delay }}
-              >
-                {content}
-              </motion.div>
-            ))}
-          </div>
         </div>
       </div>
 
@@ -636,8 +614,8 @@ function HowItWorks() {
           viewport={{ once: true }} transition={{ delay: 0.2 }}
         >
           <p>
-            Every Conduit feature — direct send, payment links, QR codes, agent relay — is an
-            expression of the same underlying primitive: a payment declaration.
+            Every Conduit feature — direct send, payment links, QR codes, the settlement API — is
+            an expression of the same underlying primitive: a payment declaration.
           </p>
           <p>
             A declaration says what the recipient wants. Conduit&apos;s routing engine figures out how to
@@ -764,7 +742,7 @@ function Footer() {
             <span style={{ color: '#FFFFFF' }}>DUIT</span>
           </span>
           <p className="font-mono text-[9px] text-[#333] mt-3 leading-[1.8]">
-            Arc&apos;s native agent payment protocol
+            Accept any stablecoin, settle in yours
             <br />
             Chain ID 5042002 · Testnet 2026
           </p>

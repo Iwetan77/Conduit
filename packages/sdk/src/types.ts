@@ -77,22 +77,20 @@ export interface PaymentReceipt {
 
 // ── Client Config ─────────────────────────────────────────────────────────────
 
-// Server/agent usage example:
+// Server usage example:
 // const conduit = new ConduitClient({
 //   privateKey: process.env.PRIVATE_KEY,
 //   kitKey: process.env.KIT_KEY,
 //   network: "arc-testnet"
 // })
-// const result = await conduit.discover("https://service.xyz/api")
-// if (result.found) await conduit.fulfill(result.declaration!)
+// await conduit.pay({ recipient, amount: 10_000_000n, currency: "USDC" })
 
 export interface ConduitClientConfig {
   /** Browser wallet signer (ethers Signer or viem WalletClient).
    *  Mutually exclusive with privateKey. Required for browser flows. */
   signer?: SignerLike;
-  /** Server/agent private key for non-browser environments.
-   *  Mutually exclusive with signer. Required for server-side
-   *  cross-currency payments via conduit.discover() + fulfill(). */
+  /** Server private key for non-browser environments.
+   *  Mutually exclusive with signer. Required for server-side payments. */
   privateKey?: string;
   /** Circle App Kit Key — required for cross-currency (USDC↔EURC).
    *  Get one at console.circle.com → Keys → Kit Key */
@@ -101,9 +99,6 @@ export interface ConduitClientConfig {
   network?: "arc-testnet";
   /** Override app URL for link generation */
   appUrl?: string;
-  /** Optional spending constraints for autonomous agent operation.
-   *  In v1 these are enforced client-side. On-chain AgentRegistry is a v2 feature. */
-  agentConfig?: AgentConfig;
 }
 
 // Minimal signer abstraction — works with ethers v6 Signer and viem WalletClient
@@ -148,19 +143,4 @@ export interface FulfillOptions {
 export interface GetHistoryOptions {
   limit?: number;
   offset?: number;
-}
-
-// ── Agent Config (v1: client-side only, v2: on-chain) ──────────────────────
-// In v1, spending constraints are enforced client-side by the SDK.
-// On-chain AgentRegistry is a v2 feature.
-
-export interface AgentConfig {
-  /** Maximum spend per transaction, in USDC's minor units (6dp). 0 = unlimited. */
-  maxPerTransactionUSDC?: bigint;
-  /** Maximum spend per day, in USDC's minor units (6dp). 0 = unlimited. */
-  dailyLimitUSDC?: bigint;
-  /** Allowed tokens to send. Empty = all supported tokens. */
-  allowedTokens?: Currency[];
-  /** Whitelisted recipient addresses. Empty = any recipient. */
-  allowedRecipients?: string[];
 }

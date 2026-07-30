@@ -9,7 +9,6 @@ const APP_URL = process.env["NEXT_PUBLIC_APP_URL"] ?? "http://localhost:3000";
 const NAV_LINKS = [
   { label: "Quickstart",  href: "/" },
   { label: "Guides",      href: "/guides" },
-  { label: "Relay",       href: "/relay" },
   { label: "Reference",   href: "/reference" },
   { label: "Dashboard →", href: `${APP_URL}/dashboard`, external: true },
 ];

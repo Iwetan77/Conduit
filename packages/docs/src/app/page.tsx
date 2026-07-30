@@ -149,9 +149,6 @@ CCTP Domain:  26`}</code></pre>
 
       <ul>
         <li>
-          <a href="/relay">Conduit Relay</a> — autonomous payments for AI agents and services
-        </li>
-        <li>
           <a href="/reference">SDK Reference</a> — full API surface, every method and parameter
         </li>
         <li>

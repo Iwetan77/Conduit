@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type { PaymentDeclaration, PaymentReceipt, Currency } from "@conduit/sdk";
+import type { PaymentDeclaration, PaymentReceipt } from "@conduit/sdk";
 import type { Eip1193Provider } from "ethers";
 import { currencyDecimals, toHumanAmount } from "@conduit/sdk";
 import { formatAmount } from "@/lib/format";
@@ -13,11 +13,14 @@ import { useAccount } from "wagmi";
 
 interface PayConfirmProps {
   declaration: PaymentDeclaration;
-  payerCurrency: Currency;
   openAmount?: string; // for open-amount declarations
 }
 
-export function PayConfirm({ declaration, payerCurrency, openAmount }: PayConfirmProps) {
+export function PayConfirm({ declaration, openAmount }: PayConfirmProps) {
+  // fulfill() is same-currency only — the payer pays in exactly what the
+  // declaration asks for. Cross-currency payment against a link isn't
+  // offered from this page.
+  const payerCurrency = declaration.currency;
   const { address, isConnected } = useAccount();
   const [step, setStep] = useState<"confirm" | "pending" | "success" | "error">("confirm");
   const [receipt, setReceipt] = useState<PaymentReceipt | null>(null);
@@ -39,7 +42,7 @@ export function PayConfirm({ declaration, payerCurrency, openAmount }: PayConfir
       );
       const client = ConduitClient.fromBrowserProvider(browserProvider, "");
 
-      const result = await client.fulfill(declaration, { payerToken: payerCurrency });
+      const result = await client.fulfill(declaration);
 
       setReceipt(result);
       setStep("success");

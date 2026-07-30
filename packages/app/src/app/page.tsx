@@ -41,7 +41,7 @@ export default function HomePage() {
             <ConduitMark height={140} />
           </div>
           <p className="text-brand-muted mt-3 text-sm font-mono">
-            Arc&apos;s native agent payment protocol
+            Accept any stablecoin, settle in yours
           </p>
           <div className="flex items-center justify-center gap-2 mt-2">
             <span className="w-1.5 h-1.5 rounded-full bg-brand-green animate-pulse" />

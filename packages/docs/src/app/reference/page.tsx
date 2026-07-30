@@ -32,8 +32,8 @@ export default function ReferencePage() {
   // Required for browser flows. Mutually exclusive with privateKey.
   signer?: SignerLike;
 
-  // Server/agent private key. Mutually exclusive with signer.
-  // Required for server-side and autonomous agent flows.
+  // Server private key. Mutually exclusive with signer.
+  // Required for server-side flows.
   privateKey?: string;
 
   // Circle App Kit Key — required for cross-currency payments.
@@ -45,9 +45,6 @@ export default function ReferencePage() {
 
   // Override the app URL for link generation
   appUrl?: string;
-
-  // Optional client-side spending constraints for agents
-  agentConfig?: AgentConfig;
 }`}</code></pre>
 
       <h3>Static factory: fromBrowserProvider()</h3>
@@ -93,10 +90,6 @@ export default function ReferencePage() {
         <strong>Cross-currency</strong> (e.g. USDC → EURC): Circle StableFX swap → then{" "}
         <code>ConduitRouter.execute()</code>. Requires <code>kitKey</code>.
       </p>
-      <p>
-        If <code>agentConfig</code> is set, spending constraints are checked before any
-        execution. Violations throw synchronously.
-      </p>
 
       <hr />
 
@@ -130,39 +123,6 @@ export default function ReferencePage() {
 
       <hr />
 
-      {/* ── discover() ────────────────────────────────────────────────────── */}
-      <h2>discover()</h2>
-
-      <pre><code>{`conduit.discover(url: string): Promise<DiscoveryResult>`}</code></pre>
-
-      <pre><code>{`interface DiscoveryResult {
-  found: boolean;
-  declaration?: PaymentDeclaration; // present if found === true
-  source?: "header" | "well-known"; // how it was found
-  url?: string;                     // the payment URL that was found
-}`}</code></pre>
-
-      <p>
-        Checks a service endpoint for a Conduit payment declaration. Tries two sources
-        in order:
-      </p>
-
-      <ul>
-        <li>
-          HEAD request → <code>Conduit-Payment</code> response header
-        </li>
-        <li>
-          GET <code>{"<origin>"}/.well-known/conduit</code> → <code>paymentUrl</code> field
-        </li>
-      </ul>
-
-      <p>
-        Each check has a 5-second timeout. If neither source has a declaration,
-        returns <code>{"{ found: false }"}</code>.
-      </p>
-
-      <hr />
-
       {/* ── fulfill() ─────────────────────────────────────────────────────── */}
       <h2>fulfill()</h2>
 
@@ -172,19 +132,17 @@ export default function ReferencePage() {
 ): Promise<PaymentReceipt>`}</code></pre>
 
       <pre><code>{`interface FulfillOptions {
-  // Currency the payer holds (defaults to declaration currency)
+  // Currency the payer holds — must match the declaration's currency.
   payerToken?: Currency;
 }`}</code></pre>
 
       <p>
-        Executes a payment for a resolved declaration. Use with <code>discover()</code> for
-        the full autonomous agent pattern:
+        Executes a payment for a resolved declaration. Same-currency only — the payer's
+        currency must match what the declaration asks for, or this throws. For a
+        cross-currency payment against a declaration, resolve it with{" "}
+        <code>parse()</code>/<code>resolveDeclaration()</code> and call{" "}
+        <code>pay()</code> instead.
       </p>
-
-      <pre><code>{`const result = await conduit.discover("https://service.xyz/api");
-if (result.found) {
-  const receipt = await conduit.fulfill(result.declaration!);
-}`}</code></pre>
 
       <hr />
 
@@ -233,7 +191,7 @@ if (result.found) {
 
       <p>
         Cancels a payment declaration. Only callable by the address that created it.
-        Agents will no longer be able to fulfill a deactivated declaration.
+        A deactivated declaration can no longer be fulfilled.
       </p>
 
       <hr />
@@ -319,27 +277,6 @@ interface PaymentReceipt {
 
       <hr />
 
-      {/* ── AgentConfig ───────────────────────────────────────────────────── */}
-      <h2>AgentConfig</h2>
-
-      <pre><code>{`interface AgentConfig {
-  // Maximum spend per transaction in USDC equivalent (6 decimals).
-  // 0n or undefined = unlimited.
-  maxPerTransactionUSDC?: bigint;
-
-  // Maximum spend per day in USDC equivalent (6 decimals).
-  // v1: not enforced on-chain. v2 feature.
-  dailyLimitUSDC?: bigint;
-
-  // Tokens the agent is allowed to send. Empty = all supported.
-  allowedTokens?: Currency[];
-
-  // Recipient addresses the agent may pay. Empty = any address.
-  allowedRecipients?: string[];
-}`}</code></pre>
-
-      <hr />
-
       {/* ── Constants ─────────────────────────────────────────────────────── */}
       <h2>Constants</h2>
 
@@ -370,21 +307,6 @@ interface PaymentReceipt {
 
       <hr />
 
-      {/* ── Standalone discover() ─────────────────────────────────────────── */}
-      <h2>Standalone discover()</h2>
-
-      <p>
-        The discovery function is also exported standalone for custom integration:
-      </p>
-
-      <pre><code>{`import { discover, CONDUIT_PAYMENT_HEADER } from "@conduit/sdk";
-import { DeclarationClient } from "@conduit/sdk";
-
-// Build a DeclarationClient if you don't want a full ConduitClient
-const result = await discover(url, declarationClient);`}</code></pre>
-
-      <hr />
-
       <h2>Next steps</h2>
 
       <ul>
@@ -392,13 +314,8 @@ const result = await discover(url, declarationClient);`}</code></pre>
           <a href="/">Quickstart</a> — first payment in 5 minutes
         </li>
         <li>
-          <a href="/relay">Conduit Relay</a> — autonomous agent payment patterns
-        </li>
-        <li>
-          <a href="https://app.conduit.xyz/agent" target="_blank" rel="noopener noreferrer">
-            Relay dashboard
-          </a>{" "}
-          — interactive snippets and network parameters
+          <a href="/guides">Guides</a> — the B2B settlement API: errors, webhooks,
+          currencies, FX timing
         </li>
       </ul>
     </article>

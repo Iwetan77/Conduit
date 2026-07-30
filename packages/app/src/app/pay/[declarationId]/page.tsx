@@ -5,10 +5,9 @@
 // Rules: no crypto jargon, mobile-first, works without wallet connected, 3 taps to pay.
 
 import { use, useEffect, useState } from "react";
-import type { PaymentDeclaration, Currency } from "@conduit/sdk";
+import type { PaymentDeclaration } from "@conduit/sdk";
 import { DeclarationDisplay } from "@/components/PayFlow/DeclarationDisplay";
 import { PayConfirm } from "@/components/PayFlow/PayConfirm";
-import { TokenSelector } from "@/components/Shared/TokenBadge";
 import { Logo, Wordmark } from "@/components/Shared/Logo";
 import { motion } from "framer-motion";
 
@@ -21,7 +20,6 @@ export default function PayPage({ params }: PageParams) {
   const [declaration, setDeclaration] = useState<PaymentDeclaration | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string>("");
-  const [payerCurrency, setPayerCurrency] = useState<Currency>("USDC");
 
   useEffect(() => {
     const load = async () => {
@@ -93,22 +91,8 @@ export default function PayPage({ params }: PageParams) {
             {/* Who is requesting */}
             <DeclarationDisplay declaration={declaration} />
 
-            {/* Payer currency selector */}
-            <div className="bg-brand-surface border border-brand-border rounded-xl p-4">
-              <p className="text-sm text-brand-white mb-3 font-medium">
-                What do you want to pay with?
-              </p>
-              <TokenSelector
-                value={payerCurrency}
-                onChange={setPayerCurrency}
-              />
-            </div>
-
             {/* Pay button and wallet connect */}
-            <PayConfirm
-              declaration={declaration}
-              payerCurrency={payerCurrency}
-            />
+            <PayConfirm declaration={declaration} />
           </motion.div>
         )}
       </main>

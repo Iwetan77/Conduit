@@ -6,8 +6,6 @@ import { ReceiptClient } from "./receipt.js";
 import { swap, swapWithBrowserWallet } from "./swap.js";
 import { toHumanAmount, fromHumanAmount } from "./amount.js";
 import { currencyToAddress, currencyDecimals } from "./currency.js";
-import { discover as _discover } from "./discovery.js";
-import type { DiscoveryResult } from "./discovery.js";
 import type {
   Address,
   Bytes32,
@@ -16,7 +14,6 @@ import type {
   PaymentReceipt,
   Quote,
   ConduitClientConfig,
-  AgentConfig,
   PayOptions,
   CreateLinkOptions,
   FulfillOptions,
@@ -29,10 +26,9 @@ import type {
 ///   const conduit = ConduitClient.fromBrowserProvider(window.ethereum, kitKey);
 ///   await conduit.pay({ recipient, amount: 10_000_000n, currency: "USDC" });
 ///
-/// Server / agent usage:
+/// Server usage:
 ///   const conduit = new ConduitClient({ privateKey: process.env.PRIVATE_KEY, kitKey: "..." });
-///   const result = await conduit.discover("https://service.xyz/api");
-///   if (result.found) await conduit.fulfill(result.declaration!);
+///   await conduit.pay({ recipient, amount: 10_000_000n, currency: "USDC" });
 export class ConduitClient {
   private provider: ethers.JsonRpcProvider;
   private signerProvider: ethers.BrowserProvider | ethers.JsonRpcProvider;
@@ -41,7 +37,6 @@ export class ConduitClient {
   private kitKey: string;
   private privateKey?: string;
   private walletSigner?: ethers.Wallet;
-  private agentConfig?: AgentConfig;
 
   private declarationClient: DeclarationClient;
   private routerClient: RouterClient;
@@ -57,7 +52,6 @@ export class ConduitClient {
     this.signerProvider = this.provider;
     this.appUrl = config.appUrl ?? DEFAULT_APP_URL;
     this.kitKey = config.kitKey ?? "";
-    this.agentConfig = config.agentConfig;
 
     // Server-side: build a wallet signer from privateKey
     if (config.privateKey) {
@@ -121,9 +115,6 @@ export class ConduitClient {
   ///     Browser path: swapWithBrowserWallet() → ConduitRouter.execute()
   ///
   async pay(options: PayOptions): Promise<PaymentReceipt> {
-    // Enforce agent spending constraints before any execution
-    await this.checkAgentConstraints(options);
-
     const signerAddr = await this.getSignerAddress();
     const payerToken = this.currencyToAddress(options.payerToken ?? options.currency);
     const recipientToken = this.currencyToAddress(options.currency);
@@ -210,7 +201,10 @@ export class ConduitClient {
     return this.declarationClient.parseUrl(url);
   }
 
-  /// @notice Fulfill a parsed payment declaration.
+  /// @notice Fulfill a parsed payment declaration. Same-currency only — the
+  ///         payer's token must match what the declaration asks for. For a
+  ///         cross-currency payment against a declaration, use `pay()` with
+  ///         the declaration's recipient/amount/currency instead.
   async fulfill(
     declaration: PaymentDeclaration,
     options: FulfillOptions = {}
@@ -221,57 +215,13 @@ export class ConduitClient {
     const deadline = Math.floor(Date.now() / 1000) + QUOTE_TTL_SECONDS;
 
     if (payerToken !== declaration.recipientToken) {
-      // Cross-currency fulfill: swap via AMM, then transfer
-      const humanAmount = toHumanAmount(declaration.amount, currencyDecimals(declaration.currency));
-
-      // Detect environment: server (Node.js) vs browser
-      const isServer = typeof window === "undefined";
-      let swapResult;
-
-      if (isServer) {
-        if (!this.privateKey) {
-          throw new Error(
-            "Server-side cross-currency fulfillment requires privateKey in ConduitClient config."
-          );
-        }
-        swapResult = await swap(
-          this.privateKey,
-          payerCurrency,
-          declaration.currency,
-          humanAmount,
-          this.kitKey
-        );
-      } else {
-        swapResult = await swapWithBrowserWallet(
-          this.getEip1193Provider(),
-          payerCurrency,
-          declaration.currency,
-          humanAmount,
-          this.kitKey
-        );
-      }
-
-      const receivedAmount = swapResult.amountOutRaw
-        ? BigInt(swapResult.amountOutRaw)
-        : declaration.amount;
-
-      // Recompute deadline after swap completes — original would be expired.
-      const freshDeadline = Math.floor(Date.now() / 1000) + QUOTE_TTL_SECONDS;
-
-      const instruction = {
-        payer: signerAddr,
-        recipient: declaration.recipient,
-        payerToken: declaration.recipientToken,
-        recipientToken: declaration.recipientToken,
-        amount: receivedAmount,
-        deadline: freshDeadline,
-        declarationId: declaration.declarationId,
-      };
-
-      return this.routerClient.execute(instruction, this.getSignerProvider());
+      throw new Error(
+        `fulfill() only supports same-currency settlement — payerToken (${payerCurrency}) ` +
+        `must match the declaration's currency (${declaration.currency}). ` +
+        `For a cross-currency payment, use pay() instead.`
+      );
     }
 
-    // Same-currency fulfill
     const instruction = {
       payer: signerAddr,
       recipient: declaration.recipient,
@@ -283,18 +233,6 @@ export class ConduitClient {
     };
 
     return this.routerClient.execute(instruction, this.getSignerProvider());
-  }
-
-  /// @notice Discover a Conduit payment declaration from a service endpoint.
-  ///
-  /// Checks for a Conduit-Payment HTTP header or /.well-known/conduit file.
-  /// Returns the declaration if found, or { found: false } if not.
-  ///
-  /// Use with fulfill() for fully autonomous agent payment flows:
-  ///   const result = await conduit.discover("https://service.xyz/api")
-  ///   if (result.found) await conduit.fulfill(result.declaration!)
-  async discover(url: string): Promise<DiscoveryResult> {
-    return _discover(url, this.declarationClient);
   }
 
   /// @notice Deactivate a declaration (only callable by the creator).
@@ -369,43 +307,6 @@ export class ConduitClient {
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────────
-
-  /// @notice Enforce agent spending constraints before any payment execution.
-  private async checkAgentConstraints(options: PayOptions): Promise<void> {
-    if (!this.agentConfig) return;
-
-    const { maxPerTransactionUSDC, allowedTokens, allowedRecipients } = this.agentConfig;
-
-    if (
-      maxPerTransactionUSDC &&
-      maxPerTransactionUSDC > 0n &&
-      options.amount > maxPerTransactionUSDC
-    ) {
-      throw new Error(
-        `Payment of ${options.amount} exceeds agent maxPerTransactionUSDC ` +
-        `limit of ${maxPerTransactionUSDC}`
-      );
-    }
-
-    if (allowedTokens && allowedTokens.length > 0) {
-      if (!allowedTokens.includes(options.currency)) {
-        throw new Error(
-          `Token ${options.currency} is not in agent allowedTokens: ` +
-          `${allowedTokens.join(", ")}`
-        );
-      }
-    }
-
-    if (allowedRecipients && allowedRecipients.length > 0) {
-      const recipientLower = options.recipient.toLowerCase();
-      const allowed = allowedRecipients.map((r) => r.toLowerCase());
-      if (!allowed.includes(recipientLower)) {
-        throw new Error(
-          `Recipient ${options.recipient} is not in agent allowedRecipients`
-        );
-      }
-    }
-  }
 
   private async getSignerAddress(): Promise<Address> {
     if (this.signerAddress) return this.signerAddress;

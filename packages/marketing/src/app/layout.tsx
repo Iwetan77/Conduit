@@ -7,13 +7,13 @@ const barlow = Barlow({ weight: ["400", "500", "600", "700"], subsets: ["latin"]
 const mono = IBM_Plex_Mono({ weight: ["400", "500"], subsets: ["latin"], variable: "--font-mono" });
 
 export const metadata: Metadata = {
-  title: "Conduit — Arc's Native Agent Payment Protocol",
+  title: "Conduit — Accept Any Stablecoin, Settle in Yours",
   description:
-    "Paste an address. Share a link. Add one header. Conduit converts, routes, and settles — in any currency, in under a second.",
-  keywords: ["payments", "stablecoin", "USDC", "EURC", "Arc", "agent payments", "x402"],
+    "Accept any stablecoin, settle in yours. Conduit routes and settles B2B payments atomically, in under a second, on Arc.",
+  keywords: ["payments", "stablecoin", "USDC", "EURC", "Arc", "B2B settlement", "FX"],
   openGraph: {
-    title: "Conduit — Agent Payments, Reimagined",
-    description: "Send any currency. Receive any currency. Settle in under a second on Arc Testnet.",
+    title: "Conduit — Accept Any Stablecoin, Settle in Yours",
+    description: "Conduit routes and settles B2B payments atomically, in under a second, on Arc.",
     type: "website",
   },
 };

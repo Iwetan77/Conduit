@@ -10,7 +10,7 @@ const mono = IBM_Plex_Mono({ weight: ["400", "500"], subsets: ["latin"], variabl
 export const metadata: Metadata = {
   title: { default: "Conduit Docs", template: "%s — Conduit Docs" },
   description:
-    "Documentation for Conduit — Arc's native agent payment protocol. Quickstart, Relay integration, and SDK reference.",
+    "Documentation for Conduit — accept any stablecoin, settle in yours. Quickstart, API reference, and webhook guides.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

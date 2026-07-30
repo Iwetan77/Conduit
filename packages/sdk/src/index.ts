@@ -7,11 +7,6 @@ export { toHumanAmount, fromHumanAmount } from "./amount.js";
 export { resolveCurrency, currencyToAddress, currencyDecimals, addressToCurrency, CURRENCIES } from "./currency.js";
 export { arcTestnet } from "./chains.js";
 export { ARC_TESTNET, ERC20_ABI, ROUTER_ABI, REGISTRY_ABI } from "./constants.js";
-export { discover } from "./discovery.js";
-export {
-  CONDUIT_PAYMENT_HEADER,
-  CONDUIT_WELL_KNOWN_PATH,
-} from "./discovery.js";
 export type {
   Address,
   Bytes32,
@@ -22,11 +17,9 @@ export type {
   PaymentReceipt,
   Quote,
   ConduitClientConfig,
-  AgentConfig,
   PayOptions,
   CreateLinkOptions,
   FulfillOptions,
   GetHistoryOptions,
 } from "./types.js";
 export type { SwapResult } from "./swap.js";
-export type { DiscoveryResult } from "./discovery.js";

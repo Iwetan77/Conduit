@@ -4,13 +4,13 @@ import { Providers } from "./providers";
 import { ChainGuard } from "@/components/Shared/ChainGuard";
 
 export const metadata: Metadata = {
-  title: "Conduit — Arc Native Agent Payment Protocol",
+  title: "Conduit — Accept Any Stablecoin, Settle in Yours",
   description:
-    "Send any currency, receive any currency. Conduit routes and settles atomically in under a second on Arc Testnet.",
-  keywords: ["payments", "stablecoin", "USDC", "EURC", "Arc", "blockchain", "agent payments"],
+    "Accept any stablecoin, settle in yours. Conduit routes and settles atomically in under a second on Arc Testnet.",
+  keywords: ["payments", "stablecoin", "USDC", "EURC", "Arc", "blockchain", "B2B settlement"],
   openGraph: {
     title: "Conduit",
-    description: "Arc's native agent payment protocol",
+    description: "Accept any stablecoin, settle in yours.",
     type: "website",
   },
 };

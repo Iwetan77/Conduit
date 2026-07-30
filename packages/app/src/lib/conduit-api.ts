@@ -147,6 +147,59 @@ export function quoteSettlementIntent(id: string, payCurrency: string, apiKey?: 
   );
 }
 
+// ── Public payer surface (no API key -- a bare payment link has none) ───────
+
+export interface PublicSettlementIntent {
+  id: string;
+  status: string;
+  amount: string;
+  settle_currency: string;
+  source_chain: string;
+  expires_at: string;
+}
+
+export function getPublicSettlementIntent(id: string) {
+  return request<PublicSettlementIntent>(`/v1/settlement_intents/${id}/public`);
+}
+
+// ── Cross-chain bridge (CCTP Solana -> Arc) ──────────────────────────────────
+
+export interface BridgeInitiateResponse {
+  transfer_id: string;
+  state: string;
+  unsigned_tx_base64?: string;
+}
+
+export function initiateBridge(intentId: string, payerAddress: string, usdcAmount: string) {
+  return request<BridgeInitiateResponse>(`/v1/settlement_intents/${intentId}/bridge/initiate`, {
+    method: "POST",
+    body: { payer_address: payerAddress, usdc_amount: usdcAmount },
+  });
+}
+
+export function reportBridgeBurn(intentId: string, transferId: string, sourceTxHash: string) {
+  return request<BridgeInitiateResponse>(`/v1/settlement_intents/${intentId}/bridge/initiate`, {
+    method: "POST",
+    body: { transfer_id: transferId, source_tx_hash: sourceTxHash },
+  });
+}
+
+export interface BridgeStatus {
+  transfer_id: string;
+  state: string;
+  source_domain: number;
+  dest_domain: number;
+  burn_amount: string;
+  minted_amount?: string;
+  source_tx_hash?: string;
+  mint_tx_hash?: string;
+  updated_at: string;
+}
+
+export function getBridgeStatus(intentId: string) {
+  return request<BridgeStatus>(`/v1/settlement_intents/${intentId}/bridge/status`);
+}
+
 // ── Settlements (per-payment view: paid, received, rate, fee, tx link) ──────
 
 export interface Settlement {

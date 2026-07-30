@@ -15,6 +15,7 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/cors"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/kzn-labs/conduit/api/internal/auth"
 	bridgepkg "github.com/kzn-labs/conduit/api/internal/bridge"
@@ -59,6 +60,23 @@ func New(cfg Config) http.Handler {
 	}
 
 	r := chi.NewRouter()
+	// The app (packages/app) calls this API directly from browser JS on a
+	// different origin/port -- a genuinely cross-origin request browsers
+	// block without CORS headers. Most acute for the public payer-facing
+	// routes (bridge/*, settlement_intents/:id/public), which by definition
+	// are hit from a browser with no prior same-origin context at all. Found
+	// this live-testing the payer page for real, not caught by any static
+	// check. AllowedOrigins is a wildcard here because this is a testnet
+	// product with no cookie-based auth to leak (API keys are bearer tokens
+	// in a header, never sent implicitly) -- tighten to an explicit
+	// allowlist before any mainnet/production deployment.
+	r.Use(cors.Handler(cors.Options{
+		AllowedOrigins:   []string{"*"},
+		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowedHeaders:   []string{"Authorization", "Content-Type", "Idempotency-Key", "Conduit-Account"},
+		AllowCredentials: false,
+		MaxAge:           300,
+	}))
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) })
 
 	r.Route("/v1", func(r chi.Router) {
@@ -71,6 +89,12 @@ func New(cfg Config) http.Handler {
 		// account key — this only covers creating a brand new top-level account.
 		r.Get("/currencies", currenciesH.List)
 		r.Post("/accounts", accountsH.Create)
+
+		// Public, minimal intent details for the payer surface (/pay/[id]) --
+		// a payer landing on a bare payment link has no API key. Deliberately
+		// exposes only amount/currency/status/source_chain/expiry, never
+		// account_id/settle_address/reference/metadata.
+		r.Get("/settlement_intents/{id}/public", intentsH.GetPublic)
 
 		// Cross-chain bridge endpoints are deliberately unauthenticated: this
 		// is the payer surface (see spec), and a Solana-side payer has no

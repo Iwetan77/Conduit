@@ -111,6 +111,40 @@ func (h *SettlementIntents) Create(w http.ResponseWriter, r *http.Request) {
 		req.SettleAddress, req.AcceptCurrencies, req.Reference, req.Metadata, expiresAt, time.Now(), req.SourceChain))
 }
 
+type publicIntentResponse struct {
+	ID             string    `json:"id"`
+	Status         string    `json:"status"`
+	Amount         string    `json:"amount"`
+	SettleCurrency string    `json:"settle_currency"`
+	SourceChain    string    `json:"source_chain"`
+	ExpiresAt      time.Time `json:"expires_at"`
+}
+
+// GetPublic is GET /v1/settlement_intents/:id/public -- unauthenticated,
+// for the payer surface (/pay/[id]). A payer landing on a bare payment link
+// has no API key at all, so this exposes only what's safe to show a
+// stranger: amount, currency, status, source_chain, expiry. Deliberately
+// omits account_id, settle_address, reference, and metadata.
+func (h *SettlementIntents) GetPublic(w http.ResponseWriter, r *http.Request) {
+	id := pathParam(r, "id")
+
+	var resp publicIntentResponse
+	resp.ID = id
+	err := h.Pool.QueryRow(r.Context(),
+		`SELECT amount::text, status, settle_currency, source_chain, expires_at FROM settlement_intents WHERE id = $1`,
+		id,
+	).Scan(&resp.Amount, &resp.Status, &resp.SettleCurrency, &resp.SourceChain, &resp.ExpiresAt)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			writeErr(w, apierrors.E(apierrors.CodeNotFound, "id"))
+			return
+		}
+		writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
 func (h *SettlementIntents) Get(w http.ResponseWriter, r *http.Request) {
 	id := pathParam(r, "id")
 	principal, _ := auth.FromContext(r.Context())

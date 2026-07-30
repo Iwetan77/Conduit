@@ -8,6 +8,7 @@ import { use, useEffect, useState } from "react";
 import type { PaymentDeclaration } from "@conduit/sdk";
 import { DeclarationDisplay } from "@/components/PayFlow/DeclarationDisplay";
 import { PayConfirm } from "@/components/PayFlow/PayConfirm";
+import { SettlementIntentPay } from "@/components/PayFlow/SettlementIntentPay";
 import { Logo, Wordmark } from "@/components/Shared/Logo";
 import { motion } from "framer-motion";
 
@@ -17,6 +18,37 @@ interface PageParams {
 
 export default function PayPage({ params }: PageParams) {
   const { declarationId } = use(params);
+
+  // Two payment surfaces share this route: settlement_intents (si_ prefixed
+  // ids, the B2B REST API -- including the CCTP bridge flow) and the older
+  // on-chain PaymentDeclaration flow (bytes32 hashes). Same hosted_url shape
+  // either way (AppBaseURL + "/pay/" + id), so this dispatches on id format
+  // rather than needing a second route.
+  if (declarationId.startsWith("si_")) {
+    return (
+      <div className="min-h-screen bg-bg flex flex-col">
+        <header className="px-6 py-4 border-b border-border flex justify-center">
+          <Logo size="sm" />
+        </header>
+        <main className="flex-1 max-w-sm mx-auto w-full px-4 py-8 space-y-8">
+          <SettlementIntentPay intentId={declarationId} />
+        </main>
+        <footer className="px-6 py-4 border-t border-border flex justify-center">
+          <div className="flex items-center gap-2 text-ink-dim text-xs font-mono">
+            <span>Powered by</span>
+            <Wordmark size="sm" />
+            <span>·</span>
+            <span>Arc Testnet</span>
+          </div>
+        </footer>
+      </div>
+    );
+  }
+
+  return <DeclarationPay declarationId={declarationId} />;
+}
+
+function DeclarationPay({ declarationId }: { declarationId: string }) {
   const [declaration, setDeclaration] = useState<PaymentDeclaration | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string>("");

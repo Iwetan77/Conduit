@@ -45,4 +45,5 @@ Thumbs.db
 
 # Claude's own resumability notes -- never commit, local scratch only
 whereistopped.md
+WHERE-I-STOPPED.md
 DESIGN-NOTES.md

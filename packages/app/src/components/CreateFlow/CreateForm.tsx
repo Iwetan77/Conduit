@@ -60,7 +60,7 @@ export function CreateForm({ onSuccess }: CreateFormProps) {
   if (!mounted || !isConnected) {
     return (
       <div className="text-center py-12 space-y-4">
-        <p className="text-brand-muted">Connect your wallet to create a payment link.</p>
+        <p className="text-ink-dim">Connect your wallet to create a payment link.</p>
         <WalletConnect />
       </div>
     );
@@ -77,7 +77,7 @@ export function CreateForm({ onSuccess }: CreateFormProps) {
       />
 
       <div className="flex flex-col gap-1.5">
-        <label className="text-xs font-mono text-brand-muted uppercase tracking-wider">
+        <label className="text-xs font-mono text-ink-dim uppercase tracking-wider">
           Label (optional)
         </label>
         <input
@@ -86,29 +86,29 @@ export function CreateForm({ onSuccess }: CreateFormProps) {
           onChange={(e) => setCreateFlow({ label: e.target.value })}
           placeholder="e.g. Table 7, Invoice #42, Coffee"
           maxLength={80}
-          className="w-full px-4 py-3 rounded-xl bg-brand-surface border border-brand-border
-                     text-brand-white placeholder:text-brand-muted outline-none
-                     focus:border-brand-white/30 transition-colors"
+          className="w-full px-4 py-3 bg-surface border border-border
+                     text-ink placeholder:text-ink-dim outline-none
+                     focus:border-ink-dim/30 transition-colors"
         />
       </div>
 
       {error && (
-        <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/30">
-          <p className="text-red-400 text-sm font-mono">{error}</p>
+        <div className="p-3 bg-danger/10 border border-danger/30">
+          <p className="text-danger text-sm font-mono">{error}</p>
         </div>
       )}
 
       <button
         type="submit"
         disabled={isSubmitting}
-        className="w-full py-4 rounded-xl bg-brand-green text-brand-black
-                   font-mono text-lg hover:bg-brand-green/90 transition-colors
+        className="w-full py-4 bg-signal text-signal-ink
+                   font-mono text-lg hover:bg-signal/90 transition-colors
                    disabled:opacity-50 disabled:cursor-not-allowed"
       >
         {isSubmitting ? "Creating on-chain..." : "Create Payment Link"}
       </button>
 
-      <p className="text-xs text-brand-muted text-center">
+      <p className="text-xs text-ink-dim text-center">
         Creates a declaration on Arc Testnet. Anyone with the link can pay you.
       </p>
     </form>

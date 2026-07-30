@@ -55,7 +55,7 @@ export function PayConfirm({ declaration, openAmount }: PayConfirmProps) {
   if (!isConnected) {
     return (
       <div className="space-y-4">
-        <p className="text-center text-brand-muted text-sm">
+        <p className="text-center text-ink-dim text-sm">
           Connect your wallet to pay
         </p>
         <WalletConnectCompact />
@@ -83,15 +83,15 @@ export function PayConfirm({ declaration, openAmount }: PayConfirmProps) {
 
           <button
             onClick={handlePay}
-            className="w-full py-4 rounded-2xl bg-brand-green text-brand-black
-                       font-mono text-xl hover:bg-brand-green/90 transition-colors"
+            className="w-full py-4 bg-signal text-signal-ink
+                       font-mono text-xl hover:bg-signal/90 transition-colors"
           >
             {amount
               ? `Pay ${formatAmount(amount, declaration.currency)}`
               : "Pay"}
           </button>
 
-          <p className="text-xs text-center text-brand-muted">
+          <p className="text-xs text-center text-ink-dim">
             Settles in under a second on Arc · No hidden fees
           </p>
         </motion.div>
@@ -105,11 +105,11 @@ export function PayConfirm({ declaration, openAmount }: PayConfirmProps) {
           className="text-center py-12 space-y-4"
         >
           <div
-            className="w-14 h-14 rounded-full border-2 border-brand-green border-t-transparent
+            className="w-14 h-14 border-2 border-signal border-t-transparent
                           animate-spin mx-auto"
           />
-          <p className="text-brand-white font-mono">Settling on Arc...</p>
-          <p className="text-brand-muted text-sm font-mono">Sub-second finality</p>
+          <p className="text-ink font-mono">Settling on Arc...</p>
+          <p className="text-ink-dim text-sm font-mono">Sub-second finality</p>
         </motion.div>
       )}
 
@@ -131,14 +131,14 @@ export function PayConfirm({ declaration, openAmount }: PayConfirmProps) {
           animate={{ opacity: 1 }}
           className="space-y-4"
         >
-          <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/30">
-            <p className="text-red-400 font-mono text-sm mb-1">Payment failed</p>
-            <p className="text-red-400/70 text-xs font-mono">{error}</p>
+          <div className="p-4 bg-danger/10 border border-danger/30">
+            <p className="text-danger font-mono text-sm mb-1">Payment failed</p>
+            <p className="text-danger/70 text-xs font-mono">{error}</p>
           </div>
           <button
             onClick={() => setStep("confirm")}
-            className="w-full py-3 rounded-xl border border-brand-border
-                       text-brand-white hover:border-brand-white/20 transition-colors"
+            className="w-full py-3 border border-border
+                       text-ink hover:border-ink-dim/20 transition-colors"
           >
             Try Again
           </button>

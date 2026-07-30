@@ -57,26 +57,26 @@ export default function PayPage({ params }: PageParams) {
   }, [declarationId]);
 
   return (
-    <div className="min-h-screen bg-brand-black flex flex-col">
+    <div className="min-h-screen bg-bg flex flex-col">
       {/* Minimal header */}
-      <header className="px-6 py-4 border-b border-brand-border flex justify-center">
+      <header className="px-6 py-4 border-b border-border flex justify-center">
         <Logo size="sm" />
       </header>
 
       <main className="flex-1 max-w-sm mx-auto w-full px-4 py-8 space-y-8">
         {isLoading && (
           <div className="space-y-6 animate-pulse">
-            <div className="h-8 bg-brand-surface rounded-xl" />
-            <div className="h-32 bg-brand-surface rounded-2xl" />
-            <div className="h-14 bg-brand-surface rounded-2xl" />
+            <div className="h-8 bg-surface" />
+            <div className="h-32 bg-surface" />
+            <div className="h-14 bg-surface" />
           </div>
         )}
 
         {error && (
           <div className="text-center py-16 space-y-3">
             <p className="text-4xl">⚠</p>
-            <p className="text-brand-white font-medium">{error}</p>
-            <a href="/" className="text-brand-green text-sm hover:underline">
+            <p className="text-ink font-medium">{error}</p>
+            <a href="/" className="text-signal text-sm hover:underline">
               Go to Conduit →
             </a>
           </div>
@@ -98,8 +98,8 @@ export default function PayPage({ params }: PageParams) {
       </main>
 
       {/* Footer */}
-      <footer className="px-6 py-4 border-t border-brand-border flex justify-center">
-        <div className="flex items-center gap-2 text-brand-muted text-xs font-mono">
+      <footer className="px-6 py-4 border-t border-border flex justify-center">
+        <div className="flex items-center gap-2 text-ink-dim text-xs font-mono">
           <span>Powered by</span>
           <Wordmark size="sm" />
           <span>·</span>

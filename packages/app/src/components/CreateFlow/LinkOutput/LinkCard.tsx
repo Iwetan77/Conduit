@@ -65,11 +65,11 @@ export function LinkCard({
         ref={cardRef}
         style={{
           flex: 1,
-          background: "#000000",
-          border: "1px solid #1F1F1F",
+          background: "var(--bg)",
+          border: "1px solid var(--border)",
           borderRadius: "16px",
           padding: "28px",
-          fontFamily: "Barlow, sans-serif",
+          fontFamily: "var(--font-mono), monospace",
           display: "flex",
           flexDirection: "column",
           gap: "20px",
@@ -88,8 +88,8 @@ export function LinkCard({
           </div>
           <span style={{
             fontSize: "10px",
-            fontFamily: "IBM Plex Mono, monospace",
-            color: "#666666",
+            fontFamily: "var(--font-mono), monospace",
+            color: "var(--ink-dim)",
             letterSpacing: "0.1em",
             textTransform: "uppercase",
           }}>
@@ -100,25 +100,25 @@ export function LinkCard({
         {/* Amount */}
         <div style={{ textAlign: "center", padding: "8px 0" }}>
           {label && (
-            <p style={{ color: "#888888", fontSize: "13px", marginBottom: "8px" }}>{label}</p>
+            <p style={{ color: "var(--ink-dim)", fontSize: "13px", marginBottom: "8px" }}>{label}</p>
           )}
           <p style={{
             fontFamily: "Anton, sans-serif",
             fontWeight: 800,
             fontSize: "48px",
-            color: "#FFFFFF",
+            color: "var(--ink)",
             lineHeight: 1,
           }}>
             {displayAmount}
           </p>
-          <p style={{ color: "#666666", fontSize: "13px", marginTop: "8px" }}>
+          <p style={{ color: "var(--ink-dim)", fontSize: "13px", marginTop: "8px" }}>
             Pay in any currency
           </p>
         </div>
 
         {/* Footer */}
         <div style={{
-          borderTop: "1px solid #1F1F1F",
+          borderTop: "1px solid var(--border)",
           paddingTop: "14px",
           display: "flex",
           flexDirection: "column",
@@ -126,15 +126,15 @@ export function LinkCard({
           marginTop: "auto",
         }}>
           <span style={{
-            fontFamily: "IBM Plex Mono, monospace",
-            color: "#666666",
+            fontFamily: "var(--font-mono), monospace",
+            color: "var(--ink-dim)",
             fontSize: "11px",
           }}>
             {shortRecipient}
           </span>
           <span style={{
-            fontFamily: "IBM Plex Mono, monospace",
-            color: "#B2F55A",
+            fontFamily: "var(--font-mono), monospace",
+            color: "var(--signal)",
             fontSize: "10px",
             wordBreak: "break-all",
           }}>
@@ -147,24 +147,24 @@ export function LinkCard({
       <div className="flex flex-col gap-2 mt-3">
         <button
           onClick={copyUrl}
-          className="w-full py-3 rounded-xl border border-brand-border
-                     text-sm font-mono text-brand-muted hover:text-brand-white
-                     hover:border-brand-white/20 transition-colors"
+          className="w-full py-3 border border-border
+                     text-sm font-mono text-ink-dim hover:text-ink
+                     hover:border-ink-dim/20 transition-colors"
         >
           Copy URL
         </button>
         <button
           onClick={shareToX}
-          className="w-full py-3 rounded-xl border border-brand-border
-                     text-sm font-mono text-brand-muted hover:text-brand-white
-                     hover:border-brand-green/30 transition-colors"
+          className="w-full py-3 border border-border
+                     text-sm font-mono text-ink-dim hover:text-ink
+                     hover:border-signal/30 transition-colors"
         >
           Share to X
         </button>
         <button
           onClick={downloadPng}
-          className="w-full py-3 rounded-xl bg-brand-green/10 border border-brand-green/30
-                     text-sm font-mono text-brand-green hover:bg-brand-green/20 transition-colors"
+          className="w-full py-3 bg-signal/10 border border-signal/30
+                     text-sm font-mono text-signal hover:bg-signal/20 transition-colors"
         >
           Download PNG
         </button>

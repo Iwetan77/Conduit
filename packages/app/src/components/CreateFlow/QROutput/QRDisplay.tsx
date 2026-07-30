@@ -67,12 +67,12 @@ export function QRDisplay({
       {/* QR Card — grows to fill column height, designed for physical printing */}
       <div
         ref={cardRef}
-        className="bg-brand-black border border-brand-border rounded-2xl overflow-hidden"
+        className="bg-bg border border-border overflow-hidden"
         style={{ flex: 1 }}
       >
         <div
           style={{
-            background: "#000000",
+            background: "var(--bg)",
             padding: "32px",
             display: "flex",
             flexDirection: "column",
@@ -95,16 +95,16 @@ export function QRDisplay({
           {/* QR Code */}
           <div
             style={{
-              background: "#000000",
+              background: "var(--bg)",
               padding: "12px",
               borderRadius: "12px",
-              border: "2px solid #1F1F1F",
+              border: "2px solid var(--border)",
             }}
           >
             <QRCodeSVG
               value={paymentUrl}
               size={220}
-              bgColor="#000000"
+              bgColor="#050505"
               fgColor="#B2F55A"
               level="H"
               includeMargin={false}
@@ -114,21 +114,21 @@ export function QRDisplay({
           {/* Amount */}
           <div style={{ textAlign: "center" }}>
             {label && (
-              <p style={{ color: "#666666", fontSize: "13px", marginBottom: "6px", fontFamily: "Barlow, sans-serif" }}>
+              <p style={{ color: "var(--ink-dim)", fontSize: "13px", marginBottom: "6px", fontFamily: "var(--font-mono), monospace" }}>
                 {label}
               </p>
             )}
-            <p style={{ fontFamily: "Anton, sans-serif", fontWeight: 800, fontSize: "32px", color: "#FFFFFF", lineHeight: 1 }}>
+            <p style={{ fontFamily: "Anton, sans-serif", fontWeight: 800, fontSize: "32px", color: "var(--ink)", lineHeight: 1 }}>
               {displayAmount}
             </p>
-            <p style={{ color: "#666666", fontSize: "12px", marginTop: "6px", fontFamily: "Barlow, sans-serif" }}>
+            <p style={{ color: "var(--ink-dim)", fontSize: "12px", marginTop: "6px", fontFamily: "var(--font-mono), monospace" }}>
               Scan to pay · Any currency accepted
             </p>
           </div>
 
           {/* Footer */}
-          <div style={{ borderTop: "1px solid #1F1F1F", paddingTop: "12px", width: "100%", textAlign: "center", marginTop: "auto" }}>
-            <span style={{ fontFamily: "IBM Plex Mono, monospace", color: "#666666", fontSize: "10px", letterSpacing: "0.05em" }}>
+          <div style={{ borderTop: "1px solid var(--border)", paddingTop: "12px", width: "100%", textAlign: "center", marginTop: "auto" }}>
+            <span style={{ fontFamily: "var(--font-mono), monospace", color: "var(--ink-dim)", fontSize: "10px", letterSpacing: "0.05em" }}>
               — Powered by Conduit —
             </span>
           </div>
@@ -139,24 +139,24 @@ export function QRDisplay({
       <div className="flex flex-col gap-2 mt-3">
         <button
           onClick={downloadPng}
-          className="w-full py-3 rounded-xl border border-brand-border
-                     text-sm font-mono text-brand-muted hover:text-brand-white
-                     hover:border-brand-white/20 transition-colors"
+          className="w-full py-3 border border-border
+                     text-sm font-mono text-ink-dim hover:text-ink
+                     hover:border-ink-dim/20 transition-colors"
         >
           Download PNG
         </button>
         <button
           onClick={downloadPdf}
-          className="w-full py-3 rounded-xl bg-brand-green/10 border border-brand-green/30
-                     text-sm font-mono text-brand-green hover:bg-brand-green/20 transition-colors"
+          className="w-full py-3 bg-signal/10 border border-signal/30
+                     text-sm font-mono text-signal hover:bg-signal/20 transition-colors"
         >
           Download PDF (A5)
         </button>
         <button
           onClick={handlePrint}
-          className="w-full py-3 rounded-xl border border-brand-border
-                     text-sm font-mono text-brand-muted hover:text-brand-white
-                     hover:border-brand-white/20 transition-colors no-print"
+          className="w-full py-3 border border-border
+                     text-sm font-mono text-ink-dim hover:text-ink
+                     hover:border-ink-dim/20 transition-colors no-print"
         >
           Print
         </button>

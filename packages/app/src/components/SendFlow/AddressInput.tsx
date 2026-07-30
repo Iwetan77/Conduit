@@ -16,7 +16,7 @@ export function AddressInput({ value, onChange, placeholder }: AddressInputProps
 
   return (
     <div className="flex flex-col gap-1.5">
-      <label className="text-xs font-mono text-brand-muted uppercase tracking-wider">
+      <label className="text-xs font-mono text-ink-dim uppercase tracking-wider">
         Recipient Address
       </label>
       <div className="relative">
@@ -26,26 +26,26 @@ export function AddressInput({ value, onChange, placeholder }: AddressInputProps
           onChange={(e) => onChange(e.target.value)}
           onBlur={() => setTouched(true)}
           placeholder={placeholder ?? "0x..."}
-          className={`w-full px-4 py-3 rounded-xl font-mono text-sm
-                       bg-brand-surface border transition-colors outline-none
-                       text-brand-white placeholder:text-brand-muted
+          className={`w-full px-4 py-3 font-mono text-sm
+                       bg-surface border transition-colors outline-none
+                       text-ink placeholder:text-ink-dim
                        ${showError
-                         ? "border-red-500/50 focus:border-red-500"
+                         ? "border-danger/50 focus:border-danger"
                          : value && isValid
-                         ? "border-brand-green/50 focus:border-brand-green"
-                         : "border-brand-border focus:border-brand-white/30"
+                         ? "border-signal/50 focus:border-signal"
+                         : "border-border focus:border-ink-dim/30"
                        }`}
           spellCheck={false}
           autoComplete="off"
         />
         {value && isValid && (
-          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-brand-green text-sm">
+          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-signal text-sm">
             ✓
           </span>
         )}
       </div>
       {showError && (
-        <p className="text-xs text-red-400 font-mono">Invalid Ethereum address</p>
+        <p className="text-xs text-danger font-mono">Invalid Ethereum address</p>
       )}
     </div>
   );

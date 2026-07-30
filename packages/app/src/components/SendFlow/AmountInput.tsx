@@ -41,17 +41,17 @@ export function AmountInput({
 
   return (
     <div className="flex flex-col gap-3">
-      <label className="text-xs font-mono text-brand-muted uppercase tracking-wider">
+      <label className="text-xs font-mono text-ink-dim uppercase tracking-wider">
         {label}
       </label>
 
       {/* Large amount display */}
       <div
-        className={`relative bg-brand-surface border rounded-xl overflow-hidden transition-colors
-                    ${showError ? "border-red-500/50" : "border-brand-border focus-within:border-brand-white/30"}`}
+        className={`relative bg-surface border overflow-hidden transition-colors
+                    ${showError ? "border-danger/50" : "border-border focus-within:border-ink-dim/30"}`}
       >
         <div className="flex items-center px-4 py-4 gap-3">
-          <span className="text-brand-muted text-2xl font-display select-none">
+          <span className="text-ink-dim text-2xl font-display select-none">
             {SYMBOLS[currency] ?? ""}
           </span>
           <input
@@ -61,7 +61,7 @@ export function AmountInput({
             onBlur={() => setTouched(true)}
             placeholder="0.00"
             className="flex-1 bg-transparent text-3xl font-display font-bold
-                       text-brand-white outline-none placeholder:text-brand-border"
+                       text-ink outline-none placeholder:text-ink-dim"
             min="0"
             step={(1 / 10 ** decimals).toFixed(decimals)}
           />
@@ -69,12 +69,12 @@ export function AmountInput({
 
         {max !== undefined && (
           <div className="px-4 pb-3 flex justify-between items-center">
-            <span className="text-xs text-brand-muted font-mono">
+            <span className="text-xs text-ink-dim font-mono">
               Balance: {toHumanAmount(max, decimals)} {currency}
             </span>
             <button
               onClick={() => onChange(toHumanAmount(max, decimals))}
-              className="text-xs text-brand-green font-mono hover:text-brand-green/70 transition-colors"
+              className="text-xs text-signal font-mono hover:text-signal/70 transition-colors"
             >
               MAX
             </button>
@@ -85,7 +85,7 @@ export function AmountInput({
       <TokenSelector value={currency} onChange={onCurrencyChange} label="Currency" />
 
       {showError && (
-        <p className="text-xs text-red-400 font-mono">
+        <p className="text-xs text-danger font-mono">
           Enter a valid amount greater than 0
         </p>
       )}

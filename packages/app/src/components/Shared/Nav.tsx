@@ -146,7 +146,7 @@ export function Nav() {
   const isWrongNetwork = mounted && isConnected && chainId !== arcTestnet.id;
 
   return (
-    <header className="fixed top-0 left-0 right-0 z-50 border-b border-border bg-bg/90 backdrop-blur-sm">
+    <header className="fixed top-0 left-0 right-0 z-50 border-b border-border bg-bg/90">
       <div className="max-w-6xl mx-auto px-6 h-16 flex items-center">
         <div className="flex-1">
           <Logo size="sm" />
@@ -195,7 +195,7 @@ export function MobileNav() {
   const pathname = usePathname();
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-50 border-t border-border bg-bg/95 backdrop-blur-sm md:hidden">
+    <nav className="fixed bottom-0 left-0 right-0 z-50 border-t border-border bg-bg/95 md:hidden">
       <div className="flex">
         {NAV_LINKS.map(({ href, label }) => {
           const isActive = href === "/" ? pathname === "/" : pathname.startsWith(href);

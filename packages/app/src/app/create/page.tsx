@@ -31,21 +31,21 @@ export default function CreatePage() {
   const amount = result?.amount ? parseAmount(result.amount, currency) : 0n;
 
   return (
-    <div className="min-h-screen bg-brand-black">
+    <div className="min-h-screen bg-bg">
       <Nav />
 
       <main className="max-w-2xl mx-auto px-4 pt-24 pb-24">
         <div className="mb-8">
-          <h1 className="text-3xl font-anton text-brand-white">
+          <h1 className="text-3xl font-anton text-ink">
             Create Payment
           </h1>
-          <p className="text-brand-muted text-sm mt-1">
+          <p className="text-ink-dim text-sm mt-1">
             Generate a link for digital sharing and a QR for physical locations.
           </p>
         </div>
 
         {!result ? (
-          <div className="bg-brand-surface border border-brand-border rounded-2xl p-6">
+          <div className="bg-surface border border-border p-6">
             <CreateForm onSuccess={handleSuccess} />
           </div>
         ) : (
@@ -55,23 +55,23 @@ export default function CreatePage() {
             className="space-y-6"
           >
             {/* Tab switcher — only needed on mobile; desktop shows both columns */}
-            <div className="md:hidden flex bg-brand-surface border border-brand-border rounded-xl p-1 gap-1">
+            <div className="md:hidden flex bg-surface border border-border p-1 gap-1">
               <button
                 onClick={() => setActiveTab("link")}
-                className={`flex-1 py-2.5 rounded-lg text-sm font-mono transition-all ${
+                className={`flex-1 py-2.5 text-sm font-mono transition-all ${
                   activeTab === "link"
-                    ? "bg-brand-black text-brand-white"
-                    : "text-brand-muted hover:text-brand-white"
+                    ? "bg-bg text-ink"
+                    : "text-ink-dim hover:text-ink"
                 }`}
               >
                 Payment Link
               </button>
               <button
                 onClick={() => setActiveTab("qr")}
-                className={`flex-1 py-2.5 rounded-lg text-sm font-mono transition-all ${
+                className={`flex-1 py-2.5 text-sm font-mono transition-all ${
                   activeTab === "qr"
-                    ? "bg-brand-black text-brand-white"
-                    : "text-brand-muted hover:text-brand-white"
+                    ? "bg-bg text-ink"
+                    : "text-ink-dim hover:text-ink"
                 }`}
               >
                 QR Code
@@ -81,7 +81,7 @@ export default function CreatePage() {
             {/* Outputs side by side on desktop, tabs on mobile */}
             <div className="grid md:grid-cols-2 gap-6 md:items-stretch">
               <div className={`${activeTab === "link" ? "block" : "hidden md:block"} flex flex-col`}>
-                <p className="text-xs font-mono text-brand-muted uppercase tracking-wider mb-3">
+                <p className="text-xs font-mono text-ink-dim uppercase tracking-wider mb-3">
                   Payment Link — Digital sharing
                 </p>
                 <LinkCard
@@ -95,7 +95,7 @@ export default function CreatePage() {
               </div>
 
               <div className={`${activeTab === "qr" ? "block" : "hidden md:block"} flex flex-col`}>
-                <p className="text-xs font-mono text-brand-muted uppercase tracking-wider mb-3">
+                <p className="text-xs font-mono text-ink-dim uppercase tracking-wider mb-3">
                   QR Code — Physical commerce
                 </p>
                 <QRDisplay
@@ -113,9 +113,9 @@ export default function CreatePage() {
                 href={result.paymentUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="flex-1 py-3 text-center rounded-xl border border-brand-border
-                           text-sm text-brand-muted hover:text-brand-white
-                           hover:border-brand-white/20 transition-colors"
+                className="flex-1 py-3 text-center border border-border
+                           text-sm text-ink-dim hover:text-ink
+                           hover:border-ink-dim/20 transition-colors"
               >
                 Preview payment page →
               </a>
@@ -123,8 +123,8 @@ export default function CreatePage() {
                 onClick={() => {
                   setResult(null);
                 }}
-                className="flex-1 py-3 rounded-xl bg-brand-green text-brand-black
-                           text-sm font-mono hover:bg-brand-green/90 transition-colors"
+                className="flex-1 py-3 bg-signal text-signal-ink
+                           text-sm font-mono hover:bg-signal/90 transition-colors"
               >
                 Create Another
               </button>

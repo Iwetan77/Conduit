@@ -60,8 +60,8 @@ export default function HistoryPage() {
         ) : (
           <>
             {error && (
-              <div className="mb-4 p-3 rounded-xl bg-red-500/10 border border-red-500/30">
-                <p className="text-red-400 text-sm font-mono">{error}</p>
+              <div className="mb-4 p-3 bg-danger/10 border border-danger/30">
+                <p className="text-danger text-sm font-mono">{error}</p>
               </div>
             )}
             <HistoryTable

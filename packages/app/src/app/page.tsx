@@ -31,7 +31,7 @@ export default function HomePage() {
   const canProceed = isAddress(recipient) && parseFloat(amount) > 0 && isConnected;
 
   return (
-    <div className="min-h-screen bg-brand-black">
+    <div className="min-h-screen bg-bg">
       <Nav />
 
       <main className="max-w-lg mx-auto px-4 pt-24 pb-24">
@@ -40,12 +40,12 @@ export default function HomePage() {
           <div className="flex justify-center mb-4">
             <ConduitMark height={140} />
           </div>
-          <p className="text-brand-muted mt-3 text-sm font-mono">
+          <p className="text-ink-dim mt-3 text-sm font-mono">
             Accept any stablecoin, settle in yours
           </p>
           <div className="flex items-center justify-center gap-2 mt-2">
-            <span className="w-1.5 h-1.5 rounded-full bg-brand-green animate-pulse" />
-            <span className="text-xs font-mono text-brand-green">
+            <span className="w-1.5 h-1.5 bg-signal animate-pulse" />
+            <span className="text-xs font-mono text-signal">
               Chain ID 5042002 · Arc Testnet
             </span>
           </div>
@@ -61,8 +61,8 @@ export default function HomePage() {
               className="space-y-6"
             >
               {/* Card */}
-              <div className="bg-brand-surface border border-brand-border rounded-2xl p-6 space-y-6">
-                <h2 className="text-xs font-mono text-brand-muted uppercase tracking-widest">
+              <div className="bg-surface border border-border p-6 space-y-6">
+                <h2 className="text-xs font-mono text-ink-dim uppercase tracking-widest">
                   Direct Send
                 </h2>
 
@@ -81,7 +81,7 @@ export default function HomePage() {
 
                 {/* Payer currency toggle */}
                 <div className="flex flex-col gap-1.5">
-                  <label className="text-xs font-mono text-brand-muted uppercase tracking-wider">
+                  <label className="text-xs font-mono text-ink-dim uppercase tracking-wider">
                     You pay with
                   </label>
                   <div className="flex gap-2">
@@ -89,10 +89,10 @@ export default function HomePage() {
                       <button
                         key={c}
                         onClick={() => setPayerCurrency(c)}
-                        className={`flex-1 py-2 rounded-lg text-sm font-mono border transition-all ${
+                        className={`flex-1 py-2 text-sm font-mono border transition-all ${
                           payerCurrency === c
-                            ? "border-brand-green/50 text-brand-white bg-brand-green/5"
-                            : "border-brand-border text-brand-muted hover:border-brand-white/20"
+                            ? "border-signal/50 text-ink bg-signal/5"
+                            : "border-border text-ink-dim hover:border-ink-dim/20"
                         }`}
                       >
                         {c}
@@ -112,15 +112,15 @@ export default function HomePage() {
 
               {!mounted || !isConnected ? (
                 <div className="text-center space-y-3">
-                  <p className="text-brand-muted text-sm">Connect your wallet to send</p>
+                  <p className="text-ink-dim text-sm">Connect your wallet to send</p>
                   <WalletConnect />
                 </div>
               ) : (
                 <button
                   onClick={() => setStep("confirm")}
                   disabled={!canProceed}
-                  className="w-full py-4 rounded-2xl bg-brand-green text-brand-black
-                             font-mono text-xl hover:bg-brand-green/90 transition-colors
+                  className="w-full py-4 bg-signal text-signal-ink
+                             font-mono text-xl hover:bg-signal/90 transition-colors
                              disabled:opacity-30 disabled:cursor-not-allowed"
                 >
                   Review Payment →
@@ -129,9 +129,9 @@ export default function HomePage() {
 
               {/* Links CTA */}
               <div className="text-center">
-                <p className="text-brand-muted text-sm">
+                <p className="text-ink-dim text-sm">
                   Need a payment link or QR?{" "}
-                  <a href="/create" className="text-brand-green hover:underline">
+                  <a href="/create" className="text-signal hover:underline">
                     Create one →
                   </a>
                 </p>
@@ -145,7 +145,7 @@ export default function HomePage() {
               initial={{ opacity: 0, y: 12 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -12 }}
-              className="bg-brand-surface border border-brand-border rounded-2xl p-6"
+              className="bg-surface border border-border p-6"
             >
               <SendConfirm
                 recipient={recipient}

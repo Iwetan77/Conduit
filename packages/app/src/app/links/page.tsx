@@ -91,18 +91,18 @@ export default function LinksPage() {
   };
 
   return (
-    <div className="min-h-screen bg-brand-black">
+    <div className="min-h-screen bg-bg">
       <Nav />
       <main className="max-w-2xl mx-auto px-4 pt-24 pb-24">
         <div className="flex items-center justify-between mb-8">
           <div>
-            <h1 className="text-3xl font-anton text-brand-white">My Links</h1>
-            <p className="text-brand-muted text-sm mt-1">Manage your payment declarations</p>
+            <h1 className="text-3xl font-anton text-ink">My Links</h1>
+            <p className="text-ink-dim text-sm mt-1">Manage your payment declarations</p>
           </div>
           <a
             href="/create"
-            className="px-4 py-2 rounded-xl bg-brand-green text-brand-black
-                       text-sm font-mono hover:bg-brand-green/90 transition-colors"
+            className="px-4 py-2 bg-signal text-signal-ink
+                       text-sm font-mono hover:bg-signal/90 transition-colors"
           >
             + New Link
           </a>
@@ -110,19 +110,19 @@ export default function LinksPage() {
 
         {!mounted || !isConnected ? (
           <div className="text-center py-16 space-y-4">
-            <p className="text-brand-muted">Connect your wallet to see your links.</p>
+            <p className="text-ink-dim">Connect your wallet to see your links.</p>
             <WalletConnect />
           </div>
         ) : isLoading ? (
           <div className="space-y-3">
             {[...Array(3)].map((_, i) => (
-              <div key={i} className="h-20 bg-brand-surface rounded-xl animate-pulse border border-brand-border" />
+              <div key={i} className="h-20 bg-surface animate-pulse border border-border" />
             ))}
           </div>
         ) : declarations.length === 0 ? (
           <div className="text-center py-16">
-            <p className="text-brand-muted mb-4">No payment links yet.</p>
-            <a href="/create" className="px-6 py-3 rounded-xl bg-brand-green text-brand-black font-mono">
+            <p className="text-ink-dim mb-4">No payment links yet.</p>
+            <a href="/create" className="px-6 py-3 bg-signal text-signal-ink font-mono">
               Create your first link
             </a>
           </div>
@@ -135,27 +135,27 @@ export default function LinksPage() {
               return (
                 <div
                   key={decl.declarationId}
-                  className={`p-5 rounded-xl border transition-all ${
+                  className={`p-5 border transition-all ${
                     decl.active
-                      ? "bg-brand-surface border-brand-border"
-                      : "bg-brand-surface/50 border-brand-border/50 opacity-60"
+                      ? "bg-surface border-border"
+                      : "bg-surface/50 border-border/50 opacity-60"
                   }`}
                 >
                   <div className="flex items-start justify-between gap-4">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-1.5">
-                        <span className={`w-1.5 h-1.5 rounded-full ${decl.active ? "bg-brand-green" : "bg-brand-muted"}`} />
-                        <span className="text-sm font-anton text-brand-white">
+                        <span className={`w-1.5 h-1.5 ${decl.active ? "bg-signal" : "bg-ink-dim"}`} />
+                        <span className="text-sm font-anton text-ink">
                           {decl.amount > 0n ? formatAmount(decl.amount, currency) : `Open · ${currency}`}
                         </span>
                         <TokenBadge currency={currency} size="sm" />
                         {count > 0 && (
-                          <span className="px-2 py-0.5 rounded-full bg-brand-green/10 border border-brand-green/20 text-brand-green text-xs font-mono">
+                          <span className="px-2 py-0.5 bg-signal/10 border border-signal/20 text-signal text-xs font-mono">
                             {count} payment{count !== 1 ? "s" : ""}
                           </span>
                         )}
                       </div>
-                      <p className="text-xs font-mono text-brand-muted truncate">
+                      <p className="text-xs font-mono text-ink-dim truncate">
                         {typeof window !== "undefined"
                           ? `${window.location.origin}/pay/${decl.declarationId}`
                           : decl.paymentUrl}
@@ -170,15 +170,15 @@ export default function LinksPage() {
                             : decl.paymentUrl;
                           navigator.clipboard.writeText(url);
                         }}
-                        className="px-3 py-1.5 rounded-lg text-xs border border-brand-border
-                                   text-brand-muted hover:text-brand-white hover:border-brand-white/20 transition-colors"
+                        className="px-3 py-1.5 text-xs border border-border
+                                   text-ink-dim hover:text-ink hover:border-ink-dim/20 transition-colors"
                       >
                         Copy
                       </button>
                       <button
                         onClick={() => setSelectedDecl(decl)}
-                        className="px-3 py-1.5 rounded-lg text-xs border border-brand-border
-                                   text-brand-muted hover:text-brand-white hover:border-brand-white/20 transition-colors"
+                        className="px-3 py-1.5 text-xs border border-border
+                                   text-ink-dim hover:text-ink hover:border-ink-dim/20 transition-colors"
                       >
                         View
                       </button>
@@ -186,8 +186,8 @@ export default function LinksPage() {
                         <button
                           onClick={() => handleDeactivate(decl.declarationId)}
                           disabled={deactivating === decl.declarationId}
-                          className="px-3 py-1.5 rounded-lg text-xs border border-red-500/20
-                                     text-red-400/70 hover:text-red-400 hover:border-red-500/40 transition-colors
+                          className="px-3 py-1.5 text-xs border border-danger/20
+                                     text-danger/70 hover:text-danger hover:border-danger/40 transition-colors
                                      disabled:opacity-50"
                         >
                           {deactivating === decl.declarationId ? "..." : "Deactivate"}
@@ -206,15 +206,15 @@ export default function LinksPage() {
       {/* Link card modal */}
       {selectedDecl && (
         <div
-          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-start justify-center p-4 overflow-y-auto"
+          className="fixed inset-0 z-50 bg-bg/90 flex items-start justify-center p-4 overflow-y-auto"
           onClick={(e) => { if (e.target === e.currentTarget) setSelectedDecl(null); }}
         >
           <div className="w-full max-w-4xl my-8">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-anton text-brand-white">Payment Link</h2>
+              <h2 className="text-xl font-anton text-ink">Payment Link</h2>
               <button
                 onClick={() => setSelectedDecl(null)}
-                className="text-brand-muted hover:text-brand-white text-3xl leading-none transition-colors"
+                className="text-ink-dim hover:text-ink text-3xl leading-none transition-colors"
               >
                 ×
               </button>
@@ -222,7 +222,7 @@ export default function LinksPage() {
 
             <div className="grid md:grid-cols-2 gap-6 md:items-stretch">
               <div className="flex flex-col">
-                <p className="text-xs font-mono text-brand-muted uppercase tracking-wider mb-3">
+                <p className="text-xs font-mono text-ink-dim uppercase tracking-wider mb-3">
                   Payment Link — Digital sharing
                 </p>
                 <LinkCard
@@ -236,7 +236,7 @@ export default function LinksPage() {
                 />
               </div>
               <div className="flex flex-col">
-                <p className="text-xs font-mono text-brand-muted uppercase tracking-wider mb-3">
+                <p className="text-xs font-mono text-ink-dim uppercase tracking-wider mb-3">
                   QR Code — Physical commerce
                 </p>
                 <QRDisplay

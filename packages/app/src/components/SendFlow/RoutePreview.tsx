@@ -21,19 +21,19 @@ export function RoutePreview({
   const isSameCurrency = payerCurrency === recipientCurrency;
 
   return (
-    <div className="bg-brand-surface border border-brand-border rounded-xl p-4 space-y-3">
-      <p className="text-xs font-mono text-brand-muted uppercase tracking-wider">
+    <div className="bg-surface border border-border p-4 space-y-3">
+      <p className="text-xs font-mono text-ink-dim uppercase tracking-wider">
         Route Preview
       </p>
 
       <div className="flex items-center gap-3">
         <div className="flex-1 flex flex-col gap-1">
-          <p className="text-xs text-brand-muted">You send</p>
+          <p className="text-xs text-ink-dim">You send</p>
           <div className="flex items-center gap-2">
             <TokenBadge currency={payerCurrency} />
-            <span className="font-mono text-brand-white">
+            <span className="font-mono text-ink">
               {isLoading ? (
-                <span className="inline-block w-16 h-4 bg-brand-border rounded animate-pulse" />
+                <span className="inline-block w-16 h-4 bg-border animate-pulse" />
               ) : (
                 payerAmount ?? recipientAmount
               )}
@@ -41,30 +41,30 @@ export function RoutePreview({
           </div>
         </div>
 
-        <div className="text-brand-green text-xl">→</div>
+        <div className="text-signal text-xl">→</div>
 
         <div className="flex-1 flex flex-col gap-1 items-end">
-          <p className="text-xs text-brand-muted">They receive</p>
+          <p className="text-xs text-ink-dim">They receive</p>
           <div className="flex items-center gap-2">
             <TokenBadge currency={recipientCurrency} />
-            <span className="font-mono text-brand-white">{recipientAmount}</span>
+            <span className="font-mono text-ink">{recipientAmount}</span>
           </div>
         </div>
       </div>
 
       {!isSameCurrency && (
-        <div className="pt-2 border-t border-brand-border">
-          <div className="flex items-center gap-2 text-xs text-brand-muted">
-            <span className="w-1.5 h-1.5 rounded-full bg-brand-green" />
+        <div className="pt-2 border-t border-border">
+          <div className="flex items-center gap-2 text-xs text-ink-dim">
+            <span className="w-1.5 h-1.5 bg-signal" />
             Routed via Circle StableFX · Rate locked for 30s
           </div>
         </div>
       )}
 
       {isSameCurrency && (
-        <div className="pt-2 border-t border-brand-border">
-          <div className="flex items-center gap-2 text-xs text-brand-muted">
-            <span className="w-1.5 h-1.5 rounded-full bg-brand-green" />
+        <div className="pt-2 border-t border-border">
+          <div className="flex items-center gap-2 text-xs text-ink-dim">
+            <span className="w-1.5 h-1.5 bg-signal" />
             Direct transfer · No FX conversion
           </div>
         </div>

@@ -62,36 +62,51 @@ before unlocking Phase 1, so work is paused here until it does.
 
 ## Live bridge proof
 
-**BLOCKED, not faked.** Attempting the real Solana devnet → Arc testnet transfer requires
-a devnet Solana keypair funded with SOL (to pay the `depositForBurn` transaction fee) and
-devnet USDC (the asset being bridged).
+**Real transfer completed 2026-07-30.** The environment's own devnet SOL/USDC faucets
+were rate-limited on the sandbox's shared IP (see the funding blocker note below, kept
+for the record); the user funded the Solana devnet keypair directly (5 SOL) and via
+Circle's faucet (20 USDC, `https://faucet.circle.com`, Solana Devnet), which unblocked
+the transfer.
 
-A devnet keypair already exists in this environment
-(`~/.config/solana/id.json`, address `HpDTQVaAFQVuDBBuwM99Zfg7ZSfQG72qp95gYUFeQ2FD`),
-configured against `https://api.devnet.solana.com`, with 0 SOL and no USDC token account.
+Executed via Circle's own official quickstart script
+(`https://developers.circle.com/cctp/quickstarts/transfer-usdc-solana-to-arc`, "Direct
+mint" variant — burn on Solana, poll Iris, `receiveMessage` directly on Arc, no Hook),
+run as a throwaway TypeScript script outside the repo (`@solana/kit`,
+`@solana-program/system`, `@solana-program/token`, `viem` — not added to any package.json,
+this was proof-of-capability only, not shipped code). Amount: 1,000,000 minor units
+(1.0 USDC). `maxFee`: 500 minor units. `minFinalityThreshold`: 1000 (Fast Transfer).
 
-Attempted to fund it for real:
+- **Payer (Solana devnet):** `HpDTQVaAFQVuDBBuwM99Zfg7ZSfQG72qp95gYUFeQ2FD`
+- **Recipient (Arc testnet):** `0xf04a181eaB4CfABf7D13CCe64737782737cD0b22` (this
+  project's existing Arc deployer address, already funded for gas)
+- **Burn tx (Solana devnet):**
+  `5M1Y4YArneHqTBN7PYLmxXMpK6BTfJCm4VB2ujRvDMZVfc2PrwZi26LV4Y3NpmuLTLpBZgzBnrSP6o3yC697GVCg`
+- **Mint tx (Arc testnet):**
+  `0x09cd09c45dde9d2c0e1c30020f793dd5251664b4c2b9893a932a5e4e00d24d15`
+- **Attestation latency observed:** ~14.1s from burn confirmation to Iris returning
+  `status: "complete"` (well within the documented ~8–30s Fast Transfer window).
+- **Balance confirmation:** `cast receipt` on the mint tx shows a `Transfer` event on the
+  Arc USDC contract (`0x3600000000000000000000000000000000000000`) from the zero address
+  to the recipient for **999900** minor units — the burned 1,000,000 minus a 100-minor-unit
+  CCTP fee actually charged (well under the 500 maxFee cap; fee amount is emitted on-chain
+  in the `MessageTransmitterV2` log too, both values agree). `status: 1 (success)` on the
+  mint transaction. This on-chain Transfer event is the balance-increase proof — exact
+  amount, exact recipient, verifiable independently by anyone querying Arc testnet.
+
+**Conclusion: GATE 0 satisfied for real.** The Solana devnet → Arc testnet CCTP V2 Fast
+Transfer route works end to end: burn → attest (~14s) → mint, with the fee/amount
+accounting exactly matching CCTP's documented behavior. Phase 1 may proceed.
+
+### Funding blocker (historical, resolved)
+
+Before the user funded the address, the environment's own SOL/USDC faucet paths were
+exhausted:
 ```
 $ solana airdrop 2
 Requesting airdrop of 2 SOL
 Error: airdrop request failed. This can happen when the rate limit is reached.
-
-$ curl -s -X POST https://api.devnet.solana.com -H "Content-Type: application/json" \
-    -d '{"jsonrpc":"2.0","id":1,"method":"requestAirdrop","params":["HpDTQVaAFQVuDBBuwM99Zfg7ZSfQG72qp95gYUFeQ2FD",1000000000]}'
-{"jsonrpc":"2.0","error":{"code": 429,"message":"You've either reached your airdrop limit
-today or the airdrop faucet has run dry. Please visit https://faucet.solana.com for
-alternate sources of test SOL"}, "id": 1}
 ```
-
-Retried at three different amounts (2 SOL, 1 SOL, 0.5 SOL) via both the `solana` CLI and
-a direct RPC `requestAirdrop` call — all return HTTP 429. This is Solana's public devnet
-faucet rate-limiting the sandbox's shared egress IP (almost certainly exhausted by other
-activity on this IP today, not by this session). `faucet.solana.com`'s web UI is
-captcha-gated and not something to script around.
-
-Per the spec's explicit instruction ("You cannot obtain Solana devnet USDC or complete a
-real transfer → STOP and report; do not fake it"), this phase stops here rather than
-faking a transfer, inventing tx hashes, or mocking the attestation/mint. GATE 0 does not
-pass yet — see `WHERE-I-STOPPED.md` for the exact resumption path once SOL is available
-(fresh airdrop window, a manually-funded transfer to the keypair above, or an alternate
-funded RPC/faucet).
+This was Solana's public devnet faucet rate-limiting the sandbox's shared egress IP.
+`faucet.solana.com` (SOL) and `faucet.circle.com` (USDC) are both captcha/human-gated and
+were not scripted around — the user funded the keypair manually instead. See git history
+for the WIP commit documenting this blocker at the time.

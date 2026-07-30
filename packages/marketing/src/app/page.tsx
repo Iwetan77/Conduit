@@ -1,7 +1,7 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
-import { motion, useInView, useScroll, useTransform } from 'framer-motion'
+import { useEffect, useState } from 'react'
+import { motion } from 'framer-motion'
 import Image from 'next/image'
 import Link from 'next/link'
 
@@ -9,101 +9,6 @@ import Link from 'next/link'
 // `pnpm dev` at the repo root runs marketing/docs/app together via turbo.
 // Production falls back to the real subdomain.
 const DOCS_URL = process.env['NEXT_PUBLIC_DOCS_URL'] ?? 'http://localhost:3002'
-
-// ─────────────────────────────────────────────────────────────────────────────
-// AMBIENT BACKGROUND
-// ─────────────────────────────────────────────────────────────────────────────
-
-function Orbs() {
-  return (
-    <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden">
-      <motion.div
-        className="absolute rounded-full"
-        style={{
-          width: 1000, height: 1000,
-          top: '-30%', left: '5%',
-          background: 'radial-gradient(circle, rgba(178,245,90,0.065) 0%, transparent 60%)',
-        }}
-        animate={{ x: [0, 90, -60, 0], y: [0, -60, 80, 0], scale: [1, 1.1, 0.93, 1] }}
-        transition={{ duration: 22, repeat: Infinity, ease: 'easeInOut' }}
-      />
-      <motion.div
-        className="absolute rounded-full"
-        style={{
-          width: 800, height: 800,
-          bottom: '-10%', right: '-5%',
-          background: 'radial-gradient(circle, rgba(178,245,90,0.045) 0%, transparent 60%)',
-        }}
-        animate={{ x: [0, -80, 50, 0], y: [0, 60, -70, 0], scale: [1, 0.9, 1.08, 1] }}
-        transition={{ duration: 28, repeat: Infinity, ease: 'easeInOut', delay: 6 }}
-      />
-      <motion.div
-        className="absolute rounded-full"
-        style={{
-          width: 500, height: 500,
-          top: '35%', right: '15%',
-          background: 'radial-gradient(circle, rgba(178,245,90,0.03) 0%, transparent 60%)',
-        }}
-        animate={{ x: [0, 40, -30, 0], y: [0, -40, 50, 0] }}
-        transition={{ duration: 17, repeat: Infinity, ease: 'easeInOut', delay: 3 }}
-      />
-    </div>
-  )
-}
-
-function Particles() {
-  const [items, setItems] = useState<
-    { id: number; x: number; startY: number; dur: number; delay: number; size: number; op: number }[]
-  >([])
-
-  useEffect(() => {
-    setItems(
-      Array.from({ length: 28 }, (_, i) => ({
-        id: i,
-        x: Math.random() * 100,
-        startY: 55 + Math.random() * 45,
-        dur: 14 + Math.random() * 16,
-        delay: -(Math.random() * 30),
-        size: 1 + Math.random() * 1.5,
-        op: 0.08 + Math.random() * 0.18,
-      }))
-    )
-  }, [])
-
-  return (
-    <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden">
-      {items.map(p => (
-        <motion.div
-          key={p.id}
-          className="absolute rounded-full"
-          style={{
-            width: p.size, height: p.size,
-            left: `${p.x}%`,
-            top: `${p.startY}%`,
-            background: '#B2F55A',
-          }}
-          animate={{ y: ['0%', '-140vh'], opacity: [0, p.op, 0] }}
-          transition={{ duration: p.dur, repeat: Infinity, delay: p.delay, ease: 'linear' }}
-        />
-      ))}
-    </div>
-  )
-}
-
-function Scanline() {
-  return (
-    <motion.div
-      className="fixed left-0 right-0 pointer-events-none z-[9998]"
-      style={{
-        height: 1,
-        background: 'linear-gradient(90deg, transparent, rgba(178,245,90,0.12) 40%, rgba(178,245,90,0.12) 60%, transparent)',
-        top: 0,
-      }}
-      animate={{ top: ['0vh', '100vh'] }}
-      transition={{ duration: 9, repeat: Infinity, ease: 'linear', repeatDelay: 5 }}
-    />
-  )
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // NAV
@@ -119,19 +24,16 @@ function Nav() {
   }, [])
 
   return (
-    <motion.header
-      className="fixed top-0 left-0 right-0 z-50 transition-all duration-500"
+    <header
+      className="fixed top-0 left-0 right-0 z-50 transition-colors duration-300"
       style={{
-        borderBottom: `1px solid ${scrolled ? '#1F1F1F' : 'transparent'}`,
-        background: scrolled ? 'rgba(0,0,0,0.88)' : 'transparent',
-        backdropFilter: scrolled ? 'blur(16px)' : 'none',
+        borderBottom: `1px solid ${scrolled ? 'var(--border)' : 'transparent'}`,
+        background: scrolled ? 'var(--bg)' : 'transparent',
       }}
     >
       <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
-        <Link href="/" className="flex items-center group">
-          <motion.div whileHover={{ scale: 1.05 }} transition={{ type: 'spring', stiffness: 400 }}>
-            <Image src="/CONDUIT-MAIN.png" alt="Conduit" height={44} width={140} style={{ height: 44, width: 'auto' }} priority />
-          </motion.div>
+        <Link href="/" className="flex items-center">
+          <Image src="/CONDUIT-MAIN.png" alt="Conduit" height={44} width={140} style={{ height: 44, width: 'auto' }} priority />
         </Link>
 
         <nav className="hidden md:flex items-center gap-8">
@@ -142,7 +44,7 @@ function Nav() {
             <a
               key={href}
               href={href}
-              className="font-mono text-[10px] uppercase tracking-[0.12em] text-[#555] hover:text-[#B2F55A] transition-colors duration-200"
+              className="font-mono text-[10px] uppercase tracking-[0.12em] text-ink-dim hover:text-signal transition-colors duration-200"
             >
               {label}
             </a>
@@ -153,12 +55,12 @@ function Nav() {
         <a
           href="#waitlist"
           onClick={e => { e.preventDefault(); document.getElementById('waitlist-input')?.focus() }}
-          className="md:hidden font-mono text-[10px] uppercase tracking-widest text-[#B2F55A] border border-[#B2F55A]/30 px-3 py-1.5 rounded"
+          className="md:hidden font-mono text-[10px] uppercase tracking-widest text-signal border border-signal/30 px-3 py-1.5"
         >
           Waitlist
         </a>
       </div>
-    </motion.header>
+    </header>
   )
 }
 
@@ -193,14 +95,10 @@ function WaitlistForm() {
 
   if (status === 'done') {
     return (
-      <motion.div
-        className="flex items-center gap-3 px-5 py-3 rounded-xl border border-[#B2F55A]/30 bg-[#B2F55A]/5"
-        initial={{ opacity: 0, scale: 0.96 }}
-        animate={{ opacity: 1, scale: 1 }}
-      >
-        <span className="w-2 h-2 rounded-full bg-[#B2F55A] animate-pulse" />
-        <span className="font-mono text-[12px] text-[#B2F55A]">You&apos;re on the list. We&apos;ll reach out.</span>
-      </motion.div>
+      <div className="flex items-center gap-3 px-5 py-3 border border-signal/30 bg-signal/5">
+        <span className="w-2 h-2 bg-signal" />
+        <span className="font-mono text-[12px] text-signal">You&apos;re on the list. We&apos;ll reach out.</span>
+      </div>
     )
   }
 
@@ -213,203 +111,148 @@ function WaitlistForm() {
         value={email}
         onChange={e => setEmail(e.target.value)}
         placeholder="your@email.com"
-        className="flex-1 px-4 py-3 rounded-xl bg-[#0A0A0A] border border-[#1F1F1F]
-                   font-mono text-[12px] text-white placeholder-[#333]
-                   focus:outline-none focus:border-[#B2F55A]/40 transition-colors"
+        className="flex-1 px-4 py-3 bg-surface border border-border
+                   font-mono text-[12px] text-ink placeholder-ink-dim
+                   focus:outline-none focus:border-signal transition-colors"
       />
-      <motion.button
+      <button
         type="submit"
         disabled={status === 'loading'}
-        className="px-5 py-3 rounded-xl font-mono font-bold text-[12px] bg-[#B2F55A] text-black
-                   disabled:opacity-60 whitespace-nowrap"
-        whileHover={{ scale: 1.04, boxShadow: '0 0 28px rgba(178,245,90,0.3)' }}
-        whileTap={{ scale: 0.97 }}
-        transition={{ type: 'spring', stiffness: 500, damping: 20 }}
+        className="px-5 py-3 font-mono font-bold text-[12px] bg-signal text-signal-ink
+                   disabled:opacity-60 whitespace-nowrap hover:bg-signal/90 transition-colors"
       >
         {status === 'loading' ? '...' : 'Join Waitlist'}
-      </motion.button>
+      </button>
     </form>
   )
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// HERO
+// HERO — the one signature moment on this page
 // ─────────────────────────────────────────────────────────────────────────────
 
-function StatPill({ value, label, delay }: { value: string; label: string; delay: number }) {
-  const ref = useRef(null)
-  const inView = useInView(ref, { once: true })
+function StatPill({ value, label }: { value: string; label: string }) {
   return (
-    <motion.div
-      ref={ref}
-      className="flex flex-col items-center gap-1.5 px-6 py-3 border-r border-[#1A1A1A] last:border-0 first:pl-0"
-      initial={{ opacity: 0, y: 12 }}
-      animate={inView ? { opacity: 1, y: 0 } : {}}
-      transition={{ duration: 0.5, delay }}
-    >
-      <span className="font-display font-black text-2xl text-[#B2F55A] leading-none">{value}</span>
-      <span className="font-mono text-[9px] uppercase tracking-[0.14em] text-[#444]">{label}</span>
-    </motion.div>
+    <div className="flex flex-col items-center gap-1.5 px-6 py-3 border-r border-border last:border-0 first:pl-0">
+      <span className="font-display font-black text-2xl text-signal leading-none">{value}</span>
+      <span className="font-mono text-[9px] uppercase tracking-[0.14em] text-ink-dim">{label}</span>
+    </div>
   )
 }
 
 const wordVariant = {
-  hidden: { opacity: 0, y: 44, skewY: 3 },
+  hidden: { opacity: 0, y: 44 },
   show: {
-    opacity: 1, y: 0, skewY: 0,
+    opacity: 1, y: 0,
     transition: { duration: 0.65, ease: [0.22, 1, 0.36, 1] as [number, number, number, number] },
   },
 }
 
 function Hero() {
-  const { scrollY } = useScroll()
-  const y = useTransform(scrollY, [0, 600], [0, -80])
-  const opacity = useTransform(scrollY, [0, 400], [1, 0])
-
   return (
-    <section className="relative min-h-screen flex flex-col items-center justify-center text-center px-4 pt-24 pb-20 overflow-hidden">
-      <div
-        className="absolute inset-0 pointer-events-none"
-        style={{
-          background: 'radial-gradient(ellipse 80% 60% at 50% 40%, transparent 40%, rgba(0,0,0,0.6) 100%)',
-        }}
-      />
-
-      <motion.div style={{ y, opacity }} className="flex flex-col items-center gap-0">
+    <section className="relative min-h-screen flex flex-col items-center justify-center text-center px-4 pt-24 pb-20">
+      <motion.div
+        className="flex flex-col items-center gap-0"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.4 }}
+      >
         {/* Eyebrow */}
-        <motion.p
-          className="font-mono text-[11px] text-[#B2F55A] uppercase tracking-[0.22em] mb-8"
-          initial={{ opacity: 0, letterSpacing: '0.35em' }}
-          animate={{ opacity: 1, letterSpacing: '0.22em' }}
-          transition={{ duration: 1.2, delay: 0.1 }}
-        >
-          Arc-native · Agent Payment Protocol · Testnet 2026
-        </motion.p>
+        <p className="font-mono text-[11px] text-signal uppercase tracking-[0.22em] mb-8">
+          Arc-native · B2B Settlement · Testnet 2026
+        </p>
 
-        {/* Headline */}
+        {/* Headline — the signature entrance, per-word stagger, once */}
         <motion.h1
           className="font-display font-black uppercase leading-[0.92] tracking-tight mb-8 overflow-hidden"
           style={{ fontSize: 'clamp(3.2rem, 9.5vw, 8.5rem)' }}
-          variants={{ hidden: {}, show: { transition: { staggerChildren: 0.09, delayChildren: 0.3 } } }}
+          variants={{ hidden: {}, show: { transition: { staggerChildren: 0.09, delayChildren: 0.15 } } }}
           initial="hidden"
           animate="show"
         >
           <div className="overflow-hidden">
-            <motion.span variants={wordVariant} className="inline-block" style={{ color: '#B2F55A' }}>SEND.</motion.span>
+            <motion.span variants={wordVariant} className="inline-block text-signal">SEND.</motion.span>
             {' '}
-            <motion.span variants={wordVariant} className="inline-block text-white">RECEIVE.</motion.span>
+            <motion.span variants={wordVariant} className="inline-block text-ink">RECEIVE.</motion.span>
           </div>
           <div className="overflow-hidden">
-            <motion.span variants={wordVariant} className="inline-block text-white">SETTLE IN</motion.span>
+            <motion.span variants={wordVariant} className="inline-block text-ink">SETTLE IN</motion.span>
             {' '}
-            <motion.span variants={wordVariant} className="inline-block" style={{ color: '#B2F55A' }}>YOURS.</motion.span>
+            <motion.span variants={wordVariant} className="inline-block text-signal">YOURS.</motion.span>
           </div>
         </motion.h1>
 
         {/* Sub */}
-        <motion.p
-          className="font-body text-[1rem] text-[#555] max-w-[520px] leading-[1.75] mb-10"
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.7, delay: 0.9 }}
-        >
+        <p className="font-body text-[1rem] text-ink-dim max-w-[520px] leading-[1.75] mb-10">
           Accept any stablecoin, settle in yours.{' '}
           Conduit routes and settles B2B payments atomically, in under a second.
-        </motion.p>
+        </p>
 
         {/* Waitlist form */}
-        <motion.div
-          className="flex flex-col items-center gap-4 mb-16 w-full"
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.7, delay: 1.1 }}
-        >
+        <div className="flex flex-col items-center gap-4 mb-16 w-full">
           <WaitlistForm />
           <a
             href={DOCS_URL}
-            className="font-mono text-[11px] text-[#444] hover:text-[#B2F55A] transition-colors uppercase tracking-widest"
+            className="font-mono text-[11px] text-ink-dim hover:text-signal transition-colors uppercase tracking-widest"
           >
             Read the docs →
           </a>
-        </motion.div>
+        </div>
 
         {/* Stats */}
-        <motion.div
-          className="flex items-stretch flex-wrap justify-center"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ duration: 0.6, delay: 1.3 }}
-        >
+        <div className="flex items-stretch flex-wrap justify-center">
           {[
-            { value: '<1s', label: 'Settlement Time', delay: 1.4 },
-            { value: '1', label: 'Instruction', delay: 1.5 },
-            { value: '∞', label: 'Currencies', delay: 1.6 },
-            { value: '0', label: 'Stuck Funds', delay: 1.7 },
+            { value: '<1s', label: 'Settlement Time' },
+            { value: '1', label: 'Instruction' },
+            { value: '9', label: 'Currencies' },
+            { value: '0', label: 'Stuck Funds' },
           ].map(s => <StatPill key={s.value} {...s} />)}
-        </motion.div>
+        </div>
       </motion.div>
 
-      {/* Scroll indicator */}
-      <motion.div
-        className="absolute bottom-10 left-1/2 -translate-x-1/2 flex flex-col items-center gap-2"
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ delay: 2 }}
-      >
-        <span className="font-mono text-[9px] uppercase tracking-widest text-[#333]">scroll</span>
-        <motion.div
-          className="w-px h-10 origin-top"
-          style={{ background: 'linear-gradient(to bottom, #B2F55A, transparent)' }}
-          animate={{ scaleY: [1, 0.4, 1] }}
-          transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
-        />
-      </motion.div>
+      {/* Scroll indicator — static, no ambient loop */}
+      <div className="absolute bottom-10 left-1/2 -translate-x-1/2 flex flex-col items-center gap-2">
+        <span className="font-mono text-[9px] uppercase tracking-widest text-ink-dim">scroll</span>
+        <div className="w-px h-10" style={{ background: 'linear-gradient(to bottom, var(--signal), transparent)' }} />
+      </div>
     </section>
   )
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// FEATURE PANELS
+// FEATURE PANELS — static after the hero moment, no scroll-triggered reveals
 // ─────────────────────────────────────────────────────────────────────────────
 
-function PanelShell({ children, delay = 0 }: { children: React.ReactNode; delay?: number }) {
+function PanelShell({ children }: { children: React.ReactNode }) {
   return (
-    <motion.div
-      className="bg-black flex flex-col gap-6 p-8 group cursor-default transition-all duration-500 hover:bg-[#030303]"
-      style={{ borderTop: '2px solid #B2F55A' }}
-      initial={{ opacity: 0, y: 40 }}
-      whileInView={{ opacity: 1, y: 0 }}
-      viewport={{ once: true, margin: '-60px' }}
-      transition={{ duration: 0.6, delay }}
-      whileHover={{ boxShadow: '0 0 60px rgba(178,245,90,0.07), inset 0 0 60px rgba(178,245,90,0.02)' }}
+    <div
+      className="bg-bg flex flex-col gap-6 p-8 hover:bg-surface transition-colors duration-300"
+      style={{ borderTop: '1px solid var(--signal)' }}
     >
       {children}
-    </motion.div>
+    </div>
   )
 }
 
 function PanelLabel({ children }: { children: React.ReactNode }) {
-  return <p className="font-mono text-[9px] uppercase tracking-[0.14em] text-[#444]">{children}</p>
+  return <p className="font-mono text-[9px] uppercase tracking-[0.14em] text-ink-dim">{children}</p>
 }
 
 function PanelTitle({ children }: { children: React.ReactNode }) {
   return (
-    <h3 className="font-display font-bold text-[1.35rem] uppercase text-white tracking-wide leading-tight">
+    <h3 className="font-display font-bold text-[1.35rem] uppercase text-ink tracking-wide leading-tight">
       {children}
     </h3>
   )
 }
 
 function PanelDesc({ children }: { children: React.ReactNode }) {
-  return <p className="font-body text-[0.85rem] text-[#555] leading-[1.75]">{children}</p>
+  return <p className="font-body text-[0.85rem] text-ink-dim leading-[1.75]">{children}</p>
 }
 
 function SendPanel() {
-  const ref = useRef(null)
-  const inView = useInView(ref, { once: true, margin: '-80px' })
-
   return (
-    <PanelShell delay={0}>
+    <PanelShell>
       <div className="space-y-2">
         <PanelLabel>For Senders</PanelLabel>
         <PanelTitle>Direct Send</PanelTitle>
@@ -419,38 +262,22 @@ function SendPanel() {
         </PanelDesc>
       </div>
 
-      <div
-        ref={ref}
-        className="rounded-xl border border-[#1A1A1A] bg-[#050505] p-5 space-y-2.5 font-mono text-[11px]"
-      >
+      <div className="border border-border bg-bg p-5 space-y-2.5 font-mono text-[11px]">
         <div className="flex items-center gap-2 mb-3">
-          <div className="w-2 h-2 rounded-full bg-[#FF5F57]" />
-          <div className="w-2 h-2 rounded-full bg-[#FEBC2E]" />
-          <div className="w-2 h-2 rounded-full bg-[#28C840]" />
-          <span className="text-[#333] text-[9px] ml-1">conduit.xyz</span>
+          <div className="w-2 h-2 bg-danger" />
+          <div className="w-2 h-2 bg-ink-dim" />
+          <div className="w-2 h-2 bg-signal" />
+          <span className="text-ink-dim text-[9px] ml-1">conduit.xyz</span>
         </div>
         {[
-          { text: '0xABC...def  ', check: '✓', delay: 0.4 },
-          { text: '10.00 USDC   ', check: '✓', delay: 1.2 },
-          { text: 'Settled in 0.74s  ', check: '✓', delay: 2.0 },
-        ].map(({ text, check, delay }) => (
-          <motion.div
-            key={text}
-            className="flex items-center gap-1"
-            initial={{ opacity: 0, x: -8 }}
-            animate={inView ? { opacity: 1, x: 0 } : {}}
-            transition={{ duration: 0.4, delay }}
-          >
-            <span className="text-[#666]">{text}</span>
-            <motion.span
-              className="text-[#B2F55A]"
-              initial={{ scale: 0 }}
-              animate={inView ? { scale: 1 } : {}}
-              transition={{ duration: 0.25, delay: delay + 0.35, type: 'spring' }}
-            >
-              {check}
-            </motion.span>
-          </motion.div>
+          { text: '0xABC...def  ', check: '✓' },
+          { text: '10.00 USDC   ', check: '✓' },
+          { text: 'Settled in 0.74s  ', check: '✓' },
+        ].map(({ text, check }) => (
+          <div key={text} className="flex items-center gap-1">
+            <span className="text-ink-dim">{text}</span>
+            <span className="text-signal">{check}</span>
+          </div>
         ))}
       </div>
     </PanelShell>
@@ -461,7 +288,7 @@ function ReceivePanel() {
   const qr = [1,1,1,1,1,1,1,1,0,0,0,0,0,1,1,0,1,0,1,0,1,1,0,0,1,0,0,1,1,0,1,0,1,0,1,1,0,0,0,0,0,1,1,1,1,1,1,1,1]
 
   return (
-    <PanelShell delay={0.1}>
+    <PanelShell>
       <div className="space-y-2">
         <PanelLabel>For Creators &amp; Businesses</PanelLabel>
         <PanelTitle>Links &amp; QR Codes</PanelTitle>
@@ -472,29 +299,29 @@ function ReceivePanel() {
       </div>
 
       <div className="flex gap-4 items-start">
-        <div className="flex-1 rounded-xl border border-[#1A1A1A] bg-[#050505] p-4 overflow-hidden">
-          <div className="h-[2px] w-8 bg-[#B2F55A] rounded-full mb-3" />
-          <p className="font-display font-black text-base text-white">10.00 USDC</p>
-          <p className="font-mono text-[9px] text-[#333] mt-1.5 truncate">
+        <div className="flex-1 border border-border bg-bg p-4 overflow-hidden">
+          <div className="h-[2px] w-8 bg-signal mb-3" />
+          <p className="font-display font-black text-base text-ink">10.00 USDC</p>
+          <p className="font-mono text-[9px] text-ink-dim mt-1.5 truncate">
             app.conduit.xyz/pay/0x9f4a…
           </p>
-          <p className="font-mono text-[8px] text-[#222] mt-3 uppercase tracking-widest">Digital</p>
+          <p className="font-mono text-[8px] text-ink-dim mt-3 uppercase tracking-widest">Digital</p>
         </div>
 
         <div className="flex-shrink-0 flex flex-col items-center gap-2">
           <div
-            className="bg-[#B2F55A] p-2 rounded-md"
+            className="bg-signal p-2"
             style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 8px)', gap: '1px' }}
           >
             {qr.map((cell, i) => (
-              <div key={i} style={{ width: 8, height: 8, background: cell ? '#000' : '#B2F55A' }} />
+              <div key={i} style={{ width: 8, height: 8, background: cell ? 'var(--bg)' : 'var(--signal)' }} />
             ))}
           </div>
-          <p className="font-mono text-[8px] text-[#333] uppercase tracking-widest">Physical</p>
+          <p className="font-mono text-[8px] text-ink-dim uppercase tracking-widest">Physical</p>
         </div>
       </div>
 
-      <p className="font-mono text-[9px] text-[#333]">
+      <p className="font-mono text-[9px] text-ink-dim">
         Restaurant tables · Freelance invoices · Creator pages
       </p>
     </PanelShell>
@@ -502,11 +329,8 @@ function ReceivePanel() {
 }
 
 function BuildPanel() {
-  const ref = useRef(null)
-  const inView = useInView(ref, { once: true, margin: '-80px' })
-
   return (
-    <PanelShell delay={0.2}>
+    <PanelShell>
       <div className="space-y-2">
         <PanelLabel>For Developers</PanelLabel>
         <PanelTitle>Conduit API</PanelTitle>
@@ -516,42 +340,31 @@ function BuildPanel() {
         </PanelDesc>
       </div>
 
-      <div ref={ref} className="rounded-xl border border-[#1A1A1A] bg-[#030303] overflow-hidden">
-        <div className="flex items-center gap-1.5 px-4 py-2.5 border-b border-[#1A1A1A]">
-          <div className="w-2 h-2 rounded-full bg-[#FF5F57]" />
-          <div className="w-2 h-2 rounded-full bg-[#FEBC2E]" />
-          <div className="w-2 h-2 rounded-full bg-[#28C840]" />
-          <span className="font-mono text-[9px] text-[#333] ml-1">conduit-node</span>
+      <div className="border border-border bg-bg overflow-hidden">
+        <div className="flex items-center gap-1.5 px-4 py-2.5 border-b border-border">
+          <div className="w-2 h-2 bg-danger" />
+          <div className="w-2 h-2 bg-ink-dim" />
+          <div className="w-2 h-2 bg-signal" />
+          <span className="font-mono text-[9px] text-ink-dim ml-1">conduit-node</span>
         </div>
 
         <div className="p-5 font-mono text-[11px] leading-[1.9] space-y-0">
-          {[
-            { delay: 0.3, content: <span key="c0" className="text-[#444]">{'// Request payment in EUR, get paid in whatever they hold'}</span> },
-            { delay: 0.6, content: <>
-              <span className="text-[#B2F55A]">const </span>
-              <span className="text-white">intent </span>
-              <span className="text-[#555]">= await </span>
-              <span className="text-[#B2F55A]">conduit</span>
-              <span className="text-white">.settlementIntents.create({'{'}</span>
-            </> },
-            { delay: 0.8, content: <span className="text-[#555] pl-4">{'amount: 1_000_00, settle_currency: "EUR",'}</span> },
-            { delay: 1.0, content: <span className="text-[#555] pl-4">{'accept_currencies: ["USDC", "BRLA", "GBPA"],'}</span> },
-            { delay: 1.2, content: <span className="text-white">{'})'}</span> },
-            { delay: 1.5, content: <span key="c3" className="text-[#B2F55A]">{'// -> hosted_url, qr_payload — send either one'}</span> },
-          ].map(({ delay, content }, i) => (
-            <motion.div
-              key={i}
-              initial={{ opacity: 0, x: -6 }}
-              animate={inView ? { opacity: 1, x: 0 } : {}}
-              transition={{ duration: 0.35, delay }}
-            >
-              {content}
-            </motion.div>
-          ))}
+          <div className="text-ink-dim">{'// Request payment in EUR, get paid in whatever they hold'}</div>
+          <div>
+            <span className="text-signal">const </span>
+            <span className="text-ink">intent </span>
+            <span className="text-ink-dim">= await </span>
+            <span className="text-signal">conduit</span>
+            <span className="text-ink">.settlementIntents.create({'{'}</span>
+          </div>
+          <div className="text-ink-dim pl-4">{'amount: 1_000_00, settle_currency: "EUR",'}</div>
+          <div className="text-ink-dim pl-4">{'accept_currencies: ["USDC", "BRLA", "GBPA"],'}</div>
+          <div className="text-ink">{'})'}</div>
+          <div className="text-signal">{'// -> hosted_url, qr_payload — send either one'}</div>
         </div>
       </div>
 
-      <a href={DOCS_URL} className="font-mono text-[11px] text-[#B2F55A] hover:underline mt-auto transition-opacity group-hover:opacity-100 opacity-60">
+      <a href={DOCS_URL} className="font-mono text-[11px] text-signal hover:underline mt-auto">
         Read the docs →
       </a>
     </PanelShell>
@@ -560,8 +373,8 @@ function BuildPanel() {
 
 function Features() {
   return (
-    <section className="relative z-10 w-full border-t border-b border-[#1F1F1F]">
-      <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-3 divide-y md:divide-y-0 md:divide-x divide-[#1F1F1F]">
+    <section className="relative z-10 w-full border-t border-b border-border">
+      <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-3 divide-y md:divide-y-0 md:divide-x divide-border">
         <SendPanel />
         <ReceivePanel />
         <BuildPanel />
@@ -571,48 +384,27 @@ function Features() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// HOW IT WORKS — THE PIPE
+// HOW IT WORKS — THE PIPE (static, no looping highlight cycle)
 // ─────────────────────────────────────────────────────────────────────────────
 
 function HowItWorks() {
-  const ref = useRef(null)
-  const inView = useInView(ref, { once: true, margin: '-100px' })
-  const [active, setActive] = useState(-1)
-
   const nodes = ['Declaration', 'Quote', 'Route', 'Settle', 'Receipt']
-
-  useEffect(() => {
-    if (!inView) return
-    setActive(0)
-    const id = setInterval(() => setActive(prev => (prev + 1) % nodes.length), 1000)
-    return () => clearInterval(id)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [inView])
 
   return (
     <section className="relative z-10 py-32 px-4">
       <div className="max-w-4xl mx-auto">
-        <motion.p
-          className="font-mono text-[10px] text-[#B2F55A] uppercase tracking-[0.18em] mb-4"
-          initial={{ opacity: 0 }} whileInView={{ opacity: 1 }} viewport={{ once: true }}
-        >
+        <p className="font-mono text-[10px] text-signal uppercase tracking-[0.18em] mb-4">
           The Pipe
-        </motion.p>
+        </p>
 
-        <motion.h2
-          className="font-display font-bold text-white mb-6 leading-tight"
+        <h2
+          className="font-display font-bold text-ink mb-6 leading-tight"
           style={{ fontSize: 'clamp(1.8rem, 4vw, 2.8rem)' }}
-          initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true }} transition={{ delay: 0.1 }}
         >
           One primitive underneath everything.
-        </motion.h2>
+        </h2>
 
-        <motion.div
-          className="font-body text-[0.95rem] text-[#444] max-w-[600px] leading-[1.8] space-y-4 mb-16"
-          initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true }} transition={{ delay: 0.2 }}
-        >
+        <div className="font-body text-[0.95rem] text-ink-dim max-w-[600px] leading-[1.8] space-y-4 mb-16">
           <p>
             Every Conduit feature — direct send, payment links, QR codes, the settlement API — is
             an expression of the same underlying primitive: a payment declaration.
@@ -622,33 +414,17 @@ function HowItWorks() {
             get there from whatever the sender holds. The conversion, the route selection, the atomic
             settlement — all happen inside the pipe.
           </p>
-          <p className="text-[#333]">Built on Arc. Powered by Circle StableFX and CCTP.</p>
-        </motion.div>
+          <p className="text-ink-dim">Built on Arc. Powered by Circle StableFX.</p>
+        </div>
 
-        <div ref={ref} className="flex items-center overflow-x-auto pb-4">
+        <div className="flex items-center overflow-x-auto pb-4">
           {nodes.map((node, i) => (
             <div key={node} className="flex items-center flex-shrink-0">
-              <motion.div
-                className="px-5 py-2.5 border font-mono text-[10px] uppercase tracking-widest transition-all duration-500 rounded-sm"
-                style={{
-                  background: active === i ? 'rgba(178,245,90,0.07)' : '#0A0A0A',
-                  borderColor: active === i ? '#B2F55A' : '#1A1A1A',
-                  boxShadow: active === i ? '0 0 24px rgba(178,245,90,0.18)' : 'none',
-                  color: active === i ? '#B2F55A' : '#444',
-                }}
-                initial={{ opacity: 0, y: 10 }}
-                animate={inView ? { opacity: 1, y: 0 } : {}}
-                transition={{ duration: 0.4, delay: i * 0.1 }}
-              >
+              <div className="px-5 py-2.5 border border-border bg-surface font-mono text-[10px] uppercase tracking-widest text-ink-dim">
                 {node}
-              </motion.div>
+              </div>
               {i < nodes.length - 1 && (
-                <motion.span
-                  className="font-mono px-2 text-sm flex-shrink-0 transition-all duration-300"
-                  style={{ color: active === i ? '#B2F55A' : '#222' }}
-                >
-                  →
-                </motion.span>
+                <span className="font-mono px-2 text-sm flex-shrink-0 text-ink-dim">→</span>
               )}
             </div>
           ))}
@@ -664,27 +440,21 @@ function HowItWorks() {
 
 function WaitlistSection() {
   return (
-    <section className="relative z-10 py-32 px-4 border-t border-[#1F1F1F] text-center">
-      <motion.div
-        className="max-w-xl mx-auto flex flex-col items-center gap-6"
-        initial={{ opacity: 0, y: 24 }}
-        whileInView={{ opacity: 1, y: 0 }}
-        viewport={{ once: true }}
-        transition={{ duration: 0.6 }}
-      >
-        <p className="font-mono text-[10px] text-[#B2F55A] uppercase tracking-[0.18em]">Early Access</p>
+    <section className="relative z-10 py-32 px-4 border-t border-border text-center">
+      <div className="max-w-xl mx-auto flex flex-col items-center gap-6">
+        <p className="font-mono text-[10px] text-signal uppercase tracking-[0.18em]">Early Access</p>
         <h2
-          className="font-display font-bold text-white leading-tight"
+          className="font-display font-bold text-ink leading-tight"
           style={{ fontSize: 'clamp(1.8rem, 4vw, 2.6rem)' }}
         >
           Be first on Arc.
         </h2>
-        <p className="font-body text-[0.9rem] text-[#444] leading-[1.75]">
+        <p className="font-body text-[0.9rem] text-ink-dim leading-[1.75]">
           Conduit is live on Arc Testnet. Mainnet access is invite-only. Drop your email and we&apos;ll
           reach out when it&apos;s your turn.
         </p>
         <WaitlistForm />
-      </motion.div>
+      </div>
     </section>
   )
 }
@@ -695,22 +465,17 @@ function WaitlistSection() {
 
 function EcosystemBadge() {
   return (
-    <section className="relative z-10 py-16 px-4 border-t border-[#1F1F1F] text-center">
-      <motion.div
-        className="flex flex-col items-center gap-5"
-        initial={{ opacity: 0, y: 20 }}
-        whileInView={{ opacity: 1, y: 0 }}
-        viewport={{ once: true }}
-      >
-        <p className="font-mono text-[10px] text-[#333] uppercase tracking-[0.18em]">
-          Built on Arc · Circle StableFX + CCTP · Chain ID 5042002
+    <section className="relative z-10 py-16 px-4 border-t border-border text-center">
+      <div className="flex flex-col items-center gap-5">
+        <p className="font-mono text-[10px] text-ink-dim uppercase tracking-[0.18em]">
+          Built on Arc · Circle StableFX · Chain ID 5042002
         </p>
 
         <div className="flex items-center gap-8">
           {['Arc', 'Circle'].map(name => (
             <div
               key={name}
-              className="px-4 py-2 border border-[#1A1A1A] rounded-lg font-mono text-[10px] text-[#333] uppercase tracking-widest"
+              className="px-4 py-2 border border-border font-mono text-[10px] text-ink-dim uppercase tracking-widest"
             >
               {name}
             </div>
@@ -719,11 +484,11 @@ function EcosystemBadge() {
 
         <a
           href="https://arc.network"
-          className="font-mono text-[10px] text-[#B2F55A] hover:underline uppercase tracking-widest"
+          className="font-mono text-[10px] text-signal hover:underline uppercase tracking-widest"
         >
           Learn about Arc →
         </a>
-      </motion.div>
+      </div>
     </section>
   )
 }
@@ -734,14 +499,14 @@ function EcosystemBadge() {
 
 function Footer() {
   return (
-    <footer className="relative z-10 border-t border-[#1F1F1F] bg-black px-6 py-14">
+    <footer className="relative z-10 border-t border-border bg-bg px-6 py-14">
       <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between gap-10">
         <div>
           <span className="font-display font-black text-2xl tracking-tight select-none leading-none">
-            <span style={{ color: '#B2F55A' }}>CON</span>
-            <span style={{ color: '#FFFFFF' }}>DUIT</span>
+            <span className="text-signal">CON</span>
+            <span className="text-ink">DUIT</span>
           </span>
-          <p className="font-mono text-[9px] text-[#333] mt-3 leading-[1.8]">
+          <p className="font-mono text-[9px] text-ink-dim mt-3 leading-[1.8]">
             Accept any stablecoin, settle in yours
             <br />
             Chain ID 5042002 · Testnet 2026
@@ -757,7 +522,7 @@ function Footer() {
             <a
               key={href}
               href={href}
-              className="font-mono text-[10px] text-[#333] hover:text-[#B2F55A] transition-colors duration-200"
+              className="font-mono text-[10px] text-ink-dim hover:text-signal transition-colors duration-200"
             >
               {label} → {href.replace('https://', '')}
             </a>
@@ -775,10 +540,8 @@ function Footer() {
 export default function Page() {
   return (
     <>
-      <div className="fixed inset-0 z-0 grid-bg pointer-events-none" />
-      <Orbs />
-      <Particles />
-      <Scanline />
+      {/* The grid is the only background layer — no orbs, no particles, no scanline. */}
+      <div className="conduit-grid" aria-hidden="true" />
 
       <div className="relative z-10">
         <Nav />

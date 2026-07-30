@@ -1,10 +1,9 @@
 import type { Metadata } from "next";
 import "./globals.css";
-import { Anton, Barlow, IBM_Plex_Mono } from "next/font/google";
+import { Anton, JetBrains_Mono } from "next/font/google";
 
 const anton = Anton({ weight: "400", subsets: ["latin"], variable: "--font-anton" });
-const barlow = Barlow({ weight: ["400", "500", "600", "700"], subsets: ["latin"], variable: "--font-barlow" });
-const mono = IBM_Plex_Mono({ weight: ["400", "500"], subsets: ["latin"], variable: "--font-mono" });
+const mono = JetBrains_Mono({ weight: ["400", "500", "600"], subsets: ["latin"], variable: "--font-mono" });
 
 export const metadata: Metadata = {
   title: "Conduit — Accept Any Stablecoin, Settle in Yours",
@@ -20,8 +19,8 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${anton.variable} ${barlow.variable} ${mono.variable}`}>
-      <body>{children}</body>
+    <html lang="en" className={`${anton.variable} ${mono.variable}`}>
+      <body className="font-mono">{children}</body>
     </html>
   );
 }

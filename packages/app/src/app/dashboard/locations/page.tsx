@@ -22,7 +22,10 @@ function DownloadableQR({ value, filename }: { value: string; filename: string }
     const ctx = canvas.getContext("2d")!;
     const img = new Image();
     img.onload = () => {
-      ctx.fillStyle = "#000000";
+      // Canvas 2D context can't resolve CSS custom properties, so this stays a
+      // literal — matches --bg (#050505), same exception as QRCodeSVG's own
+      // bgColor/fgColor props above.
+      ctx.fillStyle = "#050505";
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
       canvas.toBlob((blob) => {

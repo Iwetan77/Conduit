@@ -69,10 +69,10 @@ export default function SettingsPage() {
     <div className="max-w-md space-y-8">
       <h1 className="font-display text-3xl font-bold">Settings</h1>
 
-      <div className="border border-brand-border rounded-lg p-6 space-y-4">
+      <div className="border border-border p-6 space-y-4">
         <div>
           <h2 className="font-medium text-sm mb-1">Standing settlement preference</h2>
-          <p className="text-xs text-brand-muted">
+          <p className="text-xs text-ink-dim">
             An on-chain preference (writes <code>SettlementPreferenceRegistry.sol</code>) — every direct payment
             (no invoice/declaration) sent to your address is forced to settle in this token, or the payment is
             rejected outright rather than silently honoring whatever the sender chose.
@@ -83,9 +83,9 @@ export default function SettingsPage() {
           <WalletConnect />
         ) : (
           <>
-            <p className="text-xs text-brand-muted font-mono">{address}</p>
+            <p className="text-xs text-ink-dim font-mono">{address}</p>
             <select
-              className="w-full bg-brand-surface border border-brand-border rounded px-3 py-2 text-sm"
+              className="w-full bg-surface border border-border px-3 py-2 text-sm focus:border-signal focus:outline-none"
               value={tokenSymbol}
               onChange={(e) => setTokenSymbol(e.target.value as keyof typeof CURRENCIES)}
             >
@@ -97,14 +97,14 @@ export default function SettingsPage() {
               <button
                 onClick={handleSetPreference}
                 disabled={busy}
-                className="flex-1 bg-brand-green text-brand-black font-medium rounded py-2 text-sm disabled:opacity-50"
+                className="flex-1 bg-signal text-signal-ink font-medium py-2 text-sm disabled:opacity-50"
               >
                 {busy ? "Submitting..." : "Set preference"}
               </button>
               <button
                 onClick={handleClearPreference}
                 disabled={busy}
-                className="border border-brand-border rounded py-2 px-4 text-sm disabled:opacity-50"
+                className="border border-border py-2 px-4 text-sm disabled:opacity-50"
               >
                 Clear
               </button>
@@ -112,8 +112,8 @@ export default function SettingsPage() {
           </>
         )}
 
-        {status && <p className="text-brand-green text-xs">{status}</p>}
-        {error && <p className="text-red-400 text-xs">{error}</p>}
+        {status && <p className="text-signal text-xs">{status}</p>}
+        {error && <p className="text-danger text-xs">{error}</p>}
       </div>
     </div>
   );

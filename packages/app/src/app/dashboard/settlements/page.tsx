@@ -38,21 +38,34 @@ export default function SettlementsPage() {
     });
   }, [settlements, currencyFilter, search]);
 
+  const heroLabel = currencyFilter === "all" ? "Total settlements" : `Total settled · ${currencyFilter}`;
+  const heroValue =
+    currencyFilter === "all"
+      ? String(filtered.length)
+      : filtered
+          .reduce((sum, s) => sum + Number(s.settle_amount), 0)
+          .toLocaleString("en-US", { maximumFractionDigits: 2 });
+
   return (
     <div>
+      <div className="mb-8">
+        <p className="text-scale-1 font-mono text-ink-dim uppercase tracking-wider mb-1">{heroLabel}</p>
+        <p className="font-anton text-scale-6 text-ink leading-none">{heroValue}</p>
+      </div>
+
       <div className="flex items-center justify-between mb-6">
         <h1 className="font-display text-3xl font-bold">Settlements</h1>
       </div>
 
       <div className="flex gap-3 mb-4">
         <input
-          className="bg-brand-surface border border-brand-border rounded px-3 py-1.5 text-sm flex-1"
+          className="bg-surface border border-border px-3 py-1.5 text-sm flex-1"
           placeholder="Search reference or address..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
         <select
-          className="bg-brand-surface border border-brand-border rounded px-3 py-1.5 text-sm"
+          className="bg-surface border border-border px-3 py-1.5 text-sm"
           value={currencyFilter}
           onChange={(e) => setCurrencyFilter(e.target.value)}
         >
@@ -63,51 +76,51 @@ export default function SettlementsPage() {
         </select>
       </div>
 
-      {error && <p className="text-red-400 text-sm mb-4">{error}</p>}
+      {error && <p className="text-danger text-sm mb-4">{error}</p>}
 
-      {settlements === null && !error && <p className="text-brand-muted text-sm">Loading...</p>}
+      {settlements === null && !error && <p className="text-ink-dim text-sm">Loading...</p>}
 
       {settlements !== null && filtered.length === 0 && (
-        <div className="border border-brand-border rounded-lg p-8 text-center text-brand-muted text-sm">
+        <div className="border border-border p-8 text-center text-ink-dim text-sm">
           No settlements yet. Create a payment request to get started.
         </div>
       )}
 
       {filtered.length > 0 && (
-        <div className="border border-brand-border rounded-lg overflow-x-auto">
+        <div className="border border-border overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-brand-border text-brand-muted text-xs uppercase text-left">
+              <tr className="border-b border-border text-ink-dim text-scale-1 font-mono uppercase tracking-wider text-left">
                 <th className="px-4 py-3 font-medium">Date</th>
                 <th className="px-4 py-3 font-medium">Reference</th>
                 <th className="px-4 py-3 font-medium">Counterparty</th>
-                <th className="px-4 py-3 font-medium">Paid</th>
-                <th className="px-4 py-3 font-medium">Received</th>
-                <th className="px-4 py-3 font-medium">Rate</th>
-                <th className="px-4 py-3 font-medium">Fee</th>
-                <th className="px-4 py-3 font-medium">Net</th>
-                <th className="px-4 py-3 font-medium">Tx</th>
+                <th className="px-4 py-3 font-medium text-right">Paid</th>
+                <th className="px-4 py-3 font-medium text-right">Received</th>
+                <th className="px-4 py-3 font-medium text-right">Rate</th>
+                <th className="px-4 py-3 font-medium text-right">Fee</th>
+                <th className="px-4 py-3 font-medium text-right">Net</th>
+                <th className="px-4 py-3 font-medium text-right">Tx</th>
               </tr>
             </thead>
             <tbody>
               {filtered.map((s) => {
                 const net = (Number(s.settle_amount) - Number(s.fee)).toString();
                 return (
-                  <tr key={s.id} className="border-b border-brand-border last:border-0 hover:bg-brand-surface/50">
-                    <td className="px-4 py-3 whitespace-nowrap">{formatDate(new Date(s.settled_at).getTime() / 1000)}</td>
-                    <td className="px-4 py-3">{s.reference || "—"}</td>
+                  <tr key={s.id} className="border-b border-border last:border-0 hover:bg-surface/50">
+                    <td className="px-4 py-3 whitespace-nowrap font-mono text-ink-dim">{formatDate(new Date(s.settled_at).getTime() / 1000)}</td>
+                    <td className="px-4 py-3 font-mono">{s.reference || "—"}</td>
                     <td className="px-4 py-3 font-mono text-xs">{shortenAddress(s.settle_address)}</td>
-                    <td className="px-4 py-3 whitespace-nowrap">{formatMinor(s.pay_amount, s.pay_currency)}</td>
-                    <td className="px-4 py-3 whitespace-nowrap">{formatMinor(s.settle_amount, s.settle_currency)}</td>
-                    <td className="px-4 py-3">{s.rate_applied ?? "—"}</td>
-                    <td className="px-4 py-3">{s.fee}</td>
-                    <td className="px-4 py-3">{net} {s.settle_currency}</td>
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-3 whitespace-nowrap font-mono text-right">{formatMinor(s.pay_amount, s.pay_currency)}</td>
+                    <td className="px-4 py-3 whitespace-nowrap font-mono text-right">{formatMinor(s.settle_amount, s.settle_currency)}</td>
+                    <td className="px-4 py-3 font-mono text-right">{s.rate_applied ?? "—"}</td>
+                    <td className="px-4 py-3 font-mono text-right">{s.fee}</td>
+                    <td className="px-4 py-3 font-mono text-right">{net} {s.settle_currency}</td>
+                    <td className="px-4 py-3 text-right">
                       <a
                         href={`${EXPLORER}/tx/${s.tx_hash}`}
                         target="_blank"
                         rel="noreferrer"
-                        className="text-brand-green hover:underline text-xs font-mono"
+                        className="text-signal hover:underline text-xs font-mono"
                       >
                         {shortenAddress(s.tx_hash, 6)}
                       </a>

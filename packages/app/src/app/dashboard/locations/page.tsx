@@ -40,10 +40,10 @@ function DownloadableQR({ value, filename }: { value: string; filename: string }
 
   return (
     <div className="flex flex-col items-center gap-2">
-      <div style={{ background: "#000", padding: 8, borderRadius: 8 }}>
-        <QRCodeSVG ref={svgRef} value={value} size={120} bgColor="#000000" fgColor="#B2F55A" level="H" />
+      <div style={{ background: "var(--bg)", padding: 8, border: "1px solid var(--border)" }}>
+        <QRCodeSVG ref={svgRef} value={value} size={120} bgColor="#050505" fgColor="#B2F55A" level="H" />
       </div>
-      <button onClick={download} className="text-brand-green text-xs hover:underline">Download print-ready</button>
+      <button onClick={download} className="text-signal text-xs hover:underline">Download print-ready</button>
     </div>
   );
 }
@@ -83,55 +83,55 @@ export default function LocationsPage() {
         <h1 className="font-display text-3xl font-bold">Locations</h1>
         <button
           onClick={() => setShowForm((s) => !s)}
-          className="border border-brand-border rounded px-4 py-2 text-sm"
+          className="border border-border px-4 py-2 text-sm"
         >
           {showForm ? "Cancel" : "Add location"}
         </button>
       </div>
 
       {showForm && (
-        <form onSubmit={handleCreate} className="border border-brand-border rounded-lg p-4 mb-6 space-y-3 max-w-md">
+        <form onSubmit={handleCreate} className="border border-border p-4 mb-6 space-y-3 max-w-md">
           <input
-            className="w-full bg-brand-surface border border-brand-border rounded px-3 py-2 text-sm"
+            className="w-full bg-surface border border-border px-3 py-2 text-sm focus:border-signal focus:outline-none"
             placeholder="Location name (e.g. Shibuya store)"
             value={name}
             onChange={(e) => setName(e.target.value)}
             required
           />
           <select
-            className="w-full bg-brand-surface border border-brand-border rounded px-3 py-2 text-sm"
+            className="w-full bg-surface border border-border px-3 py-2 text-sm focus:border-signal focus:outline-none"
             value={settleCurrency}
             onChange={(e) => setSettleCurrency(e.target.value)}
           >
             {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
           </select>
           <input
-            className="w-full bg-brand-surface border border-brand-border rounded px-3 py-2 text-sm font-mono"
+            className="w-full bg-surface border border-border px-3 py-2 text-sm font-mono focus:border-signal focus:outline-none"
             placeholder="0x... settle address"
             value={settleAddress}
             onChange={(e) => setSettleAddress(e.target.value)}
             required
           />
-          {error && <p className="text-red-400 text-xs">{error}</p>}
+          {error && <p className="text-danger text-xs">{error}</p>}
           <button
             type="submit"
             disabled={busy}
-            className="w-full bg-brand-green text-brand-black font-medium rounded py-2 text-sm disabled:opacity-50"
+            className="w-full bg-signal text-signal-ink font-medium py-2 text-sm disabled:opacity-50"
           >
             {busy ? "Creating..." : "Create location"}
           </button>
         </form>
       )}
 
-      {accounts === null && <p className="text-brand-muted text-sm">Loading...</p>}
+      {accounts === null && <p className="text-ink-dim text-sm">Loading...</p>}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         {accounts?.map((a) => (
-          <div key={a.id} className="border border-brand-border rounded-lg p-4 flex flex-col items-center gap-3">
+          <div key={a.id} className="border border-border p-4 flex flex-col items-center gap-3">
             <div className="text-center">
               <p className="font-medium text-sm">{a.name}</p>
-              <p className="text-brand-muted text-xs">{a.settle_currency}</p>
-              <p className="text-brand-muted text-[10px] font-mono">{a.settle_address}</p>
+              <p className="text-ink-dim text-xs">{a.settle_currency}</p>
+              <p className="text-ink-dim text-[10px] font-mono">{a.settle_address}</p>
             </div>
             <DownloadableQR value={a.settle_address} filename={`${a.name.replace(/\s+/g, "-")}-qr.png`} />
           </div>
@@ -139,7 +139,7 @@ export default function LocationsPage() {
       </div>
 
       {accounts?.length === 1 && !showForm && (
-        <p className="text-brand-muted text-sm mt-4">
+        <p className="text-ink-dim text-sm mt-4">
           No locations yet beyond your main account — click &quot;Add location&quot; to create one.
         </p>
       )}

@@ -5,6 +5,22 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { getApiKey, setApiKey, clearApiKey, createAccount } from "@/lib/conduit-api";
 
+// Signature moment: the major gridlines draw in once, here specifically —
+// the dashboard is the main surface, not every page. Reuses the single
+// global .conduit-grid element (rendered once in the root layout) rather
+// than stacking a second grid layer; just replays its draw-in animation.
+function GridSignature() {
+  useEffect(() => {
+    const grid = document.querySelector(".conduit-grid");
+    if (!grid) return;
+    grid.removeAttribute("data-animate");
+    // Force reflow so re-adding the attribute restarts the CSS animation.
+    void (grid as HTMLElement).offsetWidth;
+    grid.setAttribute("data-animate", "true");
+  }, []);
+  return null;
+}
+
 const NAV = [
   { href: "/dashboard/settlements", label: "Settlements" },
   { href: "/dashboard/request-payment", label: "Request payment" },
@@ -46,26 +62,26 @@ function OnboardingGate({ onReady }: { onReady: () => void }) {
   };
 
   return (
-    <div className="min-h-screen bg-brand-black text-brand-white flex items-center justify-center p-6">
+    <div className="min-h-screen bg-bg text-ink flex items-center justify-center p-6">
       <div className="w-full max-w-md space-y-8">
         <div>
           <h1 className="font-display text-3xl font-bold">Conduit Dashboard</h1>
-          <p className="text-brand-muted text-sm mt-1">
+          <p className="text-ink-dim text-sm mt-1">
             Create a test account to get started, or paste an existing sk_test_ key.
           </p>
         </div>
 
-        <form onSubmit={handleCreate} className="space-y-3 border border-brand-border rounded-lg p-4">
-          <h2 className="font-medium text-sm text-brand-muted">New account</h2>
+        <form onSubmit={handleCreate} className="space-y-3 border border-border p-4">
+          <h2 className="font-medium text-sm text-ink-dim">New account</h2>
           <input
-            className="w-full bg-brand-surface border border-brand-border rounded px-3 py-2 text-sm"
+            className="w-full bg-surface border border-border px-3 py-2 text-sm"
             placeholder="Business name"
             value={name}
             onChange={(e) => setName(e.target.value)}
             required
           />
           <select
-            className="w-full bg-brand-surface border border-brand-border rounded px-3 py-2 text-sm"
+            className="w-full bg-surface border border-border px-3 py-2 text-sm"
             value={settleCurrency}
             onChange={(e) => setSettleCurrency(e.target.value)}
           >
@@ -74,7 +90,7 @@ function OnboardingGate({ onReady }: { onReady: () => void }) {
             ))}
           </select>
           <input
-            className="w-full bg-brand-surface border border-brand-border rounded px-3 py-2 text-sm font-mono"
+            className="w-full bg-surface border border-border px-3 py-2 text-sm font-mono"
             placeholder="0x... settle address"
             value={settleAddress}
             onChange={(e) => setSettleAddress(e.target.value)}
@@ -83,26 +99,26 @@ function OnboardingGate({ onReady }: { onReady: () => void }) {
           <button
             type="submit"
             disabled={busy}
-            className="w-full bg-brand-green text-brand-black font-medium rounded py-2 text-sm disabled:opacity-50"
+            className="w-full bg-signal text-signal-ink font-medium py-2 text-sm disabled:opacity-50"
           >
             {busy ? "Creating..." : "Create account"}
           </button>
         </form>
 
-        <form onSubmit={handleUseExisting} className="space-y-3 border border-brand-border rounded-lg p-4">
-          <h2 className="font-medium text-sm text-brand-muted">Or use an existing key</h2>
+        <form onSubmit={handleUseExisting} className="space-y-3 border border-border p-4">
+          <h2 className="font-medium text-sm text-ink-dim">Or use an existing key</h2>
           <input
-            className="w-full bg-brand-surface border border-brand-border rounded px-3 py-2 text-sm font-mono"
+            className="w-full bg-surface border border-border px-3 py-2 text-sm font-mono"
             placeholder="sk_test_..."
             value={pastedKey}
             onChange={(e) => setPastedKey(e.target.value)}
           />
-          <button type="submit" className="w-full border border-brand-border rounded py-2 text-sm">
+          <button type="submit" className="w-full border border-border py-2 text-sm">
             Use this key
           </button>
         </form>
 
-        {error && <p className="text-red-400 text-sm">{error}</p>}
+        {error && <p className="text-danger text-sm">{error}</p>}
       </div>
     </div>
   );
@@ -122,18 +138,19 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   if (!ready) return <OnboardingGate onReady={() => setReady(true)} />;
 
   return (
-    <div className="min-h-screen bg-brand-black text-brand-white flex">
-      <aside className="w-56 border-r border-brand-border p-4 flex flex-col shrink-0">
+    <div className="min-h-screen bg-bg text-ink flex">
+      <GridSignature />
+      <aside className="w-56 border-r border-border p-4 flex flex-col shrink-0">
         <Link href="/" className="font-display text-xl font-bold mb-8">Conduit</Link>
         <nav className="flex flex-col gap-1">
           {NAV.map((item) => (
             <Link
               key={item.href}
               href={item.href}
-              className={`px-3 py-2 rounded text-sm ${
+              className={`px-3 py-2 text-sm ${
                 pathname?.startsWith(item.href)
-                  ? "bg-brand-surface text-brand-green"
-                  : "text-brand-muted hover:text-brand-white"
+                  ? "bg-surface text-signal"
+                  : "text-ink-dim hover:text-ink"
               }`}
             >
               {item.label}
@@ -141,7 +158,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           ))}
         </nav>
         <button
-          className="mt-auto text-xs text-brand-muted hover:text-brand-white text-left"
+          className="mt-auto text-xs text-ink-dim hover:text-ink text-left"
           onClick={() => {
             clearApiKey();
             setReady(false);

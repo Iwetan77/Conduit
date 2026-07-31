@@ -9,9 +9,9 @@ import { AddressInput } from "@/components/SendFlow/AddressInput";
 import { AmountInput } from "@/components/SendFlow/AmountInput";
 import { RoutePreview } from "@/components/SendFlow/RoutePreview";
 import { SendConfirm } from "@/components/SendFlow/SendConfirm";
+import { PayerCurrencyPicker } from "@/components/SendFlow/PayerCurrencyPicker";
 import { WalletConnect } from "@/components/Shared/WalletConnect";
 import type { Currency } from "@conduit/sdk";
-import { CURRENCIES } from "@conduit/sdk";
 import { motion, AnimatePresence } from "framer-motion";
 
 type Step = "input" | "confirm";
@@ -79,27 +79,10 @@ export default function HomePage() {
                   label="They receive"
                 />
 
-                {/* Payer currency toggle */}
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-xs font-mono text-ink-dim uppercase tracking-wider">
-                    You pay with
-                  </label>
-                  <div className="flex gap-2">
-                    {(Object.keys(CURRENCIES) as Currency[]).map((c) => (
-                      <button
-                        key={c}
-                        onClick={() => setPayerCurrency(c)}
-                        className={`flex-1 py-2 text-sm font-mono border transition-all ${
-                          payerCurrency === c
-                            ? "border-signal/50 text-ink bg-signal/5"
-                            : "border-border text-ink-dim hover:border-ink-dim/20"
-                        }`}
-                      >
-                        {c}
-                      </button>
-                    ))}
-                  </div>
-                </div>
+                {/* Balance-aware payer currency (Phase 5.1): only what this
+                    wallet actually holds, never a static list of every
+                    currency that exists. */}
+                <PayerCurrencyPicker value={payerCurrency} onChange={setPayerCurrency} />
 
                 {amount && recipient && (
                   <RoutePreview

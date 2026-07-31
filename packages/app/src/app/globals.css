@@ -56,7 +56,13 @@ body {
 .conduit-grid {
   position: fixed;
   inset: 0;
-  z-index: 0;
+  /* MUST be negative: a positioned element with z-index:0 paints ABOVE all
+     normal-flow (non-positioned) content, so the grid was drawing on top of
+     every card and every line of text -- the real cause of the "grid bleeds
+     through content" bug, NOT panel contrast. At -1 the grid paints over the
+     body's --bg background but strictly behind all content, so no gridline
+     can ever cross a glyph or a panel. */
+  z-index: -1;
   pointer-events: none;
   background-image:
     repeating-linear-gradient(to right, var(--grid-line-lit) 0 1px, transparent 1px 120px),

@@ -276,24 +276,34 @@ type publicLinkResponse struct {
 	Description    string     `json:"description,omitempty"`
 	Status         string     `json:"status"`
 	ExpiresAt      *time.Time `json:"expires_at,omitempty"`
+	// Phase 4 recipient identity -- a payer looking at a bare hex address
+	// won't pay; the business name is what they need to see first.
+	// settle_address is included for on-request verification (hover/
+	// expand), not as the primary label.
+	DisplayName   string  `json:"display_name"`
+	LogoURL       *string `json:"logo_url,omitempty"`
+	SettleAddress string  `json:"settle_address"`
 }
 
 // GetPublic is GET /:id/public -- unauthenticated, for the payer surface.
 // First view of an active link transitions it to viewed (the merchant wants
 // to know the buyer opened the invoice, per spec 3.1). Deliberately omits
-// account_id/settle_address/merchant_reference, matching settlement_intents'
-// own public endpoint's redaction.
+// account_id/merchant_reference; includes the recipient's display identity.
 func (h *PaymentLinks) GetPublic(w http.ResponseWriter, r *http.Request) {
 	id := pathParam(r, "id")
 
-	var amountMode, settleCurrency, description, status string
+	var amountMode, settleCurrency, settleAddress, description, status, displayName string
 	var amount, minAmount, maxAmount *string
+	var logoURL *string
 	var expiresAt *time.Time
 	err := h.Pool.QueryRow(r.Context(),
-		`SELECT amount_mode, amount::text, min_amount::text, max_amount::text, settle_currency, COALESCE(description,''), status, expires_at
-		 FROM payment_links WHERE id = $1`,
+		`SELECT pl.amount_mode, pl.amount::text, pl.min_amount::text, pl.max_amount::text, pl.settle_currency, pl.settle_address,
+		        COALESCE(pl.description,''), pl.status, pl.expires_at, a.name, a.logo_url
+		 FROM payment_links pl JOIN accounts a ON a.id = pl.account_id
+		 WHERE pl.id = $1`,
 		id,
-	).Scan(&amountMode, &amount, &minAmount, &maxAmount, &settleCurrency, &description, &status, &expiresAt)
+	).Scan(&amountMode, &amount, &minAmount, &maxAmount, &settleCurrency, &settleAddress, &description, &status, &expiresAt,
+		&displayName, &logoURL)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			writeErr(w, apierrors.E(apierrors.CodeNotFound, "id"))
@@ -314,6 +324,7 @@ func (h *PaymentLinks) GetPublic(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, publicLinkResponse{
 		ID: id, AmountMode: amountMode, Amount: derefStr(amount), MinAmount: derefStr(minAmount), MaxAmount: derefStr(maxAmount),
 		SettleCurrency: settleCurrency, Description: description, Status: status, ExpiresAt: expiresAt,
+		DisplayName: displayName, LogoURL: logoURL, SettleAddress: settleAddress,
 	})
 }
 

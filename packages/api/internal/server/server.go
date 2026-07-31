@@ -139,7 +139,9 @@ func New(cfg Config) http.Handler {
 			r.Use(idempotency.Middleware(cfg.Pool))
 
 			r.Get("/accounts", accountsH.List)
+			r.Get("/accounts/me", accountsH.Me)
 			r.Get("/accounts/{id}", accountsH.Get)
+			r.Patch("/accounts/{id}", accountsH.Update)
 			r.Post("/accounts/sub", accountsH.CreateSub)
 			r.Get("/api_keys", apiKeysH.List)
 

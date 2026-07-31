@@ -6,6 +6,7 @@
 
 import { use, useEffect, useState } from "react";
 import type { PaymentDeclaration } from "@conduit/sdk";
+import { getPublicSettlementIntent } from "@/lib/conduit-api";
 import { DeclarationDisplay } from "@/components/PayFlow/DeclarationDisplay";
 import { PayConfirm } from "@/components/PayFlow/PayConfirm";
 import { SettlementIntentPay } from "@/components/PayFlow/SettlementIntentPay";
@@ -16,15 +17,32 @@ interface PageParams {
   params: Promise<{ declarationId: string }>;
 }
 
+// A payer looking at a bare hex address won't pay; the business name is
+// what they need to see first -- reflect it in the browser tab too, not
+// just the page body (SettlementIntentPay renders display_name/logo_url in
+// the body itself).
+function useRecipientTitle(intentId: string) {
+  useEffect(() => {
+    if (!intentId) return;
+    getPublicSettlementIntent(intentId)
+      .then((intent) => {
+        document.title = `Pay ${intent.display_name} · Conduit`;
+      })
+      .catch(() => {});
+  }, [intentId]);
+}
+
 export default function PayPage({ params }: PageParams) {
   const { declarationId } = use(params);
+  const isSettlementIntent = declarationId.startsWith("si_");
+  useRecipientTitle(isSettlementIntent ? declarationId : "");
 
   // Two payment surfaces share this route: settlement_intents (si_ prefixed
   // ids, the B2B REST API -- including the CCTP bridge flow) and the older
   // on-chain PaymentDeclaration flow (bytes32 hashes). Same hosted_url shape
   // either way (AppBaseURL + "/pay/" + id), so this dispatches on id format
   // rather than needing a second route.
-  if (declarationId.startsWith("si_")) {
+  if (isSettlementIntent) {
     return (
       <div className="min-h-screen bg-bg flex flex-col">
         <header className="px-6 py-4 border-b border-border flex justify-center">

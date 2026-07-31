@@ -64,6 +64,7 @@ async function request<T>(
 export interface Account {
   id: string;
   name: string;
+  logo_url?: string;
   settle_currency: string;
   settle_address: string;
   livemode: boolean;
@@ -98,6 +99,16 @@ export function listApiKeys() {
 
 export function createSubAccount(body: { name: string; settle_currency: string; settle_address: string }) {
   return request<AccountWithKey>("/v1/accounts/sub", { method: "POST", body });
+}
+
+// Phase 4: recipient identity. getMyAccount resolves the caller's own
+// account without needing its id up front (Settings loads this to edit).
+export function getMyAccount() {
+  return request<Account>("/v1/accounts/me");
+}
+
+export function updateAccount(id: string, body: { name?: string; logo_url?: string; settle_currency?: string; settle_address?: string }) {
+  return request<Account>(`/v1/accounts/${id}`, { method: "PATCH", body });
 }
 
 export function listAccounts() {
@@ -183,6 +194,11 @@ export interface PublicSettlementIntent {
   settle_currency: string;
   source_chain: string;
   expires_at: string;
+  // Phase 4 recipient identity — display_name is primary; settle_address is
+  // secondary (shown on request, for verification), never the main label.
+  display_name: string;
+  logo_url?: string;
+  settle_address: string;
 }
 
 export function getPublicSettlementIntent(id: string) {
@@ -380,4 +396,27 @@ export function getPaymentLink(id: string) {
 
 export function voidPaymentLink(id: string) {
   return request<{ id: string; status: string }>(`/v1/payment_links/${id}/void`, { method: "POST" });
+}
+
+// The payer-facing view of a link — display_name/logo_url/settle_address
+// (Phase 4 recipient identity) instead of account_id/merchant_reference.
+// Not yet wired into a page (Phase 5 owns the payer-surface rework that
+// will consume this), but the client function is ready for it.
+export interface PublicPaymentLink {
+  id: string;
+  amount_mode: AmountMode;
+  amount?: string;
+  min_amount?: string;
+  max_amount?: string;
+  settle_currency: string;
+  description?: string;
+  status: LinkStatus;
+  expires_at?: string;
+  display_name: string;
+  logo_url?: string;
+  settle_address: string;
+}
+
+export function getPublicPaymentLink(id: string) {
+  return request<PublicPaymentLink>(`/v1/payment_links/${id}/public`);
 }

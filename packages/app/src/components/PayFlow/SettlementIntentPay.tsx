@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { getPublicSettlementIntent, type PublicSettlementIntent } from "@/lib/conduit-api";
-import { formatAmountRaw } from "@/lib/format";
+import { formatAmountRaw, shortenAddress } from "@/lib/format";
 import { CrossChainBridge } from "./CrossChainBridge";
 
 interface SettlementIntentPayProps {
@@ -16,6 +16,7 @@ interface SettlementIntentPayProps {
 export function SettlementIntentPay({ intentId }: SettlementIntentPayProps) {
   const [intent, setIntent] = useState<PublicSettlementIntent | null>(null);
   const [error, setError] = useState("");
+  const [showAddress, setShowAddress] = useState(false);
 
   useEffect(() => {
     getPublicSettlementIntent(intentId)
@@ -53,6 +54,27 @@ export function SettlementIntentPay({ intentId }: SettlementIntentPayProps) {
 
   return (
     <div className="space-y-6">
+      <div className="flex items-center gap-3">
+        {intent.logo_url ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={intent.logo_url} alt="" className="w-10 h-10 object-contain border border-border bg-surface" />
+        ) : (
+          <div className="w-10 h-10 border border-border bg-surface flex items-center justify-center font-display font-bold text-signal">
+            {intent.display_name.charAt(0).toUpperCase()}
+          </div>
+        )}
+        <div>
+          <p className="text-ink font-medium">{intent.display_name}</p>
+          <button
+            type="button"
+            onClick={() => setShowAddress((v) => !v)}
+            className="text-ink-dim text-xs font-mono hover:text-ink"
+          >
+            {showAddress ? intent.settle_address : shortenAddress(intent.settle_address)}
+          </button>
+        </div>
+      </div>
+
       <div className="border border-border bg-surface p-4 space-y-1">
         <p className="text-ink-dim text-xs uppercase tracking-wider font-mono">Requesting</p>
         <p className="text-ink font-mono text-2xl">

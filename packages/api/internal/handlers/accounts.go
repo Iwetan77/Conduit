@@ -25,11 +25,12 @@ type createAccountRequest struct {
 }
 
 type accountResponse struct {
-	ID             string `json:"id"`
-	Name           string `json:"name"`
-	SettleCurrency string `json:"settle_currency"`
-	SettleAddress  string `json:"settle_address"`
-	Livemode       bool   `json:"livemode"`
+	ID             string  `json:"id"`
+	Name           string  `json:"name"`
+	LogoURL        *string `json:"logo_url,omitempty"`
+	SettleCurrency string  `json:"settle_currency"`
+	SettleAddress  string  `json:"settle_address"`
+	Livemode       bool    `json:"livemode"`
 	// APIKey is only ever present in the create response, exactly once.
 	APIKey *createdKey `json:"api_key,omitempty"`
 }
@@ -92,12 +93,13 @@ type createFromPrivyRequest struct {
 	LoginWallet    string `json:"login_wallet"`   // the payer's Privy embedded wallet address
 }
 type privyAccountResponse struct {
-	ID             string `json:"id"`
-	Name           string `json:"name"`
-	SettleCurrency string `json:"settle_currency"`
-	SettleAddress  string `json:"settle_address"`
-	LoginWallet    string `json:"login_wallet"`
-	Livemode       bool   `json:"livemode"`
+	ID             string  `json:"id"`
+	Name           string  `json:"name"`
+	LogoURL        *string `json:"logo_url,omitempty"`
+	SettleCurrency string  `json:"settle_currency"`
+	SettleAddress  string  `json:"settle_address"`
+	LoginWallet    string  `json:"login_wallet"`
+	Livemode       bool    `json:"livemode"`
 }
 
 // CreateFromPrivy is POST /v1/accounts/privy -- the dashboard's login
@@ -125,9 +127,9 @@ func (h *Accounts) CreateFromPrivy(w http.ResponseWriter, r *http.Request) {
 	var existing privyAccountResponse
 	var loginWallet *string
 	err = h.Pool.QueryRow(ctx,
-		`SELECT id, name, settle_currency, settle_address, login_wallet, livemode FROM accounts WHERE privy_user_id = $1`,
+		`SELECT id, name, logo_url, settle_currency, settle_address, login_wallet, livemode FROM accounts WHERE privy_user_id = $1`,
 		privyUserID,
-	).Scan(&existing.ID, &existing.Name, &existing.SettleCurrency, &existing.SettleAddress, &loginWallet, &existing.Livemode)
+	).Scan(&existing.ID, &existing.Name, &existing.LogoURL, &existing.SettleCurrency, &existing.SettleAddress, &loginWallet, &existing.Livemode)
 	if err == nil {
 		if loginWallet != nil {
 			existing.LoginWallet = *loginWallet
@@ -178,14 +180,88 @@ func (h *Accounts) Get(w http.ResponseWriter, r *http.Request) {
 
 	var resp accountResponse
 	err := h.Pool.QueryRow(r.Context(),
-		`SELECT id, name, settle_currency, settle_address, livemode FROM accounts WHERE id = $1 AND (id = $2 OR parent_id = $2)`,
+		`SELECT id, name, logo_url, settle_currency, settle_address, livemode FROM accounts WHERE id = $1 AND (id = $2 OR parent_id = $2)`,
 		id, principal.AccountID,
-	).Scan(&resp.ID, &resp.Name, &resp.SettleCurrency, &resp.SettleAddress, &resp.Livemode)
+	).Scan(&resp.ID, &resp.Name, &resp.LogoURL, &resp.SettleCurrency, &resp.SettleAddress, &resp.Livemode)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			writeErr(w, apierrors.E(apierrors.CodeNotFound, "id"))
 			return
 		}
+		writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// Me is GET /v1/accounts/me -- the authenticated caller's own account,
+// without needing to know its id up front (the dashboard's Settings page
+// uses this to load what to edit).
+func (h *Accounts) Me(w http.ResponseWriter, r *http.Request) {
+	principal, _ := auth.FromContext(r.Context())
+
+	var resp accountResponse
+	err := h.Pool.QueryRow(r.Context(),
+		`SELECT id, name, logo_url, settle_currency, settle_address, livemode FROM accounts WHERE id = $1`,
+		principal.AccountID,
+	).Scan(&resp.ID, &resp.Name, &resp.LogoURL, &resp.SettleCurrency, &resp.SettleAddress, &resp.Livemode)
+	if err != nil {
+		writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+type updateAccountRequest struct {
+	Name           *string `json:"name"`
+	LogoURL        *string `json:"logo_url"`
+	SettleCurrency *string `json:"settle_currency"`
+	SettleAddress  *string `json:"settle_address"`
+}
+
+// Update is PATCH /v1/accounts/:id -- partial update, restricted to the
+// caller's own account or a direct subaccount (same ownership rule as Get).
+// Phase 4: this is how a merchant sets display name/logo/settle
+// currency/settle address from the dashboard.
+func (h *Accounts) Update(w http.ResponseWriter, r *http.Request) {
+	id := pathParam(r, "id")
+	principal, _ := auth.FromContext(r.Context())
+
+	var req updateAccountRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, apierrors.E(apierrors.CodeInvalidRequest, "body"))
+		return
+	}
+	if req.Name != nil && *req.Name == "" {
+		writeErr(w, apierrors.E(apierrors.CodeInvalidRequest, "name"))
+		return
+	}
+
+	ctx := r.Context()
+	tag, err := h.Pool.Exec(ctx,
+		`UPDATE accounts SET
+		   name = COALESCE($1, name),
+		   logo_url = COALESCE($2, logo_url),
+		   settle_currency = COALESCE($3, settle_currency),
+		   settle_address = COALESCE($4, settle_address)
+		 WHERE id = $5 AND (id = $6 OR parent_id = $6)`,
+		req.Name, req.LogoURL, req.SettleCurrency, req.SettleAddress, id, principal.AccountID,
+	)
+	if err != nil {
+		writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
+		return
+	}
+	if tag.RowsAffected() == 0 {
+		writeErr(w, apierrors.E(apierrors.CodeNotFound, "id"))
+		return
+	}
+
+	var resp accountResponse
+	err = h.Pool.QueryRow(ctx,
+		`SELECT id, name, logo_url, settle_currency, settle_address, livemode FROM accounts WHERE id = $1`,
+		id,
+	).Scan(&resp.ID, &resp.Name, &resp.LogoURL, &resp.SettleCurrency, &resp.SettleAddress, &resp.Livemode)
+	if err != nil {
 		writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
 		return
 	}
@@ -249,7 +325,7 @@ func (h *Accounts) CreateSub(w http.ResponseWriter, r *http.Request) {
 func (h *Accounts) List(w http.ResponseWriter, r *http.Request) {
 	principal, _ := auth.FromContext(r.Context())
 	rows, err := h.Pool.Query(r.Context(),
-		`SELECT id, name, settle_currency, settle_address, livemode FROM accounts WHERE id = $1 OR parent_id = $1 ORDER BY created_at DESC`,
+		`SELECT id, name, logo_url, settle_currency, settle_address, livemode FROM accounts WHERE id = $1 OR parent_id = $1 ORDER BY created_at DESC`,
 		principal.AccountID,
 	)
 	if err != nil {
@@ -261,7 +337,7 @@ func (h *Accounts) List(w http.ResponseWriter, r *http.Request) {
 	var results []accountResponse
 	for rows.Next() {
 		var a accountResponse
-		if err := rows.Scan(&a.ID, &a.Name, &a.SettleCurrency, &a.SettleAddress, &a.Livemode); err != nil {
+		if err := rows.Scan(&a.ID, &a.Name, &a.LogoURL, &a.SettleCurrency, &a.SettleAddress, &a.Livemode); err != nil {
 			writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
 			return
 		}

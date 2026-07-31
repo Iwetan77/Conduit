@@ -118,22 +118,35 @@ type publicIntentResponse struct {
 	SettleCurrency string    `json:"settle_currency"`
 	SourceChain    string    `json:"source_chain"`
 	ExpiresAt      time.Time `json:"expires_at"`
+	// DisplayName/LogoURL: Phase 4 recipient identity -- a payer looking at
+	// a bare hex address won't pay; the business name is what they need to
+	// see first. settle_address is still available for verification (the
+	// payer surface renders it secondary, e.g. on hover/expand) but is
+	// deliberately not the primary label anymore.
+	DisplayName   string  `json:"display_name"`
+	LogoURL       *string `json:"logo_url,omitempty"`
+	SettleAddress string  `json:"settle_address"`
 }
 
 // GetPublic is GET /v1/settlement_intents/:id/public -- unauthenticated,
 // for the payer surface (/pay/[id]). A payer landing on a bare payment link
 // has no API key at all, so this exposes only what's safe to show a
-// stranger: amount, currency, status, source_chain, expiry. Deliberately
-// omits account_id, settle_address, reference, and metadata.
+// stranger: amount, currency, status, source_chain, expiry, and the
+// recipient's display identity. Deliberately omits account_id, reference,
+// and metadata.
 func (h *SettlementIntents) GetPublic(w http.ResponseWriter, r *http.Request) {
 	id := pathParam(r, "id")
 
 	var resp publicIntentResponse
 	resp.ID = id
 	err := h.Pool.QueryRow(r.Context(),
-		`SELECT amount::text, status, settle_currency, source_chain, expires_at FROM settlement_intents WHERE id = $1`,
+		`SELECT si.amount::text, si.status, si.settle_currency, si.source_chain, si.expires_at, si.settle_address,
+		        a.name, a.logo_url
+		 FROM settlement_intents si JOIN accounts a ON a.id = si.account_id
+		 WHERE si.id = $1`,
 		id,
-	).Scan(&resp.Amount, &resp.Status, &resp.SettleCurrency, &resp.SourceChain, &resp.ExpiresAt)
+	).Scan(&resp.Amount, &resp.Status, &resp.SettleCurrency, &resp.SourceChain, &resp.ExpiresAt, &resp.SettleAddress,
+		&resp.DisplayName, &resp.LogoURL)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			writeErr(w, apierrors.E(apierrors.CodeNotFound, "id"))

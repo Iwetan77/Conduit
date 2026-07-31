@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAccount, useDisconnect, useChainId, useSwitchChain, useReadContracts } from "wagmi";
+import { keepPreviousData } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { CURRENCIES, type Currency } from "@conduit/sdk";
 import { Logo } from "./Logo";
@@ -59,16 +60,28 @@ function WalletMenu({ address }: { address: `0x${string}` }) {
       functionName: "balanceOf",
       args: [address],
     })),
-    query: { enabled: open, refetchInterval: 10000 },
+    query: {
+      enabled: open,
+      refetchInterval: 10000,
+      // Arc's public RPC rate-limits; retry and keep the last good data so
+      // a single failed refetch doesn't make real balances vanish.
+      retry: 3,
+      retryDelay: (attempt: number) => 500 * 2 ** attempt,
+      placeholderData: keepPreviousData,
+    },
   });
 
-  const held = TOKEN_LIST.map((currency, i) => ({
+  const rows = TOKEN_LIST.map((currency, i) => ({
     currency,
+    // undefined = read failed/unknown → rendered as "—", never dropped.
     raw: balanceData?.[i]?.status === "success" ? (balanceData[i].result as bigint) : undefined,
-  })).filter(
-    // Always show USDC (the hub currency) so the menu never looks empty;
-    // beyond that, only currencies actually held.
-    (b) => b.currency === "USDC" || (b.raw !== undefined && b.raw > 0n)
+  }));
+  const anyKnown = rows.some((b) => b.raw !== undefined);
+  const held = rows.filter(
+    // Always show USDC (the hub currency) so the menu never looks empty.
+    // Once at least one read succeeded, also keep held currencies and the
+    // ones still unknown (shown as "—") — never silently drop a balance.
+    (b) => b.currency === "USDC" || (anyKnown && (b.raw === undefined || b.raw > 0n))
   );
 
   const copyAddress = async () => {

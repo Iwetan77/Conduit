@@ -8,6 +8,7 @@
 // never a static list of every currency that exists.
 import { useEffect, useState } from "react";
 import { useAccount, useReadContracts } from "wagmi";
+import { keepPreviousData } from "@tanstack/react-query";
 import type { Currency } from "@conduit/sdk";
 import { CURRENCIES } from "@conduit/sdk";
 import { TokenIcon } from "@/components/Shared/TokenBadge";
@@ -46,22 +47,50 @@ export function PayerCurrencyPicker({ value, onChange }: PayerCurrencyPickerProp
       functionName: "balanceOf",
       args: address ? [address] : undefined,
     })),
-    query: { enabled: isConnected && !!address, refetchInterval: 10000 },
+    query: {
+      enabled: isConnected && !!address,
+      refetchInterval: 15000,
+      // Arc's public RPC rate-limits; without retries + kept data a single
+      // failed refetch made real balances vanish from the UI.
+      retry: 3,
+      retryDelay: (attempt: number) => 500 * 2 ** attempt,
+      placeholderData: keepPreviousData,
+    },
   });
+
+  // A failed read is UNKNOWN, never zero. Claiming "you hold nothing" off a
+  // rate-limited RPC response was a real user-visible bug.
+  const allKnown = !!data && data.every((d) => d.status === "success");
+  const held = (data ?? [])
+    .map((d, i) => ({
+      currency: CURRENCY_LIST[i] as Currency,
+      balance: d.status === "success" ? (d.result as bigint) : 0n,
+      known: d.status === "success",
+    }))
+    .filter((c) => c.known && c.balance > 0n)
+    .sort((a, b) => (b.balance > a.balance ? 1 : b.balance < a.balance ? -1 : 0));
+
+  // Keep the selected currency inside the held set (prefer the largest
+  // balance). Done in an effect, not during render.
+  const heldKey = held.map((h) => h.currency).join(",");
+  useEffect(() => {
+    if (held.length > 0 && !held.some((h) => h.currency === value)) {
+      onChange(held[0]!.currency);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [heldKey]);
 
   if (!mounted || !isConnected) return null;
 
-  if (isLoading || !data) {
+  if (isLoading || !data || (held.length === 0 && !allKnown)) {
+    // Includes the partially-failed case: better to say "checking" a beat
+    // longer than to tell someone with money that they're broke.
     return (
       <div className="flex flex-col gap-1.5">
         <label className="text-xs font-mono text-ink-dim uppercase tracking-wider">Checking your balances...</label>
       </div>
     );
   }
-
-  const held = CURRENCY_LIST
-    .map((currency, i) => ({ currency, balance: (data[i]?.result as bigint | undefined) ?? 0n }))
-    .filter((c) => c.balance > 0n);
 
   if (held.length === 0) {
     // Honest, but not an error — an empty wallet is a normal state, not a
@@ -84,7 +113,6 @@ export function PayerCurrencyPicker({ value, onChange }: PayerCurrencyPickerProp
   // Exactly one routable asset -> a confirmed fact, not a picker.
   if (held.length === 1 && held[0]) {
     const only = held[0].currency;
-    if (value !== only) onChange(only);
     return (
       <div className="flex flex-col gap-1.5">
         <label className="text-xs font-mono text-ink-dim uppercase tracking-wider">Paying with</label>

@@ -1,12 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { TokenIcon } from "@web3icons/react/dynamic";
 import { usePathname } from "next/navigation";
-import { useAccount, useBalance, useDisconnect, useChainId, useSwitchChain } from "wagmi";
+import { useAccount, useDisconnect, useChainId, useSwitchChain, useReadContracts } from "wagmi";
 import { useEffect, useRef, useState } from "react";
-import { ARC_TESTNET } from "@conduit/sdk";
+import { CURRENCIES, type Currency } from "@conduit/sdk";
 import { Logo } from "./Logo";
+import { TokenIcon } from "./TokenBadge";
 import { WalletConnect } from "./WalletConnect";
 import { arcTestnet } from "@/lib/wagmi";
 import { shortenAddress } from "@/lib/format";
@@ -23,27 +23,61 @@ const NAV_LINKS = [
 
 function formatBalance(raw: bigint | undefined, decimals: number): string {
   if (raw === undefined) return "—";
-  const divisor = BigInt(10 ** decimals);
+  const divisor = 10n ** BigInt(decimals);
   const whole = raw / divisor;
   const frac = (raw % divisor).toString().padStart(decimals, "0").slice(0, 2);
   return `${whole}.${frac}`;
 }
 
+const ERC20_BALANCE_ABI = [
+  {
+    name: "balanceOf",
+    type: "function",
+    stateMutability: "view",
+    inputs: [{ name: "account", type: "address" }],
+    outputs: [{ name: "", type: "uint256" }],
+  },
+] as const;
+
+const TOKEN_LIST = Object.keys(CURRENCIES) as Currency[];
+
 function WalletMenu({ address }: { address: `0x${string}` }) {
   const [open, setOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const { disconnect } = useDisconnect();
 
-  const { data: usdcData } = useBalance({
-    address,
-    token: ARC_TESTNET.tokens.USDC as `0x${string}`,
-    query: { refetchInterval: 5000 },
+  // One multicall over every registered stablecoin. Balances are SPLIT per
+  // token on purpose: USDC and EURC are different assets — a "unified"
+  // total would need a live FX rate and imply fungibility that doesn't
+  // exist at pay time. (wagmi v2 removed useBalance's `token:` param, which
+  // is why the old per-token useBalance calls always showed "—".)
+  const { data: balanceData } = useReadContracts({
+    contracts: TOKEN_LIST.map((c) => ({
+      address: CURRENCIES[c].token as `0x${string}`,
+      abi: ERC20_BALANCE_ABI,
+      functionName: "balanceOf",
+      args: [address],
+    })),
+    query: { enabled: open, refetchInterval: 10000 },
   });
-  const { data: eurcData } = useBalance({
-    address,
-    token: ARC_TESTNET.tokens.EURC as `0x${string}`,
-    query: { refetchInterval: 5000 },
-  });
+
+  const held = TOKEN_LIST.map((currency, i) => ({
+    currency,
+    raw: balanceData?.[i]?.status === "success" ? (balanceData[i].result as bigint) : undefined,
+  })).filter(
+    // Always show USDC (the hub currency) so the menu never looks empty;
+    // beyond that, only currencies actually held.
+    (b) => b.currency === "USDC" || (b.raw !== undefined && b.raw > 0n)
+  );
+
+  const copyAddress = async () => {
+    try {
+      await navigator.clipboard.writeText(address);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {}
+  };
 
   useEffect(() => {
     function handleClick(e: MouseEvent) {
@@ -72,27 +106,40 @@ function WalletMenu({ address }: { address: `0x${string}` }) {
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full mt-2 w-56 border border-border
+        <div className="absolute right-0 top-full mt-2 w-60 border border-border
                         bg-surface z-50 overflow-hidden">
+          {/* Full address + copy — the one thing every wallet menu must have */}
+          <button
+            onClick={copyAddress}
+            className="w-full px-3 py-2.5 border-b border-border flex items-center justify-between gap-2
+                       text-left hover:bg-bg/50 transition-colors group"
+            title="Copy address"
+          >
+            <span className="text-scale-1 font-mono text-ink-dim break-all leading-relaxed">
+              {address}
+            </span>
+            <span className={`shrink-0 text-scale-1 font-mono ${copied ? "text-signal" : "text-ink-dim group-hover:text-ink"}`}>
+              {copied ? "Copied" : (
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                  <rect x="9" y="9" width="11" height="11" rx="1" />
+                  <path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1" />
+                </svg>
+              )}
+            </span>
+          </button>
+
           <div className="p-3 border-b border-border space-y-2.5">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <TokenIcon symbol="USDC" variant="mono" size={18} color="currentColor" />
-                <span className="text-scale-1 text-ink-dim font-mono">USDC</span>
+            {held.map(({ currency, raw }) => (
+              <div key={currency} className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <TokenIcon currency={currency} px={18} />
+                  <span className="text-scale-1 text-ink-dim font-mono">{currency}</span>
+                </div>
+                <span className="text-scale-2 font-mono text-ink">
+                  {formatBalance(raw, CURRENCIES[currency].decimals)}
+                </span>
               </div>
-              <span className="text-scale-2 font-mono text-ink">
-                {formatBalance(usdcData?.value, usdcData?.decimals ?? 6)}
-              </span>
-            </div>
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <TokenIcon symbol="EURC" variant="mono" size={18} color="currentColor" />
-                <span className="text-scale-1 text-ink-dim font-mono">EURC</span>
-              </div>
-              <span className="text-scale-2 font-mono text-ink">
-                {formatBalance(eurcData?.value, eurcData?.decimals ?? 6)}
-              </span>
-            </div>
+            ))}
           </div>
           <button
             onClick={() => { disconnect(); setOpen(false); }}

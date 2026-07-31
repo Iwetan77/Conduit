@@ -33,6 +33,24 @@ function GoogleSignIn({ fullWidth = false }: { fullWidth?: boolean }) {
   );
 }
 
+// @privy-io/wagmi's createConfig STRIPS the injected/walletConnect
+// connectors (it only keeps Privy-synced wallets), so once the Privy stack
+// is mounted the wagmi connect buttons have nothing to connect with.
+// External wallets must go through Privy's own connect modal instead —
+// it handles MetaMask/WalletConnect and syncs the result back into wagmi.
+function PrivyConnectWallet({ fullWidth = false }: { fullWidth?: boolean }) {
+  const { connectWallet } = usePrivy();
+  return (
+    <button
+      onClick={() => connectWallet()}
+      className={`${fullWidth ? "w-full " : ""}px-4 py-2 text-scale-2 font-mono bg-signal text-signal-ink
+                 hover:bg-signal/90 transition-colors`}
+    >
+      Connect Wallet
+    </button>
+  );
+}
+
 // Rendered only when the Privy stack is mounted (usePrivy throws otherwise).
 function PrivySignOut() {
   const { authenticated, logout } = usePrivy();
@@ -84,6 +102,7 @@ export function WalletConnect() {
   const [mounted, setMounted] = useState(false);
   const { address, isConnected } = useAccount();
   const { connect, connectors, isPending } = useConnect();
+  const { mounted: privyMounted } = usePrivyGate();
 
   useEffect(() => { setMounted(true); }, []);
   if (!mounted) return null;
@@ -92,31 +111,37 @@ export function WalletConnect() {
     return <ConnectedChip address={address} />;
   }
 
-  const injected = connectors.find((c) => c.id === "injected");
+  const injected = connectors.find((c) => c.id === "injected" || c.type === "injected");
   const wc = connectors.find((c) => c.id === "walletConnect");
 
   return (
     <div className="flex flex-wrap items-center justify-center gap-2">
-      {injected && (
-        <button
-          onClick={() => connect({ connector: injected })}
-          disabled={isPending}
-          className="px-4 py-2 text-scale-2 font-mono bg-signal text-signal-ink
-                     hover:bg-signal/90 transition-colors disabled:opacity-50"
-        >
-          {isPending ? "Connecting..." : "Connect Wallet"}
-        </button>
-      )}
-      {wc && (
-        <button
-          onClick={() => connect({ connector: wc })}
-          disabled={isPending}
-          className="px-3 py-2 text-scale-2 font-mono border border-border
-                     text-ink-dim hover:text-ink hover:border-ink-dim
-                     transition-colors disabled:opacity-50"
-        >
-          WalletConnect
-        </button>
+      {privyMounted ? (
+        <PrivyConnectWallet />
+      ) : (
+        <>
+          {injected && (
+            <button
+              onClick={() => connect({ connector: injected })}
+              disabled={isPending}
+              className="px-4 py-2 text-scale-2 font-mono bg-signal text-signal-ink
+                         hover:bg-signal/90 transition-colors disabled:opacity-50"
+            >
+              {isPending ? "Connecting..." : "Connect Wallet"}
+            </button>
+          )}
+          {wc && (
+            <button
+              onClick={() => connect({ connector: wc })}
+              disabled={isPending}
+              className="px-3 py-2 text-scale-2 font-mono border border-border
+                         text-ink-dim hover:text-ink hover:border-ink-dim
+                         transition-colors disabled:opacity-50"
+            >
+              WalletConnect
+            </button>
+          )}
+        </>
       )}
       {PRIVY_ENABLED && <GoogleSignIn />}
     </div>
@@ -127,6 +152,7 @@ export function WalletConnectCompact() {
   const [mounted, setMounted] = useState(false);
   const { address, isConnected } = useAccount();
   const { connect, connectors, isPending } = useConnect();
+  const { mounted: privyMounted } = usePrivyGate();
 
   useEffect(() => { setMounted(true); }, []);
   if (!mounted) return null;
@@ -135,18 +161,23 @@ export function WalletConnectCompact() {
     return <ConnectedChip address={address} compact />;
   }
 
-  const connector = connectors[0];
+  const connector =
+    connectors.find((c) => c.id === "injected" || c.type === "injected") ?? connectors[0];
 
   return (
     <div className="flex flex-col gap-2 w-full">
-      <button
-        onClick={() => connector && connect({ connector })}
-        disabled={isPending}
-        className="px-4 py-2 text-scale-2 font-medium font-mono bg-signal text-signal-ink
-                   w-full hover:bg-signal/90 transition-colors disabled:opacity-50"
-      >
-        {isPending ? "Connecting..." : "Connect Wallet"}
-      </button>
+      {privyMounted ? (
+        <PrivyConnectWallet fullWidth />
+      ) : (
+        <button
+          onClick={() => connector && connect({ connector })}
+          disabled={isPending || !connector}
+          className="px-4 py-2 text-scale-2 font-medium font-mono bg-signal text-signal-ink
+                     w-full hover:bg-signal/90 transition-colors disabled:opacity-50"
+        >
+          {isPending ? "Connecting..." : "Connect Wallet"}
+        </button>
+      )}
       {PRIVY_ENABLED && <GoogleSignIn fullWidth />}
     </div>
   );

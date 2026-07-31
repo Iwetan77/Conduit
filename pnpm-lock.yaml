@@ -47,6 +47,9 @@ importers:
       '@web3icons/react':
         specifier: ^4.1.19
         version: 4.1.19(react@18.3.1)
+      country-flag-icons:
+        specifier: ^1.6.20
+        version: 1.6.20
       ethers:
         specifier: ^6.11.0
         version: 6.16.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)
@@ -2609,6 +2612,9 @@ packages:
 
   core-util-is@1.0.3:
     resolution: {integrity: sha512-ZQBvi1DcpJ4GDqanjucZ2Hj3wEO5pZDS89BWbkcrvdxksJorwUDDZamX9ldFkp9aw2lmBDLgkObEA4DWNJ9FYQ==}
+
+  country-flag-icons@1.6.20:
+    resolution: {integrity: sha512-py8JiEKzjhYw6HPJ0L7SxLgCYim36UPRTZX43/kqGueUCZLSvnrqAiwW8HtQibur7mdkFQUkjOgdK+o/9FBtaw==}
 
   crc-32@1.2.2:
     resolution: {integrity: sha512-ROmzCKrTnOwybPcJApAA6WBWij23HVfGVNKqqrZpuyZOHqK2CwHSvpGuyt/UNNvaIjEd8X5IFGp4Mh+Ie1IHJQ==}
@@ -9123,6 +9129,8 @@ snapshots:
     optional: true
 
   core-util-is@1.0.3: {}
+
+  country-flag-icons@1.6.20: {}
 
   crc-32@1.2.2: {}
 

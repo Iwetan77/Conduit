@@ -44,7 +44,7 @@ export default function HistoryPage() {
   }, [mounted, isConnected, address]);
 
   return (
-    <div className="min-h-screen bg-brand-black">
+    <div className="min-h-screen">
       <Nav />
       <main className="max-w-2xl mx-auto px-4 pt-24 pb-24">
         <div className="mb-8">

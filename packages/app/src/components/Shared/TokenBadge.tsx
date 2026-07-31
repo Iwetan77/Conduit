@@ -3,17 +3,27 @@
 import { TokenIcon as Web3TokenIcon } from "@web3icons/react/dynamic";
 import type { Currency } from "@conduit/sdk";
 import { CURRENCIES } from "@conduit/sdk";
+// Real SVG flags — flag EMOJI render as bare letters ("BR") on Windows
+// browsers, which is why the earlier emoji attempt "didn't load".
+import { BR, AU, MX, CA, GB, ZA, KR, type FlagComponent } from "country-flag-icons/react/3x2";
 
 interface TokenBadgeProps {
   currency: Currency;
   size?: "sm" | "md" | "lg";
 }
 
-// Circle's regional stablecoins have no real icon in web3icons' library --
-// @web3icons/react's own `fallback` prop renders our square mono monogram
-// chip for these instead of a broken/missing icon. USDC/EURC are real
-// tokens web3icons does have artwork for.
-const EXOTIC = new Set(["BRLA", "QCAD", "KRW1", "ZARU", "AUDF", "MXNB", "GBPA"]);
+// Circle's regional stablecoins have no artwork in web3icons' library —
+// show the currency's COUNTRY FLAG instead (user decision: flags for any
+// asset without a real coin logo). USDC/EURC keep their token icons.
+const FLAG_TOKENS: Record<string, FlagComponent> = {
+  BRLA: BR,
+  AUDF: AU,
+  MXNB: MX,
+  QCAD: CA,
+  GBPA: GB,
+  ZARU: ZA,
+  KRW1: KR,
+};
 
 function MonogramFallback({ symbol, px }: { symbol: string; px: number }) {
   return (
@@ -26,9 +36,17 @@ function MonogramFallback({ symbol, px }: { symbol: string; px: number }) {
   );
 }
 
-function TokenIcon({ currency, px }: { currency: Currency; px: number }) {
-  if (EXOTIC.has(currency)) {
-    return <MonogramFallback symbol={currency} px={px} />;
+export function TokenIcon({ currency, px }: { currency: Currency; px: number }) {
+  const Flag = FLAG_TOKENS[currency];
+  if (Flag) {
+    return (
+      <span
+        className="flex items-center justify-center shrink-0 overflow-hidden border border-border"
+        style={{ width: px, height: px }}
+      >
+        <Flag style={{ height: "100%", width: "auto", maxWidth: "none" }} />
+      </span>
+    );
   }
   return (
     <Web3TokenIcon

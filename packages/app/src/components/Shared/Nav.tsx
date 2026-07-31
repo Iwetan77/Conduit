@@ -3,10 +3,11 @@
 import Link from "next/link";
 import { TokenIcon } from "@web3icons/react/dynamic";
 import { usePathname } from "next/navigation";
-import { useAccount, useBalance, useConnect, useDisconnect, useChainId, useSwitchChain } from "wagmi";
+import { useAccount, useBalance, useDisconnect, useChainId, useSwitchChain } from "wagmi";
 import { useEffect, useRef, useState } from "react";
 import { ARC_TESTNET } from "@conduit/sdk";
 import { Logo } from "./Logo";
+import { WalletConnect } from "./WalletConnect";
 import { arcTestnet } from "@/lib/wagmi";
 import { shortenAddress } from "@/lib/format";
 
@@ -106,36 +107,12 @@ function WalletMenu({ address }: { address: `0x${string}` }) {
   );
 }
 
+// Shared connect UI — handles both provider stacks (plain wagmi connectors
+// vs Privy's connect modal once the Privy stack is mounted, which strips
+// wagmi's own connectors). Keeping one implementation prevents the nav and
+// page bodies from drifting apart again.
 function ConnectButton() {
-  const { connect, connectors, isPending } = useConnect();
-  const injected = connectors.find((c) => c.id === "injected");
-  const wc = connectors.find((c) => c.id === "walletConnect");
-
-  return (
-    <div className="flex items-center gap-2">
-      {injected && (
-        <button
-          onClick={() => connect({ connector: injected })}
-          disabled={isPending}
-          className="px-4 py-2 text-scale-2 font-mono bg-signal text-signal-ink
-                     hover:bg-signal/90 transition-colors disabled:opacity-50"
-        >
-          {isPending ? "Connecting..." : "Connect Wallet"}
-        </button>
-      )}
-      {wc && (
-        <button
-          onClick={() => connect({ connector: wc })}
-          disabled={isPending}
-          className="px-3 py-2 text-scale-2 font-mono border border-border
-                     text-ink-dim hover:text-ink hover:border-ink-dim
-                     transition-colors disabled:opacity-50"
-        >
-          WC
-        </button>
-      )}
-    </div>
-  );
+  return <WalletConnect />;
 }
 
 export function Nav() {
@@ -149,7 +126,7 @@ export function Nav() {
   const isWrongNetwork = mounted && isConnected && chainId !== arcTestnet.id;
 
   return (
-    <header className="fixed top-0 left-0 right-0 z-50 border-b border-border bg-bg/90">
+    <header className="fixed top-0 left-0 right-0 z-50 border-b border-border bg-bg">
       <div className="max-w-6xl mx-auto px-6 h-16 flex items-center">
         <div className="flex-1">
           <Logo size="sm" />
@@ -198,7 +175,7 @@ export function MobileNav() {
   const pathname = usePathname();
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-50 border-t border-border bg-bg/95 md:hidden">
+    <nav className="fixed bottom-0 left-0 right-0 z-50 border-t border-border bg-bg md:hidden">
       <div className="flex">
         {NAV_LINKS.map(({ href, label }) => {
           const isActive = href === "/" ? pathname === "/" : pathname.startsWith(href);

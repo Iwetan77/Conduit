@@ -10,7 +10,7 @@ import { useEffect, useState } from "react";
 import { useAccount, useReadContracts } from "wagmi";
 import type { Currency } from "@conduit/sdk";
 import { CURRENCIES } from "@conduit/sdk";
-import { TokenIcon } from "@web3icons/react/dynamic";
+import { TokenIcon } from "@/components/Shared/TokenBadge";
 
 const CURRENCY_LIST = Object.keys(CURRENCIES) as Currency[];
 
@@ -89,7 +89,7 @@ export function PayerCurrencyPicker({ value, onChange }: PayerCurrencyPickerProp
       <div className="flex flex-col gap-1.5">
         <label className="text-xs font-mono text-ink-dim uppercase tracking-wider">Paying with</label>
         <div className="flex items-center gap-2 border border-signal/50 bg-signal/5 px-3 py-2 text-sm font-mono text-ink">
-          <TokenIcon symbol={only} variant="mono" size={18} color="currentColor" />
+          <TokenIcon currency={only} px={18} />
           {only}
         </div>
       </div>
@@ -109,7 +109,7 @@ export function PayerCurrencyPicker({ value, onChange }: PayerCurrencyPickerProp
               value === currency ? "border-signal/50 text-ink bg-signal/5" : "border-border text-ink-dim hover:border-ink-dim/20"
             }`}
           >
-            <TokenIcon symbol={currency} variant="mono" size={16} color="currentColor" />
+            <TokenIcon currency={currency} px={16} />
             {currency}
           </button>
         ))}

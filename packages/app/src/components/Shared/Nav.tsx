@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import Image from "next/image";
+import { TokenIcon } from "@web3icons/react/dynamic";
 import { usePathname } from "next/navigation";
 import { useAccount, useBalance, useConnect, useDisconnect, useChainId, useSwitchChain } from "wagmi";
 import { useEffect, useRef, useState } from "react";
@@ -69,11 +69,11 @@ function WalletMenu({ address }: { address: `0x${string}` }) {
 
       {open && (
         <div className="absolute right-0 top-full mt-2 w-56 border border-border
-                        bg-bg z-50 overflow-hidden">
+                        bg-surface z-50 overflow-hidden">
           <div className="p-3 border-b border-border space-y-2.5">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <Image src="/usdc.svg" alt="USDC" width={18} height={18} />
+                <TokenIcon symbol="USDC" variant="mono" size={18} color="currentColor" />
                 <span className="text-scale-1 text-ink-dim font-mono">USDC</span>
               </div>
               <span className="text-scale-2 font-mono text-ink">
@@ -82,7 +82,7 @@ function WalletMenu({ address }: { address: `0x${string}` }) {
             </div>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <Image src="/eurc.svg" alt="EURC" width={18} height={18} />
+                <TokenIcon symbol="EURC" variant="mono" size={18} color="currentColor" />
                 <span className="text-scale-1 text-ink-dim font-mono">EURC</span>
               </div>
               <span className="text-scale-2 font-mono text-ink">

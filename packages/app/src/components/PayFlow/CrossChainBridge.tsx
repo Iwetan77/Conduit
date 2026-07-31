@@ -246,21 +246,25 @@ export function CrossChainBridge({ intentId, intent }: CrossChainBridgeProps) {
           Your USDC is moving from Solana to Arc (~15s). You won&apos;t need to sign again.
         </p>
 
-        <ol className="space-y-3 font-mono text-sm">
+        <ol className="space-y-3 font-mono text-sm border border-border bg-surface p-4">
           <BridgeStep n={1} label="Bridging USDC from Solana" done={step1Done} active={!step1Done} />
           <BridgeStep n={2} label={`Converting to ${intent.settle_currency}`} done={step2Done} active={step1Done && !step2Done} />
           <BridgeStep n={3} label="Settling to recipient" done={step3Done} active={step2Done && !step3Done} />
         </ol>
 
-        {bridgeStatus?.source_tx_hash && (
-          <p className="text-ink-dim text-xs font-mono truncate">
-            Deposit: {bridgeStatus.source_tx_hash}
-          </p>
-        )}
-        {bridgeStatus?.mint_tx_hash && (
-          <p className="text-ink-dim text-xs font-mono truncate">
-            Mint: {bridgeStatus.mint_tx_hash}
-          </p>
+        {(bridgeStatus?.source_tx_hash || bridgeStatus?.mint_tx_hash) && (
+          <div className="border border-border bg-surface p-4 space-y-1">
+            {bridgeStatus?.source_tx_hash && (
+              <p className="text-ink-dim text-xs font-mono truncate">
+                Deposit: {bridgeStatus.source_tx_hash}
+              </p>
+            )}
+            {bridgeStatus?.mint_tx_hash && (
+              <p className="text-ink-dim text-xs font-mono truncate">
+                Mint: {bridgeStatus.mint_tx_hash}
+              </p>
+            )}
+          </div>
         )}
 
         {phase === "settled" && (

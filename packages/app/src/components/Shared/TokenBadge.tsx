@@ -1,6 +1,6 @@
 "use client";
 
-import Image from "next/image";
+import { TokenIcon as Web3TokenIcon } from "@web3icons/react/dynamic";
 import type { Currency } from "@conduit/sdk";
 import { CURRENCIES } from "@conduit/sdk";
 
@@ -9,47 +9,39 @@ interface TokenBadgeProps {
   size?: "sm" | "md" | "lg";
 }
 
-interface TokenVisual {
-  symbol: string;
-  logo?: string; // undefined = no artwork yet, render a monogram instead
-}
+// Circle's regional stablecoins have no real icon in web3icons' library --
+// @web3icons/react's own `fallback` prop renders our square mono monogram
+// chip for these instead of a broken/missing icon. USDC/EURC are real
+// tokens web3icons does have artwork for.
+const EXOTIC = new Set(["BRLA", "QCAD", "KRW1", "ZARU", "AUDF", "MXNB", "GBPA"]);
 
-// Visual styling for every currency in CURRENCIES (@conduit/sdk). Only USDC and
-// EURC have real logo artwork today (public/usdc.svg, public/eurc.svg) — the
-// rest render a monogram. One accent system: no per-currency hues (that was
-// audit finding — 8 distinct colors, the "third hue" the design spec bans).
-const TOKEN_CONFIG: Record<string, TokenVisual> = {
-  USDC: { symbol: "USDC", logo: "/usdc.svg" },
-  EURC: { symbol: "EURC", logo: "/eurc.svg" },
-  BRLA: { symbol: "BRLA" },
-  AUDF: { symbol: "AUDF" },
-  MXNB: { symbol: "MXNB" },
-  QCAD: { symbol: "QCAD" },
-  GBPA: { symbol: "GBPA" },
-  ZARU: { symbol: "ZARU" },
-};
-
-function visualFor(currency: Currency): TokenVisual {
-  return TOKEN_CONFIG[currency] ?? { symbol: currency };
-}
-
-function TokenIcon({ currency, px }: { currency: Currency; px: number }) {
-  const config = visualFor(currency);
-  if (config.logo) {
-    return <Image src={config.logo} alt={config.symbol} width={px} height={px} />;
-  }
+function MonogramFallback({ symbol, px }: { symbol: string; px: number }) {
   return (
     <span
-      className="flex items-center justify-center font-mono font-bold shrink-0 border border-border text-ink-dim"
+      className="flex items-center justify-center font-mono font-bold shrink-0 border border-border bg-surface text-ink-dim"
       style={{ width: px, height: px, fontSize: px * 0.4 }}
     >
-      {config.symbol.slice(0, 1)}
+      {symbol.slice(0, 1)}
     </span>
   );
 }
 
+function TokenIcon({ currency, px }: { currency: Currency; px: number }) {
+  if (EXOTIC.has(currency)) {
+    return <MonogramFallback symbol={currency} px={px} />;
+  }
+  return (
+    <Web3TokenIcon
+      symbol={currency}
+      variant="mono"
+      size={px}
+      color="currentColor"
+      fallback={<MonogramFallback symbol={currency} px={px} />}
+    />
+  );
+}
+
 export function TokenBadge({ currency, size = "md" }: TokenBadgeProps) {
-  const config = visualFor(currency);
   const sizes = {
     sm: "px-2 py-0.5 text-scale-1",
     md: "px-3 py-1 text-scale-2",
@@ -62,7 +54,7 @@ export function TokenBadge({ currency, size = "md" }: TokenBadgeProps) {
       className={`inline-flex items-center gap-1.5 font-mono font-medium border border-border text-ink ${sizes[size]}`}
     >
       <TokenIcon currency={currency} px={px} />
-      {config.symbol}
+      {currency}
     </span>
   );
 }

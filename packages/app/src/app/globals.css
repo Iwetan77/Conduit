@@ -10,8 +10,14 @@
   --bg: #050505;
   --grid-line: #12140F;
   --grid-line-lit: #1C1F16;
-  --surface: #0C0D0A;
-  --border: #1F241A;
+  /* Phase 6 grid-bleed fix: --surface was only ~7 hex points off --bg
+     (#0C0D0A vs #050505), so opaque panels still read as part of the grid
+     background instead of a distinct raised card. Lifted into the
+     #0E100B-#141712 range the spec calls for -- clearly a step up from
+     --bg, still dark. --border brightened correspondingly so panels have a
+     crisp edge the grid visibly stops at. */
+  --surface: #141712;
+  --border: #2A3122;
   --ink: #E8EAE0;
   --ink-dim: #6B7060;
   --signal: #B2F55A;

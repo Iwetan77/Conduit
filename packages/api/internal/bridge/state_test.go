@@ -18,7 +18,7 @@ var legalPairs = map[State]map[State]bool{
 	StateFailed:              {},
 }
 
-func TestBridgeStateMachine(t *testing.T) {
+func TestFundingProviderStateMachine(t *testing.T) {
 	for _, from := range AllStates {
 		for _, to := range AllStates {
 			wantLegal := legalPairs[from][to]
@@ -41,7 +41,7 @@ func TestBridgeStateMachine(t *testing.T) {
 	}
 }
 
-func TestBridgeStateMachine_OrphanedReachableFromAttestationPendingAndAttested(t *testing.T) {
+func TestFundingProviderStateMachine_OrphanedReachableFromAttestationPendingAndAttested(t *testing.T) {
 	if err := Transition(StateAttestationPending, StateOrphaned); err != nil {
 		t.Errorf("attestation_pending -> orphaned must be legal (session dies while waiting on Iris): %v", err)
 	}
@@ -50,7 +50,7 @@ func TestBridgeStateMachine_OrphanedReachableFromAttestationPendingAndAttested(t
 	}
 }
 
-func TestBridgeStateMachine_OrphanedIsRecoverableNotTerminal(t *testing.T) {
+func TestFundingProviderStateMachine_OrphanedIsRecoverableNotTerminal(t *testing.T) {
 	if IsTerminal(StateOrphaned) {
 		t.Error("orphaned must not be terminal -- the burn is irreversible and WILL mint, the reconciler must be able to resume it")
 	}
@@ -59,7 +59,7 @@ func TestBridgeStateMachine_OrphanedIsRecoverableNotTerminal(t *testing.T) {
 	}
 }
 
-func TestBridgeStateMachine_TerminalStatesRejectEverything(t *testing.T) {
+func TestFundingProviderStateMachine_TerminalStatesRejectEverything(t *testing.T) {
 	for _, terminal := range []State{StateHandoffToSettlement, StateFailed} {
 		if !IsTerminal(terminal) {
 			t.Errorf("%s must be terminal", terminal)
@@ -72,7 +72,7 @@ func TestBridgeStateMachine_TerminalStatesRejectEverything(t *testing.T) {
 	}
 }
 
-func TestBridgeStateMachine_NoSelfTransitions(t *testing.T) {
+func TestFundingProviderStateMachine_NoSelfTransitions(t *testing.T) {
 	for _, s := range AllStates {
 		if err := Transition(s, s); err == nil {
 			t.Errorf("%s -> %s: self-transition must be rejected", s, s)

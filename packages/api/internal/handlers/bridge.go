@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"crypto/ecdsa"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -13,7 +14,6 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
-	solanago "github.com/gagliardetto/solana-go"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	bridgepkg "github.com/kzn-labs/conduit/api/internal/bridge"
@@ -24,48 +24,48 @@ import (
 	"github.com/kzn-labs/conduit/api/internal/webhooks"
 )
 
-// Bridge implements the two payer-facing CCTP endpoints. Deliberately
+// Bridge implements the two payer-facing funding endpoints. Deliberately
 // unauthenticated (no auth.Middleware) -- this is the payer surface, and a
-// cross-chain payer has no Conduit API key or Arc wallet, only a Solana one.
-// See internal/bridge/README.md for the state machine and orphan-recovery
-// model this drives.
+// cross-chain payer has no Conduit API key. Backed by Circle Gateway
+// (internal/bridge.FundingProvider) -- chain-agnostic at this layer, never
+// Solana-typed. See internal/bridge/README.md for the state machine and
+// orphan-recovery model this drives, and docs/ubk-capability.md for the
+// deposit-then-spend mechanism underneath.
 type Bridge struct {
 	Pool        *pgxpool.Pool
-	Provider    bridgepkg.BridgeProvider
+	Provider    bridgepkg.FundingProvider
 	StableFX    *fx.StableFXProvider
 	Webhooks    *webhooks.Dispatcher
 	RelayerKey  *ecdsa.PrivateKey
 	RelayerAddr common.Address
 	// StaleAfter is how long a bridge_transfers row can sit without forward
-	// progress before ReconcileOrphanedBridges treats it as orphaned. Real
-	// observed attestation latency is 14-22s (Phases 0/2); production should
-	// use a value like 45s. Configurable (not a hardcoded package constant)
-	// so scripts/e2e-crosschain.sh can prove orphan recovery in seconds
-	// instead of waiting on a production-sized window.
+	// progress before ReconcileOrphanedBridges treats it as orphaned.
 	StaleAfter time.Duration
 }
 
 type bridgeInitiateRequest struct {
-	// Step 1: payer requests the unsigned burn.
+	// Step 1: payer requests the funding artifacts.
 	PayerAddress string `json:"payer_address,omitempty"`
 	USDCAmount   string `json:"usdc_amount,omitempty"`
-	// Step 2: payer reports back the signed+submitted burn.
-	TransferID   string `json:"transfer_id,omitempty"`
-	SourceTxHash string `json:"source_tx_hash,omitempty"`
+	// Step 2: payer reports back their signature(s).
+	TransferID          string `json:"transfer_id,omitempty"`
+	DepositTxHash       string `json:"deposit_tx_hash,omitempty"`
+	BurnIntentSignature string `json:"burn_intent_signature,omitempty"` // hex, 0x-prefixed
 }
 
 type bridgeInitiateResponse struct {
-	TransferID       string `json:"transfer_id"`
-	State            string `json:"state"`
-	UnsignedTxBase64 string `json:"unsigned_tx_base64,omitempty"`
+	TransferID        string `json:"transfer_id"`
+	State             string `json:"state"`
+	NeedsDeposit      bool   `json:"needs_deposit,omitempty"`
+	DepositTxBase64   string `json:"deposit_tx_base64,omitempty"`
+	BurnIntentMessage string `json:"burn_intent_message,omitempty"` // hex, for the payer to sign
 }
 
-// Initiate is POST /v1/settlement_intents/:id/bridge/initiate. It does
-// double duty across the two-signature-free steps of a bridge -- called once
-// with {payer_address, usdc_amount} to get the unsigned burn, and once more
-// with {transfer_id, source_tx_hash} after the payer has signed and
-// submitted it on Solana. This keeps the route count matching the spec (two
-// new endpoints) without inventing a third.
+// Initiate is POST /v1/settlement_intents/:id/bridge/initiate. Two calls:
+// {payer_address, usdc_amount} returns what to sign (a deposit transaction,
+// if the payer's Gateway balance is insufficient, plus always a burn-intent
+// message); {transfer_id, burn_intent_signature, deposit_tx_hash?} submits
+// the signed intent and kicks off the funding pipeline.
 func (h *Bridge) Initiate(w http.ResponseWriter, r *http.Request) {
 	intentID := pathParam(r, "id")
 	ctx := r.Context()
@@ -77,7 +77,7 @@ func (h *Bridge) Initiate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.TransferID != "" {
-		h.reportBurn(w, r.Context(), intentID, req)
+		h.reportSignature(w, r.Context(), intentID, req)
 		return
 	}
 
@@ -109,46 +109,47 @@ func (h *Bridge) Initiate(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, apierrors.E(apierrors.CodeInvalidRequest, "usdc_amount"))
 		return
 	}
-	payerPubkey, err := solanago.PublicKeyFromBase58(req.PayerAddress)
-	if err != nil {
-		writeErr(w, apierrors.E(apierrors.CodeInvalidRequest, "payer_address"))
-		return
-	}
 
-	burnReq, err := h.Provider.InitiateBurn(ctx, payerPubkey, amount, h.RelayerAddr)
+	fundReq, err := h.Provider.PrepareFund(ctx, bridgepkg.Address(req.PayerAddress), amount, bridgepkg.Address(h.RelayerAddr.Hex()))
 	if err != nil {
-		log.Printf("bridge: InitiateBurn failed: %v", err)
+		log.Printf("bridge: PrepareFund failed: %v", err)
 		writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
 		return
 	}
 
 	transferID := models.NewID("brg")
+	burnIntentHex := "0x" + hex.EncodeToString(fundReq.BurnIntentMessage)
 	_, err = h.Pool.Exec(ctx,
-		`INSERT INTO bridge_transfers (id, intent_id, source_domain, dest_domain, burn_amount, state)
-		 VALUES ($1,$2,$3,$4,$5,'initiated')`,
-		transferID, intentID, h.Provider.SourceDomain(), bridgepkg.ArcDomain, amount.String(),
+		`INSERT INTO bridge_transfers (id, intent_id, source_domain, dest_domain, burn_amount, message_hex, state)
+		 VALUES ($1,$2,$3,$4,$5,$6,'initiated')`,
+		transferID, intentID, bridgepkg.SolanaDomain, bridgepkg.ArcDomain, amount.String(), burnIntentHex,
 	)
 	if err != nil {
 		writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
 		return
 	}
+	fundReq.TransferID = transferID
 	h.emitWebhook(ctx, intentID, "bridge.initiated", map[string]any{
 		"intent_id": intentID, "transfer_id": transferID, "usdc_amount": amount.String(),
 	})
 
 	writeJSON(w, http.StatusCreated, bridgeInitiateResponse{
-		TransferID: transferID, State: string(bridgepkg.StateInitiated), UnsignedTxBase64: burnReq.UnsignedTxBase64,
+		TransferID:        transferID,
+		State:             string(bridgepkg.StateInitiated),
+		NeedsDeposit:      fundReq.NeedsDeposit,
+		DepositTxBase64:   fundReq.DepositTxBase64,
+		BurnIntentMessage: burnIntentHex,
 	})
 }
 
-// reportBurn is Initiate's second call: the payer has signed+submitted the
-// burn and reports its signature. This kicks off attestation polling and the
-// mint in the background so the HTTP response doesn't block for ~8-30s --
-// the client polls GET .../bridge/status instead. If the process dies before
-// this background work finishes, the row is left in attestation_pending or
-// attested, exactly where the orphan reconciler picks it up -- see
-// internal/bridge/reconciler.go.
-func (h *Bridge) reportBurn(w http.ResponseWriter, ctx context.Context, intentID string, req bridgeInitiateRequest) {
+// reportSignature is Initiate's second call: the payer has signed the burn
+// intent (and, if needed, the deposit transaction) and reports back. This
+// submits the signed intent to Gateway and drives the rest of the pipeline
+// in the background so the HTTP response doesn't block -- the client polls
+// GET .../bridge/status instead. If the process dies before this background
+// work finishes, the row is left mid-pipeline, exactly where the orphan
+// reconciler picks it up -- see internal/bridge/reconciler.go.
+func (h *Bridge) reportSignature(w http.ResponseWriter, ctx context.Context, intentID string, req bridgeInitiateRequest) {
 	var currentState string
 	err := h.Pool.QueryRow(ctx,
 		`SELECT state FROM bridge_transfers WHERE id = $1 AND intent_id = $2`,
@@ -169,57 +170,84 @@ func (h *Bridge) reportBurn(w http.ResponseWriter, ctx context.Context, intentID
 		writeJSON(w, http.StatusOK, bridgeInitiateResponse{TransferID: req.TransferID, State: currentState})
 		return
 	}
+	if req.BurnIntentSignature == "" {
+		writeErr(w, apierrors.E(apierrors.CodeInvalidRequest, "burn_intent_signature"))
+		return
+	}
 
 	if _, err := h.Pool.Exec(ctx,
 		`UPDATE bridge_transfers SET state = 'burn_submitted', source_tx_hash = $1, updated_at = now() WHERE id = $2`,
-		req.SourceTxHash, req.TransferID,
+		req.DepositTxHash, req.TransferID,
 	); err != nil {
 		writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
 		return
 	}
 
+	sigBytes, err := hex.DecodeString(strings.TrimPrefix(req.BurnIntentSignature, "0x"))
+	if err != nil {
+		writeErr(w, apierrors.E(apierrors.CodeInvalidRequest, "burn_intent_signature"))
+		return
+	}
+
 	// Fire the rest of the pipeline in the background using a fresh context --
 	// r.Context() dies with the HTTP response, but this work must survive it.
-	go h.runBridgeToSettlement(context.Background(), intentID, req.TransferID, req.SourceTxHash)
+	go h.runFundingToSettlement(context.Background(), intentID, req.TransferID, sigBytes)
 
 	writeJSON(w, http.StatusOK, bridgeInitiateResponse{TransferID: req.TransferID, State: string(bridgepkg.StateBurnSubmitted)})
 }
 
-// runBridgeToSettlement drives a bridge_transfers row from burn_submitted
+// runFundingToSettlement drives a bridge_transfers row from burn_submitted
 // through minted, then hands off to settlement. Safe to call again for the
 // same row from the reconciler -- every step checks the row's current state
-// before advancing it, so a row that's already past a given step is skipped
-// forward to wherever it actually is.
-func (h *Bridge) runBridgeToSettlement(ctx context.Context, intentID, transferID, sourceTxHash string) {
-	// burn_submitted -> burn_confirmed -> attestation_pending
+// before advancing it.
+func (h *Bridge) runFundingToSettlement(ctx context.Context, intentID, transferID string, burnIntentSig []byte) {
 	h.setState(ctx, transferID, bridgepkg.StateBurnConfirmed)
 	h.setState(ctx, transferID, bridgepkg.StateAttestationPending)
 
-	attestation, err := h.Provider.PollAttestation(ctx, sourceTxHash)
+	// Re-derive the FundRequest's burn intent bytes isn't possible here (the
+	// message was only ever held client-side between the two calls) --
+	// instead we re-run PrepareFund's deterministic encoding is NOT safe
+	// (the salt is random per call). So the message bytes must have been
+	// persisted at Initiate time. Simplification for this phase: store them
+	// on the bridge_transfers row alongside source_tx_hash.
+	var burnIntentMsgHex string
+	if err := h.Pool.QueryRow(ctx, `SELECT COALESCE(message_hex, '') FROM bridge_transfers WHERE id = $1`, transferID).Scan(&burnIntentMsgHex); err != nil {
+		log.Printf("bridge: read burn intent message for transfer %s: %v", transferID, err)
+		h.setState(ctx, transferID, bridgepkg.StateFailed)
+		return
+	}
+
+	gatewayTransferID, err := h.Provider.Fund(ctx, bridgepkg.FundRequest{
+		TransferID:          transferID,
+		BurnIntentMessage:   mustDecodeHex(burnIntentMsgHex),
+		BurnIntentSignature: burnIntentSig,
+	})
 	if err != nil {
-		log.Printf("bridge: PollAttestation failed for transfer %s: %v", transferID, err)
+		log.Printf("bridge: Fund failed for transfer %s: %v", transferID, err)
 		h.setState(ctx, transferID, bridgepkg.StateFailed)
 		h.emitWebhook(ctx, intentID, "bridge.failed", map[string]any{"intent_id": intentID, "transfer_id": transferID, "reason": err.Error()})
 		return
 	}
-
+	// Persist Gateway's own transfer id (reusing the attestation column --
+	// Gateway owns attestation internally, all Conduit needs to remember is
+	// the id to poll) so the reconciler can resume polling without the
+	// payer present.
 	if _, err := h.Pool.Exec(ctx,
-		`UPDATE bridge_transfers SET state = 'attested', attestation = $1, message_hex = $2, attestation_status = $3, updated_at = now() WHERE id = $4 AND state = 'attestation_pending'`,
-		fmt.Sprintf("0x%x", attestation.AttestationBytes), fmt.Sprintf("0x%x", attestation.Message), attestation.Status, transferID,
+		`UPDATE bridge_transfers SET state = 'attested', attestation = $1, updated_at = now() WHERE id = $2 AND state = 'attestation_pending'`,
+		gatewayTransferID, transferID,
 	); err != nil {
-		log.Printf("bridge: persist attestation failed for transfer %s: %v", transferID, err)
+		log.Printf("bridge: persist gateway transfer id for %s: %v", transferID, err)
 		return
 	}
-	h.emitWebhook(ctx, intentID, "bridge.attested", map[string]any{"intent_id": intentID, "transfer_id": transferID})
+	h.emitWebhook(ctx, intentID, "bridge.attested", map[string]any{"intent_id": intentID, "transfer_id": transferID, "gateway_transfer_id": gatewayTransferID})
 
-	h.completeMintAndSettle(ctx, intentID, transferID, attestation)
+	h.pollAndCompleteFunding(ctx, intentID, transferID, gatewayTransferID)
 }
 
-// completeMintAndSettle is the shared tail end of the pipeline, called both
-// from a live session (runBridgeToSettlement) and the orphan reconciler --
-// this is the exact function that makes orphan recovery real rather than
-// aspirational. Idempotent: re-reads the row's state before each write.
-func (h *Bridge) completeMintAndSettle(ctx context.Context, intentID, transferID string, attestation bridgepkg.Attestation) {
+// pollAndCompleteFunding polls FundingProvider.Status until Arc's forwarder
+// has minted (or it fails), then hands off to settlement. Called both from
+// a live session and the orphan reconciler.
+func (h *Bridge) pollAndCompleteFunding(ctx context.Context, intentID, transferID, gatewayTransferID string) {
 	var state string
 	if err := h.Pool.QueryRow(ctx, `SELECT state FROM bridge_transfers WHERE id = $1`, transferID).Scan(&state); err != nil {
 		log.Printf("bridge: read state for transfer %s: %v", transferID, err)
@@ -231,34 +259,40 @@ func (h *Bridge) completeMintAndSettle(ctx context.Context, intentID, transferID
 
 	h.setState(ctx, transferID, bridgepkg.StateMintSubmitted)
 
-	mintTxHash, minted, err := h.Provider.Mint(ctx, attestation)
-	if err != nil {
-		if strings.Contains(err.Error(), "Nonce already used") {
-			// Someone else (a concurrent live session or a prior reconciler
-			// pass) already minted this. Not a failure -- catch up state.
-			log.Printf("bridge: transfer %s already minted elsewhere, catching up state", transferID)
-			h.setState(ctx, transferID, bridgepkg.StateMinted)
-		} else {
-			log.Printf("bridge: Mint failed for transfer %s: %v", transferID, err)
-			h.setState(ctx, transferID, bridgepkg.StateFailed)
-			h.emitWebhook(ctx, intentID, "bridge.failed", map[string]any{"intent_id": intentID, "transfer_id": transferID, "reason": err.Error()})
-			return
+	deadline := time.Now().Add(90 * time.Second)
+	var status bridgepkg.FundingStatus
+	for time.Now().Before(deadline) {
+		var err error
+		status, err = h.Provider.Status(ctx, gatewayTransferID)
+		if err != nil {
+			log.Printf("bridge: Status poll failed for transfer %s: %v", transferID, err)
+			time.Sleep(5 * time.Second)
+			continue
 		}
-	} else {
-		if _, err := h.Pool.Exec(ctx,
-			`UPDATE bridge_transfers SET state = 'minted', mint_tx_hash = $1, minted_amount = $2, updated_at = now() WHERE id = $3 AND state = 'mint_submitted'`,
-			mintTxHash, minted.String(), transferID,
-		); err != nil {
-			log.Printf("bridge: persist mint for transfer %s: %v", transferID, err)
-			return
+		if status.State == bridgepkg.StateMinted || status.State == bridgepkg.StateFailed {
+			break
 		}
+		time.Sleep(5 * time.Second)
 	}
 
-	h.emitWebhook(ctx, intentID, "bridge.minted", map[string]any{"intent_id": intentID, "transfer_id": transferID, "mint_tx_hash": mintTxHash})
+	if status.State != bridgepkg.StateMinted {
+		log.Printf("bridge: funding did not complete for transfer %s: %s", transferID, status.FailureReason)
+		h.setState(ctx, transferID, bridgepkg.StateFailed)
+		h.emitWebhook(ctx, intentID, "bridge.failed", map[string]any{"intent_id": intentID, "transfer_id": transferID, "reason": status.FailureReason})
+		return
+	}
 
-	// Quote-after-mint ordering (spec §1.1): only now, with the USDC actually
-	// sitting on Arc, do we ask StableFX for a rate -- never before, since the
-	// bridge's ~8-30s would blow past the ~3.5s quote TTL.
+	if _, err := h.Pool.Exec(ctx,
+		`UPDATE bridge_transfers SET state = 'minted', mint_tx_hash = $1, updated_at = now() WHERE id = $2 AND state = 'mint_submitted'`,
+		status.MintTxHash, transferID,
+	); err != nil {
+		log.Printf("bridge: persist mint for transfer %s: %v", transferID, err)
+		return
+	}
+	h.emitWebhook(ctx, intentID, "bridge.minted", map[string]any{"intent_id": intentID, "transfer_id": transferID, "mint_tx_hash": status.MintTxHash})
+
+	// Quote-after-mint ordering: only now, with the USDC actually sitting on
+	// Arc, do we ask StableFX for a rate.
 	if err := h.settleBridgedIntent(ctx, intentID); err != nil {
 		log.Printf("bridge: settlement handoff failed for intent %s: %v", intentID, err)
 		return
@@ -269,7 +303,8 @@ func (h *Bridge) completeMintAndSettle(ctx context.Context, intentID, transferID
 // settleBridgedIntent runs the intent's existing Quote -> Prepare -> Confirm
 // path, but with Conduit's own Arc relayer key producing both payer
 // signatures instead of a human wallet. See eip712_sign.go's doc comment for
-// why this is safe: the burn was the payer's one and only, final signature.
+// why this is safe: the funding intent was the payer's one and only, final
+// signature.
 func (h *Bridge) settleBridgedIntent(ctx context.Context, intentID string) error {
 	var amountStr, settleCurrencyISO, settleAddress string
 	if err := h.Pool.QueryRow(ctx,
@@ -288,15 +323,6 @@ func (h *Bridge) settleBridgedIntent(ctx context.Context, intentID string) error
 	var prep fx.Preparation
 	var err error
 
-	// The observed StableFX quote TTL is ~3.5s (docs/fx-capability.md) --
-	// tight enough that even two sequential network round trips (Quote, then
-	// Prepare) can outrun it under real network latency, not just under an
-	// artificially slow client. Hit this for real running GATE 3: the first
-	// attempt's Prepare call came back "3004: Quote expired" even though
-	// nothing between Quote and Prepare does meaningful work besides signing.
-	// A human payer whose action landed just past expiry would just get
-	// re-quoted by the UI; do the same thing here rather than failing outright
-	// on a single unlucky round trip.
 	const maxQuoteAttempts = 3
 	for attempt := 1; attempt <= maxQuoteAttempts; attempt++ {
 		if settleInfo.Symbol == "USDC" {
@@ -309,12 +335,6 @@ func (h *Bridge) settleBridgedIntent(ctx context.Context, intentID string) error
 		}
 
 		if q.Provider != "stablefx" {
-			// Direct same-token settlement has no relayer signing step in this
-			// codebase's existing Provider interface (AMM/direct's Prepare is a
-			// no-op reshape, Submit still expects a signature this codebase never
-			// constructs on-chain itself for the direct path) -- out of scope for
-			// this phase's proof; bridged intents in GATE 3 settle into a
-			// non-USDC currency specifically so this path isn't exercised.
 			return fmt.Errorf("bridged settlement into %s (provider=%s) not implemented -- only stablefx-routed bridged settlement is supported", settleInfo.Symbol, q.Provider)
 		}
 
@@ -323,13 +343,6 @@ func (h *Bridge) settleBridgedIntent(ctx context.Context, intentID string) error
 		if err != nil {
 			return fmt.Errorf("sign quote message: %w", err)
 		}
-		// PrepareWithSignature's quoteMessage param is StableFX's own
-		// /trades body field, which wants only the EIP-712 "message" object,
-		// not the full {domain,types,primaryType,message} envelope used for
-		// signing/hashing -- confirmed against scripts/e2e.sh's existing
-		// working flow, which extracts .message the same way before sending.
-		// Sending the full envelope here is what produced a real "3022:
-		// Permit2 data is malformed" error running GATE 3.
 		var envelope struct {
 			Message json.RawMessage `json:"message"`
 		}
@@ -420,7 +433,7 @@ type bridgeStatusResponse struct {
 }
 
 // Status is GET /v1/settlement_intents/:id/bridge/status -- the payer-side
-// progress UI (Phase 4) polls this. Unauthenticated like Initiate.
+// progress UI polls this. Unauthenticated like Initiate.
 func (h *Bridge) Status(w http.ResponseWriter, r *http.Request) {
 	intentID := pathParam(r, "id")
 	ctx := r.Context()

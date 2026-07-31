@@ -1,8 +1,14 @@
-// Package bridge models the CCTP cross-chain funding pre-stage that runs
-// ahead of Conduit's existing settlement engine when a payer funds an intent
-// from a non-Arc chain. This is deliberately a separate state machine from
-// settlement's own status column -- a bridge transfer either lands on Arc or
-// it doesn't, and only once it has (state == minted) does the settlement
+// Package bridge models the Circle Gateway cross-chain funding pre-stage
+// that runs ahead of Conduit's existing settlement engine when a payer funds
+// an intent from a non-Arc chain. This state graph was originally written
+// for raw CCTP's burn/attest/mint mechanism and is REUSED, not rebuilt, for
+// Gateway's deposit/burn-intent/forwarder-mint mechanism -- the shape of a
+// multi-step funding pipeline with an irreversible first step and a
+// possible-while-payer-absent completion doesn't change just because the
+// provider underneath does (see audit/BRIDGE-SCRAP.md's KEEP-AND-GENERALIZE
+// verdict). This is deliberately a separate state machine from settlement's
+// own status column -- a bridge transfer either lands on Arc or it doesn't,
+// and only once it has (state == minted) does the settlement
 // engine's own quote/settle flow begin. See README.md for the orphaned-burn
 // failure model this state machine exists to make explicit.
 package bridge

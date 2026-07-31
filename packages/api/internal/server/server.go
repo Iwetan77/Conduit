@@ -148,7 +148,7 @@ func NewBridgeHandler(cfg Config) (*handlers.Bridge, error) {
 	return newBridgeHandler(cfg, stableFX, dispatcher)
 }
 
-// newBridgeHandler builds the CCTP Solana->Arc bridge handler. Returns a nil
+// newBridgeHandler builds the Circle Gateway funding handler. Returns a nil
 // handler (and a descriptive error, logged not fatal) if ArcRelayerKey isn't
 // configured -- cross-chain inbound is opt-in infrastructure, not required
 // for the rest of the API to run.
@@ -160,26 +160,11 @@ func newBridgeHandler(cfg Config, stableFX *fx.StableFXProvider, dispatcher *web
 	if err != nil {
 		return nil, err
 	}
-	arcRPC := cfg.ArcRPC
-	if arcRPC == "" {
-		arcRPC = "https://rpc.testnet.arc.network"
-	}
 	solanaRPC := cfg.SolanaRPC
 	if solanaRPC == "" {
 		solanaRPC = "https://api.devnet.solana.com"
 	}
-	solanaWS := cfg.SolanaWS
-	if solanaWS == "" {
-		solanaWS = "wss://api.devnet.solana.com"
-	}
-	chainID := cfg.ArcChainID
-	if chainID == 0 {
-		chainID = 5042002 // Arc testnet, deployments/arc-testnet.json
-	}
-	provider, err := bridgepkg.NewSolanaArcProvider(solanaRPC, solanaWS, arcRPC, chainID, cfg.ArcRelayerKey)
-	if err != nil {
-		return nil, err
-	}
+	provider := bridgepkg.NewGatewayProvider(solanaRPC, crypto.PubkeyToAddress(key.PublicKey))
 	return &handlers.Bridge{
 		Pool: cfg.Pool, Provider: provider, StableFX: stableFX, Webhooks: dispatcher,
 		RelayerKey: key, RelayerAddr: crypto.PubkeyToAddress(key.PublicKey),

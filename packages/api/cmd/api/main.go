@@ -35,10 +35,12 @@ func main() {
 
 	cfg := server.Config{
 		Pool: pool, StableFXKey: stableFXKey, StableFXBase: stableFXBase, AppBaseURL: appBaseURL,
-		ArcRPC:        envOr("ARC_RPC", "https://rpc.testnet.arc.network"),
-		SolanaRPC:     envOr("SOLANA_RPC", "https://api.devnet.solana.com"),
-		SolanaWS:      envOr("SOLANA_WS", "wss://api.devnet.solana.com"),
-		ArcRelayerKey: os.Getenv("ARC_RELAYER_KEY"),
+		ArcRPC:               envOr("ARC_RPC", "https://rpc.testnet.arc.network"),
+		SolanaRPC:            envOr("SOLANA_RPC", "https://api.devnet.solana.com"),
+		SolanaWS:             envOr("SOLANA_WS", "wss://api.devnet.solana.com"),
+		ArcRelayerKey:        os.Getenv("ARC_RELAYER_KEY"),
+		PrivyAppID:           os.Getenv("PRIVY_APP_ID"),
+		PrivyVerificationKey: os.Getenv("PRIVY_VERIFICATION_KEY"),
 	}
 	handler := server.New(cfg)
 

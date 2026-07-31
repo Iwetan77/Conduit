@@ -41,13 +41,28 @@ type Config struct {
 	ArcChainID       int64
 	ArcRelayerKey    string
 	BridgeStaleAfter time.Duration
+
+	// Privy merchant auth. Both optional -- if either is empty, Privy login
+	// is disabled and the dashboard falls back to sk_/pk_ key auth only
+	// (same opt-in pattern as the bridge feature above).
+	PrivyAppID           string
+	PrivyVerificationKey string // ES256 public key, PEM
 }
 
 func New(cfg Config) http.Handler {
 	stableFX := fx.NewStableFXProvider(cfg.StableFXBase, cfg.StableFXKey)
 	dispatcher := webhooks.NewDispatcher(cfg.Pool)
 
-	accountsH := &handlers.Accounts{Pool: cfg.Pool}
+	var privyVerifier *auth.PrivyVerifier
+	if cfg.PrivyAppID != "" && cfg.PrivyVerificationKey != "" {
+		var err error
+		privyVerifier, err = auth.NewPrivyVerifier(cfg.PrivyAppID, cfg.PrivyVerificationKey)
+		if err != nil {
+			log.Printf("auth: Privy login disabled: %v", err)
+		}
+	}
+
+	accountsH := &handlers.Accounts{Pool: cfg.Pool, PrivyVerifier: privyVerifier}
 	apiKeysH := &handlers.ApiKeys{Pool: cfg.Pool}
 	intentsH := &handlers.SettlementIntents{Pool: cfg.Pool, StableFX: stableFX, AppBaseURL: cfg.AppBaseURL, Webhooks: dispatcher}
 	currenciesH := &handlers.Currencies{}
@@ -89,6 +104,13 @@ func New(cfg Config) http.Handler {
 		// account key — this only covers creating a brand new top-level account.
 		r.Get("/currencies", currenciesH.List)
 		r.Post("/accounts", accountsH.Create)
+		// Privy-authenticated account bootstrap: verifies the bearer token
+		// itself (not gated by auth.Middleware, since a brand-new Privy user
+		// has no account yet for the middleware to resolve) and upserts by
+		// privy_user_id. Registered only when Privy is configured.
+		if privyVerifier != nil {
+			r.Post("/accounts/privy", accountsH.CreateFromPrivy)
+		}
 
 		// Public, minimal intent details for the payer surface (/pay/[id]) --
 		// a payer landing on a bare payment link has no API key. Deliberately
@@ -106,7 +128,7 @@ func New(cfg Config) http.Handler {
 		}
 
 		r.Group(func(r chi.Router) {
-			r.Use(auth.Middleware(cfg.Pool))
+			r.Use(auth.Middleware(cfg.Pool, privyVerifier))
 			r.Use(idempotency.Middleware(cfg.Pool))
 
 			r.Get("/accounts", accountsH.List)

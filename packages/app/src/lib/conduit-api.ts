@@ -4,18 +4,23 @@
 // the app is the payer signing/submitting a transaction at checkout.
 
 const API_BASE = process.env["NEXT_PUBLIC_CONDUIT_API_URL"] ?? "http://localhost:8080";
-const STORAGE_KEY = "conduit_dashboard_api_key";
+const STORAGE_KEY = "conduit_dashboard_session_token";
 
-export function getApiKey(): string | null {
+// Bearer token used for dashboard requests. Holds either a Privy access
+// token (refreshed periodically by the dashboard layout while a merchant is
+// logged in via Privy -- see DashboardLayout) or, still, a pasted sk_/pk_
+// key for the programmatic-access path -- the API's auth.Middleware accepts
+// both, so this file doesn't need to know which kind it's holding.
+export function getSessionToken(): string | null {
   if (typeof window === "undefined") return null;
   return window.localStorage.getItem(STORAGE_KEY);
 }
 
-export function setApiKey(key: string): void {
-  window.localStorage.setItem(STORAGE_KEY, key);
+export function setSessionToken(token: string): void {
+  window.localStorage.setItem(STORAGE_KEY, token);
 }
 
-export function clearApiKey(): void {
+export function clearSessionToken(): void {
   window.localStorage.removeItem(STORAGE_KEY);
 }
 
@@ -33,7 +38,7 @@ async function request<T>(
   path: string,
   options: { method?: string; body?: unknown; apiKey?: string; idempotencyKey?: string } = {}
 ): Promise<T> {
-  const apiKey = options.apiKey ?? getApiKey();
+  const apiKey = options.apiKey ?? getSessionToken();
   const headers: Record<string, string> = { "content-type": "application/json" };
   if (apiKey) headers["authorization"] = `Bearer ${apiKey}`;
   if (options.idempotencyKey) headers["idempotency-key"] = options.idempotencyKey;
@@ -97,6 +102,28 @@ export function createSubAccount(body: { name: string; settle_currency: string; 
 
 export function listAccounts() {
   return request<{ data: Account[] }>("/v1/accounts");
+}
+
+export interface PrivyAccount {
+  id: string;
+  name: string;
+  settle_currency: string;
+  settle_address: string;
+  login_wallet: string;
+  livemode: boolean;
+}
+
+// Idempotent Privy login bootstrap -- called on every successful Privy
+// login, not only the first. accessToken authenticates the request itself
+// (this route isn't behind the usual session-token plumbing, since a
+// brand-new Privy user has no account yet). On first login the body's
+// name/settle_currency/login_wallet are required by the server; on
+// subsequent logins the body is ignored and the existing account returned.
+export function createAccountFromPrivy(
+  accessToken: string,
+  body: { name?: string; settle_currency?: string; settle_address?: string; login_wallet: string }
+) {
+  return request<PrivyAccount>("/v1/accounts/privy", { method: "POST", body, apiKey: accessToken });
 }
 
 // ── Settlement intents ───────────────────────────────────────────────────────
@@ -242,7 +269,7 @@ export function listBalanceTransactions() {
 // auth on the server), so a plain <a href> download won't carry credentials —
 // fetch it as an authenticated blob and trigger the save client-side instead.
 export async function downloadBalanceTransactionsCsv(filename = "conduit-balance-transactions.csv"): Promise<void> {
-  const apiKey = getApiKey();
+  const apiKey = getSessionToken();
   const res = await fetch(`${API_BASE}/v1/balance_transactions/export`, {
     headers: apiKey ? { authorization: `Bearer ${apiKey}` } : {},
   });

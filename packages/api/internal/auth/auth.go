@@ -103,9 +103,16 @@ func isPkAllowed(method, path string) bool {
 	return false
 }
 
-// Middleware validates the Authorization: Bearer <key> header, looks up the
-// key hash, and (for pk_ keys) restricts which routes are reachable.
-func Middleware(pool *pgxpool.Pool) func(http.Handler) http.Handler {
+// Middleware validates the Authorization: Bearer <key> header. The bearer
+// value is either one of this codebase's own sk_/pk_ API keys (looked up by
+// hash, as before) or a Privy access token (a JWT, verified against Privy's
+// static ES256 key) -- Privy is the human dashboard login layer on top of
+// the existing machine-key system, not a replacement for it (see
+// docs/-carried spec note in WHERE-I-STOPPED.md). privyVerifier is nil when
+// Privy isn't configured (opt-in, same graceful-degradation pattern as the
+// bridge feature) -- in that case only sk_/pk_ keys work, exactly as before
+// this phase.
+func Middleware(pool *pgxpool.Pool, privyVerifier *PrivyVerifier) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			authHeader := r.Header.Get("Authorization")
@@ -114,7 +121,14 @@ func Middleware(pool *pgxpool.Pool) func(http.Handler) http.Handler {
 				return
 			}
 			key := strings.TrimPrefix(authHeader, "Bearer ")
-			principal, err := lookupKey(r.Context(), pool, key)
+
+			var principal Principal
+			var err error
+			if privyVerifier != nil && looksLikePrivyToken(key) {
+				principal, err = lookupPrivyPrincipal(r.Context(), pool, privyVerifier, key)
+			} else {
+				principal, err = lookupKey(r.Context(), pool, key)
+			}
 			if err != nil {
 				writeErr(w, apierrors.E(apierrors.CodeUnauthorized, ""))
 				return
@@ -140,6 +154,36 @@ func Middleware(pool *pgxpool.Pool) func(http.Handler) http.Handler {
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
+}
+
+// KeyTypePrivy marks a Principal resolved from a Privy access token rather
+// than a stored sk_/pk_ key -- there is no api_keys row backing this
+// session, KeyID is always empty.
+const KeyTypePrivy KeyType = "privy"
+
+// lookupPrivyPrincipal verifies the Privy access token and resolves it to an
+// existing Conduit account by privy_user_id. Returns an error (not a
+// synthetic empty principal) if no account exists yet for this Privy user --
+// account creation for a brand-new Privy login goes through the dedicated
+// PrivyCreateAccount handler, which verifies the token itself and creates
+// the row, rather than this general-purpose middleware silently creating
+// under-specified accounts (a fresh account needs a real name/settle
+// currency/settle address, which aren't in the JWT).
+func lookupPrivyPrincipal(ctx context.Context, pool *pgxpool.Pool, verifier *PrivyVerifier, token string) (Principal, error) {
+	privyUserID, err := verifier.Verify(token)
+	if err != nil {
+		return Principal{}, err
+	}
+	var accountID string
+	var livemode bool
+	err = pool.QueryRow(ctx,
+		`SELECT id, livemode FROM accounts WHERE privy_user_id = $1`,
+		privyUserID,
+	).Scan(&accountID, &livemode)
+	if err != nil {
+		return Principal{}, fmt.Errorf("no account for Privy user %s: %w", privyUserID, err)
+	}
+	return Principal{AccountID: accountID, KeyType: KeyTypePrivy, Livemode: livemode}, nil
 }
 
 func lookupKey(ctx context.Context, pool *pgxpool.Pool, key string) (Principal, error) {

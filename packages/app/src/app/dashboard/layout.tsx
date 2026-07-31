@@ -1,9 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { getApiKey, setApiKey, clearApiKey, createAccount } from "@/lib/conduit-api";
+import { usePrivy, useLoginWithEmail } from "@privy-io/react-auth";
+import { DashboardPrivyProvider } from "./dashboard-privy-provider";
+import { clearSessionToken, createAccountFromPrivy, setSessionToken } from "@/lib/conduit-api";
 
 // Signature moment: the major gridlines draw in once, here specifically —
 // the dashboard is the main surface, not every page. Reuses the single
@@ -30,22 +32,141 @@ const NAV = [
   { href: "/dashboard/reconciliation", label: "Reconciliation" },
 ];
 
-function OnboardingGate({ onReady }: { onReady: () => void }) {
-  const [name, setName] = useState("");
-  const [settleCurrency, setSettleCurrency] = useState("EUR");
-  const [settleAddress, setSettleAddress] = useState("");
-  const [pastedKey, setPastedKey] = useState("");
+// Email OTP login. Shown whenever Privy reports the merchant isn't
+// authenticated yet. Only signs in with Privy -- account bootstrap happens
+// separately in AccountGate once `authenticated` flips true, so this
+// doesn't need to distinguish first-time vs. returning merchants.
+function LoginGate() {
+  const { sendCode, loginWithCode } = useLoginWithEmail();
+  const [step, setStep] = useState<"email" | "code">("email");
+  const [email, setEmail] = useState("");
+  const [code, setCode] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
-  const handleCreate = async (e: React.FormEvent) => {
+  const handleSendCode = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
     setBusy(true);
     try {
-      const account = await createAccount({ name, settle_currency: settleCurrency, settle_address: settleAddress });
-      if (!account.api_key) throw new Error("No API key returned");
-      setApiKey(account.api_key.key);
+      await sendCode({ email });
+      setStep("code");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to send code");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleVerifyCode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError("");
+    setBusy(true);
+    try {
+      await loginWithCode({ code });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Invalid code");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-bg text-ink flex items-center justify-center p-6">
+      <div className="w-full max-w-md space-y-8">
+        <div>
+          <h1 className="font-display text-3xl font-bold">Conduit Dashboard</h1>
+          <p className="text-ink-dim text-sm mt-1">Sign in with your email to continue.</p>
+        </div>
+
+        {step === "email" && (
+          <form onSubmit={handleSendCode} className="space-y-3 border border-border p-4">
+            <input
+              type="email"
+              className="w-full bg-surface border border-border px-3 py-2 text-sm"
+              placeholder="you@company.com"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required
+            />
+            <button
+              type="submit"
+              disabled={busy}
+              className="w-full bg-signal text-signal-ink font-medium py-2 text-sm disabled:opacity-50"
+            >
+              {busy ? "Sending..." : "Send code"}
+            </button>
+          </form>
+        )}
+
+        {step === "code" && (
+          <form onSubmit={handleVerifyCode} className="space-y-3 border border-border p-4">
+            <h2 className="font-medium text-sm text-ink-dim">Enter the code sent to {email}</h2>
+            <input
+              className="w-full bg-surface border border-border px-3 py-2 text-sm font-mono"
+              placeholder="123456"
+              value={code}
+              onChange={(e) => setCode(e.target.value)}
+              required
+            />
+            <button
+              type="submit"
+              disabled={busy}
+              className="w-full bg-signal text-signal-ink font-medium py-2 text-sm disabled:opacity-50"
+            >
+              {busy ? "Verifying..." : "Verify"}
+            </button>
+          </form>
+        )}
+
+        {error && <p className="text-danger text-sm">{error}</p>}
+      </div>
+    </div>
+  );
+}
+
+// Runs once Privy reports `authenticated`: resolves the Conduit account for
+// this Privy user (idempotent -- existing merchants just get their account
+// back). Falls back to an inline onboarding form only when the API reports
+// no account exists yet for this Privy user (first-ever login).
+function AccountGate({ onReady }: { onReady: () => void }) {
+  const { user, getAccessToken } = usePrivy();
+  const [needsOnboarding, setNeedsOnboarding] = useState(false);
+  const [name, setName] = useState("");
+  const [settleCurrency, setSettleCurrency] = useState("EUR");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const attempted = useRef(false);
+
+  const bootstrap = async (extra?: { name: string; settle_currency: string }) => {
+    const token = await getAccessToken();
+    if (!token) throw new Error("No Privy access token");
+    const loginWallet = user?.wallet?.address;
+    if (!loginWallet) throw new Error("No embedded wallet on this Privy user yet");
+    await createAccountFromPrivy(token, { login_wallet: loginWallet, ...extra });
+    setSessionToken(token);
+  };
+
+  useEffect(() => {
+    if (attempted.current) return;
+    attempted.current = true;
+    (async () => {
+      try {
+        await bootstrap();
+        onReady();
+      } catch {
+        setNeedsOnboarding(true);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleOnboard = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError("");
+    setBusy(true);
+    try {
+      await bootstrap({ name, settle_currency: settleCurrency });
       onReady();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create account");
@@ -54,25 +175,16 @@ function OnboardingGate({ onReady }: { onReady: () => void }) {
     }
   };
 
-  const handleUseExisting = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!pastedKey.trim()) return;
-    setApiKey(pastedKey.trim());
-    onReady();
-  };
+  if (!needsOnboarding) return null;
 
   return (
     <div className="min-h-screen bg-bg text-ink flex items-center justify-center p-6">
       <div className="w-full max-w-md space-y-8">
         <div>
           <h1 className="font-display text-3xl font-bold">Conduit Dashboard</h1>
-          <p className="text-ink-dim text-sm mt-1">
-            Create a test account to get started, or paste an existing sk_test_ key.
-          </p>
+          <p className="text-ink-dim text-sm mt-1">First time here — set up your account.</p>
         </div>
-
-        <form onSubmit={handleCreate} className="space-y-3 border border-border p-4">
-          <h2 className="font-medium text-sm text-ink-dim">New account</h2>
+        <form onSubmit={handleOnboard} className="space-y-3 border border-border p-4">
           <input
             className="w-full bg-surface border border-border px-3 py-2 text-sm"
             placeholder="Business name"
@@ -89,13 +201,6 @@ function OnboardingGate({ onReady }: { onReady: () => void }) {
               <option key={c} value={c}>{c}</option>
             ))}
           </select>
-          <input
-            className="w-full bg-surface border border-border px-3 py-2 text-sm font-mono"
-            placeholder="0x... settle address"
-            value={settleAddress}
-            onChange={(e) => setSettleAddress(e.target.value)}
-            required
-          />
           <button
             type="submit"
             disabled={busy}
@@ -104,38 +209,52 @@ function OnboardingGate({ onReady }: { onReady: () => void }) {
             {busy ? "Creating..." : "Create account"}
           </button>
         </form>
-
-        <form onSubmit={handleUseExisting} className="space-y-3 border border-border p-4">
-          <h2 className="font-medium text-sm text-ink-dim">Or use an existing key</h2>
-          <input
-            className="w-full bg-surface border border-border px-3 py-2 text-sm font-mono"
-            placeholder="sk_test_..."
-            value={pastedKey}
-            onChange={(e) => setPastedKey(e.target.value)}
-          />
-          <button type="submit" className="w-full border border-border py-2 text-sm">
-            Use this key
-          </button>
-        </form>
-
         {error && <p className="text-danger text-sm">{error}</p>}
       </div>
     </div>
   );
 }
 
-export default function DashboardLayout({ children }: { children: React.ReactNode }) {
+function DashboardShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const [ready, setReady] = useState(false);
-  const [mounted, setMounted] = useState(false);
+  const { ready, authenticated, logout, getAccessToken } = usePrivy();
+  const [accountReady, setAccountReady] = useState(false);
+  const refreshing = useRef(false);
+
+  // Keep the stored bearer token fresh with Privy's own (short-lived,
+  // auto-rotated) access token for as long as the merchant stays on a
+  // dashboard page -- every existing API call in this app reads it via
+  // getSessionToken(), so this is the only place that needs to know Privy
+  // issues the token.
+  useEffect(() => {
+    if (!authenticated) return;
+    const refresh = async () => {
+      if (refreshing.current) return;
+      refreshing.current = true;
+      try {
+        const token = await getAccessToken();
+        if (token) setSessionToken(token);
+      } finally {
+        refreshing.current = false;
+      }
+    };
+    refresh();
+    const interval = setInterval(refresh, 5 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, [authenticated, getAccessToken]);
 
   useEffect(() => {
-    setMounted(true);
-    setReady(!!getApiKey());
-  }, []);
+    if (!authenticated) setAccountReady(false);
+  }, [authenticated]);
 
-  if (!mounted) return null;
-  if (!ready) return <OnboardingGate onReady={() => setReady(true)} />;
+  if (!ready) return null;
+  if (!authenticated) return <LoginGate />;
+  if (!accountReady) return <AccountGate onReady={() => setAccountReady(true)} />;
+
+  const signOut = async () => {
+    clearSessionToken();
+    await logout();
+  };
 
   return (
     <div className="min-h-screen bg-bg text-ink flex flex-col md:flex-row">
@@ -159,13 +278,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             </Link>
           ))}
         </nav>
-        <button
-          className="mt-auto text-xs text-ink-dim hover:text-ink text-left"
-          onClick={() => {
-            clearApiKey();
-            setReady(false);
-          }}
-        >
+        <button className="mt-auto text-xs text-ink-dim hover:text-ink text-left" onClick={signOut}>
           Sign out
         </button>
       </aside>
@@ -186,18 +299,20 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             {item.label}
           </Link>
         ))}
-        <button
-          className="ml-auto shrink-0 text-xs text-ink-dim hover:text-ink"
-          onClick={() => {
-            clearApiKey();
-            setReady(false);
-          }}
-        >
+        <button className="ml-auto shrink-0 text-xs text-ink-dim hover:text-ink" onClick={signOut}>
           Sign out
         </button>
       </nav>
 
       <main className="flex-1 p-4 md:p-8 max-w-6xl overflow-x-hidden">{children}</main>
     </div>
+  );
+}
+
+export default function DashboardLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <DashboardPrivyProvider>
+      <DashboardShell>{children}</DashboardShell>
+    </DashboardPrivyProvider>
   );
 }

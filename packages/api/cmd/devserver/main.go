@@ -52,15 +52,17 @@ func main() {
 	}
 
 	cfg := server.Config{
-		Pool:             pool,
-		StableFXKey:      loadStableFXKey(),
-		StableFXBase:     envOr("STABLEFX_BASE_URL", "https://api-sandbox.circle.com"),
-		AppBaseURL:       envOr("CONDUIT_APP_BASE_URL", "http://localhost:3000"),
-		ArcRPC:           envOr("ARC_RPC", "https://rpc.testnet.arc.network"),
-		SolanaRPC:        envOr("SOLANA_RPC", "https://api.devnet.solana.com"),
-		SolanaWS:         envOr("SOLANA_WS", "wss://api.devnet.solana.com"),
-		ArcRelayerKey:    os.Getenv("ARC_RELAYER_KEY"),
-		BridgeStaleAfter: staleAfter,
+		Pool:                 pool,
+		StableFXKey:          loadStableFXKey(),
+		StableFXBase:         envOr("STABLEFX_BASE_URL", "https://api-sandbox.circle.com"),
+		AppBaseURL:           envOr("CONDUIT_APP_BASE_URL", "http://localhost:3000"),
+		ArcRPC:               envOr("ARC_RPC", "https://rpc.testnet.arc.network"),
+		SolanaRPC:            envOr("SOLANA_RPC", "https://api.devnet.solana.com"),
+		SolanaWS:             envOr("SOLANA_WS", "wss://api.devnet.solana.com"),
+		ArcRelayerKey:        os.Getenv("ARC_RELAYER_KEY"),
+		BridgeStaleAfter:     staleAfter,
+		PrivyAppID:           os.Getenv("PRIVY_APP_ID"),
+		PrivyVerificationKey: os.Getenv("PRIVY_VERIFICATION_KEY"),
 	}
 	handler := server.New(cfg)
 

@@ -37,7 +37,7 @@ export function ChainGuard({ children }: ChainGuardProps) {
   const isCCTPSupported = chain.id in SUPPORTED_EXTERNAL_CHAINS;
 
   return (
-    <div className="min-h-screen bg-bg flex items-center justify-center px-4">
+    <div className="min-h-screen flex items-center justify-center px-4">
       <div className="max-w-sm w-full bg-surface border border-border
                       p-8 space-y-6 text-center">
         {/* Network indicator */}

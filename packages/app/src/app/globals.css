@@ -4,6 +4,10 @@
 
 
 :root {
+  /* Self-hosted via @fontsource (imported in layout.tsx) — was a next/font
+     variable when the font came from Google. */
+  --font-mono: "JetBrains Mono";
+
   /* Graph-paper token set — engineer's grid, one accent, sharp corners.
      See CONDUIT design system spec. Same variable names/values must land
      in packages/marketing and packages/docs too. */
@@ -44,8 +48,19 @@ html,
 body {
   max-width: 100vw;
   overflow-x: hidden;
-  background: var(--bg);
   color: var(--ink);
+}
+
+/* The page background lives on <html> ONLY. If body also has an opaque
+   background it paints in a later step than negative-z-index positioned
+   descendants -- i.e. OVER the z-index:-1 .conduit-grid -- hiding the grid
+   on every page. html's background becomes the canvas (painted first),
+   the grid paints above it, all content above that. */
+html {
+  background: var(--bg);
+}
+body {
+  background: transparent;
   font-family: var(--font-mono), ui-monospace, "SF Mono", Menlo, monospace;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;

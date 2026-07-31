@@ -26,9 +26,15 @@ export const arcTestnet = defineChain({
   testnet: true,
 });
 
-const wcProjectId = process.env["NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID"];
+// Literal dot form — Next.js only inlines `process.env.NEXT_PUBLIC_X`
+// member expressions into the browser bundle.
+const wcProjectId = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID;
 
-export const wagmiConfig = createConfig({
+// Shared by the plain config below AND the Privy-synced config built inside
+// the lazily-loaded privy-stack (do NOT build the Privy config here — a
+// module-level @privy-io/wagmi import would drag all of @privy-io into the
+// main bundle and undo the lazy split).
+export const wagmiConfigParams = {
   chains: [arcTestnet],
   connectors: [
     injected(),
@@ -37,4 +43,7 @@ export const wagmiConfig = createConfig({
   transports: {
     [arcTestnet.id]: http("https://rpc.testnet.arc.network"),
   },
-});
+} as const;
+
+// Plain config: used whenever the Privy stack isn't mounted.
+export const wagmiConfig = createConfig(wagmiConfigParams);

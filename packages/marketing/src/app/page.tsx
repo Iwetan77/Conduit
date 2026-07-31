@@ -8,7 +8,11 @@ import Link from 'next/link'
 // Local dev: docs runs on :3002 (see packages/docs' package.json script) —
 // `pnpm dev` at the repo root runs marketing/docs/app together via turbo.
 // Production falls back to the real subdomain.
-const DOCS_URL = process.env['NEXT_PUBLIC_DOCS_URL'] ?? 'http://localhost:3002'
+// NOTE: literal dot form — Next.js only inlines `process.env.NEXT_PUBLIC_X`
+// member expressions into browser bundles; bracket form reads as undefined.
+const DOCS_URL = process.env.NEXT_PUBLIC_DOCS_URL ?? 'http://localhost:3002'
+// The merchant dashboard (packages/app). Local dev: app runs on :3000.
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // NAV
@@ -49,15 +53,21 @@ function Nav() {
               {label}
             </a>
           ))}
+          {/* The one action that matters: straight into the product. */}
+          <a
+            href={`${APP_URL}/dashboard`}
+            className="font-mono text-[10px] uppercase tracking-widest font-bold bg-signal text-signal-ink px-3 py-1.5 hover:bg-signal/90 transition-colors"
+          >
+            Dashboard →
+          </a>
         </nav>
 
-        {/* Mobile: waitlist pill */}
+        {/* Mobile: dashboard pill */}
         <a
-          href="#waitlist"
-          onClick={e => { e.preventDefault(); document.getElementById('waitlist-input')?.focus() }}
-          className="md:hidden font-mono text-[10px] uppercase tracking-widest text-signal border border-signal/30 px-3 py-1.5"
+          href={`${APP_URL}/dashboard`}
+          className="md:hidden font-mono text-[10px] uppercase tracking-widest bg-signal text-signal-ink px-3 py-1.5"
         >
-          Waitlist
+          Dashboard →
         </a>
       </div>
     </header>

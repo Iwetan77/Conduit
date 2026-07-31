@@ -15,18 +15,21 @@ import {
   ConduitApiError,
 } from "@/lib/conduit-api";
 import { formatAmountRaw, shortenAddress } from "@/lib/format";
+import { isoToToken } from "@/lib/currencies";
+import { currencyDecimals } from "@conduit/sdk";
 import { SettlementIntentPay } from "./SettlementIntentPay";
 
 interface PaymentLinkPayProps {
   linkId: string;
 }
 
-// Mirrors request-payment's own simplification: assumes 6 fractional digits.
-function toMinorUnits(humanAmount: string): string {
+// Minor units in the settle token's REAL decimals — BRLA/ZARU/KRW1 are
+// 18-decimals tokens; assuming 6 there mis-prices by 10^12.
+function toMinorUnits(humanAmount: string, decimals: number): string {
   const clean = humanAmount.replace(/[^0-9.]/g, "");
   const [whole = "0", frac = ""] = clean.split(".");
-  const padded = frac.padEnd(6, "0").slice(0, 6);
-  return (BigInt(whole || "0") * 1_000_000n + BigInt(padded || "0")).toString();
+  const padded = frac.padEnd(decimals, "0").slice(0, decimals);
+  return (BigInt(whole || "0") * 10n ** BigInt(decimals) + BigInt(padded || "0")).toString();
 }
 
 export function PaymentLinkPay({ linkId }: PaymentLinkPayProps) {
@@ -44,7 +47,7 @@ export function PaymentLinkPay({ linkId }: PaymentLinkPayProps) {
         setLink(l);
         document.title = `Pay ${l.display_name} · Conduit`;
         if (l.amount_mode === "open_with_suggested" && l.amount) {
-          setAmount(formatAmountRaw(BigInt(l.amount), 6));
+          setAmount(formatAmountRaw(BigInt(l.amount), currencyDecimals(isoToToken(l.settle_currency))));
         }
       })
       .catch(() => setError("This payment link was not found or is no longer available."));
@@ -57,8 +60,9 @@ export function PaymentLinkPay({ linkId }: PaymentLinkPayProps) {
     setBusy(true);
     try {
       const needsAmount = link.amount_mode !== "fixed";
+      const decimals = currencyDecimals(isoToToken(link.settle_currency));
       const result = await payPaymentLink(linkId, {
-        amount: needsAmount && amount ? toMinorUnits(amount) : undefined,
+        amount: needsAmount && amount ? toMinorUnits(amount, decimals) : undefined,
         payer_reference: payerReference || undefined,
       });
       setIntentId(result.id);
@@ -81,7 +85,7 @@ export function PaymentLinkPay({ linkId }: PaymentLinkPayProps) {
       <div className="text-center py-16 space-y-3">
         <p className="text-4xl">⚠</p>
         <p className="text-ink font-medium">{error}</p>
-        <a href="/" className="text-signal text-sm hover:underline">Go to Conduit →</a>
+        <p className="text-ink-dim text-sm">Ask the business that sent it for a new link.</p>
       </div>
     );
   }
@@ -144,7 +148,7 @@ export function PaymentLinkPay({ linkId }: PaymentLinkPayProps) {
         </p>
         {link.amount_mode === "fixed" && link.amount ? (
           <p className="text-ink font-mono text-2xl">
-            {formatAmountRaw(BigInt(link.amount), 6)} {link.settle_currency}
+            {formatAmountRaw(BigInt(link.amount), currencyDecimals(isoToToken(link.settle_currency)))} {link.settle_currency}
           </p>
         ) : (
           <div className="flex items-baseline gap-2">
@@ -160,9 +164,9 @@ export function PaymentLinkPay({ linkId }: PaymentLinkPayProps) {
         )}
         {(link.min_amount || link.max_amount) && (
           <p className="text-ink-dim text-xs font-mono">
-            {link.min_amount && `min ${formatAmountRaw(BigInt(link.min_amount), 6)}`}
+            {link.min_amount && `min ${formatAmountRaw(BigInt(link.min_amount), currencyDecimals(isoToToken(link.settle_currency)))}`}
             {link.min_amount && link.max_amount && " · "}
-            {link.max_amount && `max ${formatAmountRaw(BigInt(link.max_amount), 6)}`}
+            {link.max_amount && `max ${formatAmountRaw(BigInt(link.max_amount), currencyDecimals(isoToToken(link.settle_currency)))}`}
           </p>
         )}
       </div>

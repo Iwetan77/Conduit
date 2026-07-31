@@ -2,8 +2,21 @@
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { WagmiProvider } from "wagmi";
+import dynamic from "next/dynamic";
+import { usePathname } from "next/navigation";
+import { useCallback, useEffect, useState } from "react";
 import { wagmiConfig } from "@/lib/wagmi";
-import { useState } from "react";
+import {
+  GOOGLE_LOGIN_EVENT,
+  PrivyGateContext,
+  hasPrivySession,
+} from "@/lib/privy-gate";
+
+const PRIVY_APP_ID = process.env.NEXT_PUBLIC_PRIVY_APP_ID ?? "";
+
+// ~700 kB of @privy-io/* kept out of the payer-page bundle: loaded only for
+// a returning Privy session, a dashboard route, or a Google sign-in click.
+const PrivyStack = dynamic(() => import("./privy-stack"), { ssr: false });
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(
@@ -18,11 +31,37 @@ export function Providers({ children }: { children: React.ReactNode }) {
       })
   );
 
+  const pathname = usePathname();
+  const [wantPrivy, setWantPrivy] = useState(false);
+  const requestMount = useCallback(() => setWantPrivy(true), []);
+
+  useEffect(() => {
+    if (hasPrivySession()) setWantPrivy(true);
+    const onLoginRequest = () => setWantPrivy(true);
+    window.addEventListener(GOOGLE_LOGIN_EVENT, onLoginRequest);
+    return () => window.removeEventListener(GOOGLE_LOGIN_EVENT, onLoginRequest);
+  }, []);
+
+  // Dashboard always needs Privy (merchant auth). Checked in render so the
+  // stack starts loading on first client render, not after an effect tick.
+  const privyOn =
+    Boolean(PRIVY_APP_ID) && (wantPrivy || Boolean(pathname?.startsWith("/dashboard")));
+
+  if (!privyOn) {
+    return (
+      <PrivyGateContext.Provider value={{ mounted: false, requestMount }}>
+        <WagmiProvider config={wagmiConfig}>
+          <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+        </WagmiProvider>
+      </PrivyGateContext.Provider>
+    );
+  }
+
   return (
-    <WagmiProvider config={wagmiConfig}>
-      <QueryClientProvider client={queryClient}>
+    <PrivyGateContext.Provider value={{ mounted: true, requestMount }}>
+      <PrivyStack appId={PRIVY_APP_ID} queryClient={queryClient}>
         {children}
-      </QueryClientProvider>
-    </WagmiProvider>
+      </PrivyStack>
+    </PrivyGateContext.Provider>
   );
 }

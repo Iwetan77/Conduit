@@ -3,16 +3,16 @@
 import { useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { createPaymentLink, type PaymentLink, type AmountMode, type ReusePolicy, ConduitApiError } from "@/lib/conduit-api";
-import { SETTLE_CURRENCIES as CURRENCIES, currencyFlag } from "@/lib/currencies";
+import { SETTLE_CURRENCIES as CURRENCIES, currencyFlag, isoToToken } from "@/lib/currencies";
+import { currencyDecimals } from "@conduit/sdk";
 
-// This form's amount inputs assume 6 fractional digits max for simplicity;
-// the API stores minor units per the settle currency's real decimals
-// (18dp for BRL/ZAR) — parse defensively rather than hardcoding a factor.
-function toMinorUnits(humanAmount: string): string {
+// Minor units in the settle token's REAL decimals — BRLA/ZARU/KRW1 are
+// 18-decimals tokens; a hardcoded 6 mis-prices those links by 10^12.
+function toMinorUnits(humanAmount: string, decimals: number): string {
   const clean = humanAmount.replace(/[^0-9.]/g, "");
   const [whole = "0", frac = ""] = clean.split(".");
-  const padded = frac.padEnd(6, "0").slice(0, 6);
-  return (BigInt(whole || "0") * 1_000_000n + BigInt(padded || "0")).toString();
+  const padded = frac.padEnd(decimals, "0").slice(0, decimals);
+  return (BigInt(whole || "0") * 10n ** BigInt(decimals) + BigInt(padded || "0")).toString();
 }
 
 export default function RequestPaymentPage() {
@@ -40,11 +40,12 @@ export default function RequestPaymentPage() {
     setError("");
     setBusy(true);
     try {
+      const decimals = currencyDecimals(isoToToken(settleCurrency));
       const link = await createPaymentLink({
         amount_mode: amountMode,
-        amount: amountMode !== "open" ? toMinorUnits(amount) : undefined,
-        min_amount: amountMode !== "fixed" && minAmount ? toMinorUnits(minAmount) : undefined,
-        max_amount: amountMode !== "fixed" && maxAmount ? toMinorUnits(maxAmount) : undefined,
+        amount: amountMode !== "open" ? toMinorUnits(amount, decimals) : undefined,
+        min_amount: amountMode !== "fixed" && minAmount ? toMinorUnits(minAmount, decimals) : undefined,
+        max_amount: amountMode !== "fixed" && maxAmount ? toMinorUnits(maxAmount, decimals) : undefined,
         settle_currency: settleCurrency,
         settle_address: settleAddress,
         accept_currencies: acceptCurrencies.length ? acceptCurrencies : undefined,

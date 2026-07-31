@@ -4,7 +4,6 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { usePrivy, useLogin, useCreateWallet } from "@privy-io/react-auth";
-import { DashboardPrivyProvider } from "./dashboard-privy-provider";
 import { clearSessionToken, createAccountFromPrivy, setSessionToken } from "@/lib/conduit-api";
 import { SETTLE_CURRENCIES, currencyFlag } from "@/lib/currencies";
 
@@ -27,6 +26,7 @@ function GridSignature() {
 const NAV = [
   { href: "/dashboard/settlements", label: "Settlements" },
   { href: "/dashboard/request-payment", label: "Request payment" },
+  { href: "/dashboard/send", label: "Send" },
   { href: "/dashboard/links", label: "Links & invoices" },
   { href: "/dashboard/locations", label: "Locations" },
   { href: "/dashboard/settings", label: "Settings" },
@@ -35,7 +35,7 @@ const NAV = [
 ];
 
 // Opens Privy's own login modal (configured with loginMethods: ['email',
-// 'google'] in DashboardPrivyProvider) rather than a custom in-page form --
+// 'google'] in the root Providers) rather than a custom in-page form --
 // this is what actually gives merchants a choice between Google (skips the
 // OTP step entirely) and email OTP in one place, themed dark/green via the
 // same `appearance` config. Account bootstrap happens separately in
@@ -44,7 +44,7 @@ function LoginGate() {
   const { login } = useLogin();
 
   return (
-    <div className="min-h-screen bg-bg text-ink flex items-center justify-center p-6">
+    <div className="min-h-screen text-ink flex items-center justify-center p-6">
       <div className="w-full max-w-md space-y-8 text-center">
         <div>
           <h1 className="font-display text-3xl font-bold">Conduit Dashboard</h1>
@@ -130,7 +130,7 @@ function AccountGate({ onReady }: { onReady: () => void }) {
   if (!needsOnboarding) return null;
 
   return (
-    <div className="min-h-screen bg-bg text-ink flex items-center justify-center p-6">
+    <div className="min-h-screen text-ink flex items-center justify-center p-6">
       <div className="w-full max-w-md space-y-8">
         <div>
           <h1 className="font-display text-3xl font-bold">Conduit Dashboard</h1>
@@ -209,7 +209,7 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <div className="min-h-screen bg-bg text-ink flex flex-col md:flex-row">
+    <div className="min-h-screen text-ink flex flex-col md:flex-row">
       <GridSignature />
 
       {/* Desktop sidebar — hidden below md, replaced by the horizontal strip below */}
@@ -261,10 +261,9 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
   );
 }
 
+// PrivyProvider now lives at the root (app/providers.tsx) so payers can use
+// Google sign-in too; the dashboard keeps only its gates. Business
+// onboarding (AccountGate) still happens exclusively here.
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
-  return (
-    <DashboardPrivyProvider>
-      <DashboardShell>{children}</DashboardShell>
-    </DashboardPrivyProvider>
-  );
+  return <DashboardShell>{children}</DashboardShell>;
 }

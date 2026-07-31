@@ -10,6 +10,9 @@ import { Logo } from "./Logo";
 import { arcTestnet } from "@/lib/wagmi";
 import { shortenAddress } from "@/lib/format";
 
+// Public payer-side nav. The merchant side is entered from the landing
+// page ("Sign in as a merchant") — deliberately NOT a persistent nav item,
+// so the payer surface reads as one product, not a door into another one.
 const NAV_LINKS = [
   { href: "/", label: "Send" },
   { href: "/create", label: "Create" },

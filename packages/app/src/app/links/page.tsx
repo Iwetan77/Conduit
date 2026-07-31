@@ -91,7 +91,7 @@ export default function LinksPage() {
   };
 
   return (
-    <div className="min-h-screen bg-bg">
+    <div className="min-h-screen">
       <Nav />
       <main className="max-w-2xl mx-auto px-4 pt-24 pb-24">
         <div className="flex items-center justify-between mb-8">

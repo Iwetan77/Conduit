@@ -1,9 +1,18 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useAccount } from "wagmi";
+import type { Currency, PaymentReceipt } from "@conduit/sdk";
+import { currencyDecimals } from "@conduit/sdk";
+import type { Eip1193Provider } from "ethers";
 import { getPublicSettlementIntent, type PublicSettlementIntent } from "@/lib/conduit-api";
 import { formatAmountRaw, shortenAddress } from "@/lib/format";
+import { isoToToken } from "@/lib/currencies";
 import { CrossChainBridge } from "./CrossChainBridge";
+import { PayerCurrencyPicker } from "@/components/SendFlow/PayerCurrencyPicker";
+import { RoutePreview } from "@/components/SendFlow/RoutePreview";
+import { ReceiptCard } from "@/components/Shared/ReceiptCard";
+import { WalletConnectCompact } from "@/components/Shared/WalletConnect";
 
 interface SettlementIntentPayProps {
   intentId: string;
@@ -29,7 +38,7 @@ export function SettlementIntentPay({ intentId }: SettlementIntentPayProps) {
       <div className="text-center py-16 space-y-3">
         <p className="text-4xl">⚠</p>
         <p className="text-ink font-medium">{error}</p>
-        <a href="/" className="text-signal text-sm hover:underline">Go to Conduit →</a>
+        <p className="text-ink-dim text-sm">Ask the business that sent it for a new link.</p>
       </div>
     );
   }
@@ -78,24 +87,114 @@ export function SettlementIntentPay({ intentId }: SettlementIntentPayProps) {
       <div className="border border-border bg-surface p-4 space-y-1">
         <p className="text-ink-dim text-xs uppercase tracking-wider font-mono">Requesting</p>
         <p className="text-ink font-mono text-2xl">
-          {formatAmountRaw(BigInt(intent.amount), 6)} {intent.settle_currency}
+          {formatAmountRaw(BigInt(intent.amount), currencyDecimals(isoToToken(intent.settle_currency)))}{" "}
+          {intent.settle_currency}
         </p>
       </div>
 
       {intent.source_chain !== "arc" ? (
         <CrossChainBridge intentId={intentId} intent={intent} />
       ) : (
-        // Direct same-chain checkout (payer already holding funds on Arc)
-        // isn't wired to this page yet -- the settlement_intents REST flow
-        // needs a client-facing key-distribution story (pk_ keys aren't
-        // embedded in hosted links today) that's a separate piece of work
-        // from CCTP cross-chain inbound. Documented honestly rather than
-        // faking a pay button that can't actually call quote/prepare/confirm
-        // without credentials this page has no way to obtain.
-        <p className="text-ink-dim text-sm">
-          Direct payment from an Arc wallet isn&apos;t available on this page yet.
-        </p>
+        <ArcWalletPay intent={intent} />
       )}
+    </div>
+  );
+}
+
+// Direct checkout from a wallet already funded on Arc. The whole settlement
+// happens on-chain through the SDK's ConduitClient.pay (ConduitRouter /
+// AtomicSettler for same-currency, StableFXAdapter route otherwise) — the
+// same proven path the home-page Direct Send uses. No API credentials are
+// needed: the payer signs the transaction, the chain enforces the rest.
+function ArcWalletPay({ intent }: { intent: PublicSettlementIntent }) {
+  const { address, isConnected } = useAccount();
+  const [mounted, setMounted] = useState(false);
+  const [payerCurrency, setPayerCurrency] = useState<Currency>("USDC");
+  const [step, setStep] = useState<"idle" | "pending" | "success" | "error">("idle");
+  const [receipt, setReceipt] = useState<PaymentReceipt | null>(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => { setMounted(true); }, []);
+
+  const settleToken = isoToToken(intent.settle_currency) as Currency;
+  const amountRaw = BigInt(intent.amount);
+  const amountHuman = formatAmountRaw(amountRaw, currencyDecimals(settleToken));
+
+  const handlePay = async () => {
+    if (!address) return;
+    setStep("pending");
+    try {
+      const { ConduitClient } = await import("@conduit/sdk");
+      const { ethers } = await import("ethers");
+      const browserProvider = new ethers.BrowserProvider(
+        (window as unknown as { ethereum: Eip1193Provider }).ethereum
+      );
+      const client = ConduitClient.fromBrowserProvider(browserProvider, "");
+      const result = await client.pay({
+        recipient: intent.settle_address as `0x${string}`,
+        amount: amountRaw,
+        currency: settleToken,
+        payerToken: payerCurrency,
+      });
+      setReceipt(result);
+      setStep("success");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Transaction failed");
+      setStep("error");
+    }
+  };
+
+  if (!mounted) return null;
+
+  if (step === "success" && receipt) {
+    return (
+      <div className="space-y-3">
+        <ReceiptCard receipt={receipt} />
+        <p className="text-ink-dim text-xs font-mono text-center">
+          Paid to {intent.display_name}. You can close this page.
+        </p>
+      </div>
+    );
+  }
+
+  if (step === "pending") {
+    return (
+      <div className="text-center py-10 space-y-4">
+        <div className="w-12 h-12 border-2 border-signal border-t-transparent animate-spin mx-auto" />
+        <p className="text-ink font-mono text-sm">Settling on-chain…</p>
+      </div>
+    );
+  }
+
+  if (!isConnected) {
+    return (
+      <div className="space-y-3">
+        <p className="text-ink-dim text-sm text-center">Connect a wallet to pay</p>
+        <WalletConnectCompact />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <PayerCurrencyPicker value={payerCurrency} onChange={setPayerCurrency} />
+      <RoutePreview
+        payerCurrency={payerCurrency}
+        recipientCurrency={settleToken}
+        recipientAmount={amountHuman}
+      />
+      {step === "error" && (
+        <div className="bg-danger/10 border border-danger/30 p-3">
+          <p className="text-danger text-sm font-mono">{error}</p>
+        </div>
+      )}
+      <button
+        onClick={handlePay}
+        className="w-full py-4 bg-signal text-signal-ink font-mono text-lg
+                   hover:bg-signal/90 transition-colors"
+      >
+        Pay {amountHuman} {intent.settle_currency}
+      </button>
     </div>
   );
 }

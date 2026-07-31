@@ -31,7 +31,7 @@ export default function CreatePage() {
   const amount = result?.amount ? parseAmount(result.amount, currency) : 0n;
 
   return (
-    <div className="min-h-screen bg-bg">
+    <div className="min-h-screen">
       <Nav />
 
       <main className="max-w-2xl mx-auto px-4 pt-24 pb-24">

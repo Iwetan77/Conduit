@@ -48,7 +48,7 @@ export default function PayPage({ params }: PageParams) {
   // dispatches on id format rather than needing separate routes.
   if (isSettlementIntent || isPaymentLink) {
     return (
-      <div className="min-h-screen bg-bg flex flex-col">
+      <div className="min-h-screen flex flex-col">
         <header className="px-6 py-4 border-b border-border flex justify-center">
           <Logo size="sm" />
         </header>
@@ -115,7 +115,7 @@ function DeclarationPay({ declarationId }: { declarationId: string }) {
   }, [declarationId]);
 
   return (
-    <div className="min-h-screen bg-bg flex flex-col">
+    <div className="min-h-screen flex flex-col">
       {/* Minimal header */}
       <header className="px-6 py-4 border-b border-border flex justify-center">
         <Logo size="sm" />

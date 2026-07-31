@@ -11,6 +11,7 @@ import { RoutePreview } from "@/components/SendFlow/RoutePreview";
 import { SendConfirm } from "@/components/SendFlow/SendConfirm";
 import { PayerCurrencyPicker } from "@/components/SendFlow/PayerCurrencyPicker";
 import { WalletConnect } from "@/components/Shared/WalletConnect";
+import { ScanToPay } from "@/components/PayFlow/ScanToPay";
 import type { Currency } from "@conduit/sdk";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -31,7 +32,7 @@ export default function HomePage() {
   const canProceed = isAddress(recipient) && parseFloat(amount) > 0 && isConnected;
 
   return (
-    <div className="min-h-screen bg-bg">
+    <div className="min-h-screen">
       <Nav />
 
       <main className="max-w-lg mx-auto px-4 pt-24 pb-24">
@@ -48,6 +49,11 @@ export default function HomePage() {
             <span className="text-xs font-mono text-signal">
               Chain ID 5042002 · Arc Testnet
             </span>
+          </div>
+          {/* Scan-to-pay: the fastest path for someone standing in front of
+              a merchant's printed QR. */}
+          <div className="flex justify-center mt-5">
+            <ScanToPay />
           </div>
         </div>
 
@@ -96,7 +102,9 @@ export default function HomePage() {
               {!mounted || !isConnected ? (
                 <div className="text-center space-y-3">
                   <p className="text-ink-dim text-sm">Connect your wallet to send</p>
-                  <WalletConnect />
+                  <div className="flex justify-center">
+                    <WalletConnect />
+                  </div>
                 </div>
               ) : (
                 <button
@@ -110,12 +118,12 @@ export default function HomePage() {
                 </button>
               )}
 
-              {/* Links CTA */}
+              {/* Merchant entry — the other half of the product. */}
               <div className="text-center">
                 <p className="text-ink-dim text-sm">
-                  Need a payment link or QR?{" "}
-                  <a href="/create" className="text-signal hover:underline">
-                    Create one →
+                  Running a business?{" "}
+                  <a href="/dashboard" className="text-signal hover:underline">
+                    Sign in as a merchant →
                   </a>
                 </p>
               </div>

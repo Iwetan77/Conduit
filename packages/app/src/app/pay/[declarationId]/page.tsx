@@ -85,10 +85,8 @@ function DeclarationPay({ declarationId }: { declarationId: string }) {
         const { ConduitClient } = await import("@conduit/sdk");
         const { ethers } = await import("ethers");
 
-        const provider = new ethers.JsonRpcProvider("https://rpc.testnet.arc.network", {
-          chainId: 5042002,
-          name: "arc-testnet",
-        });
+        const { arcReadProvider } = await import("@/lib/arc-provider");
+        const provider = arcReadProvider();
 
         const mockSigner = {
           getAddress: async () => "0x0000000000000000000000000000000000000000",

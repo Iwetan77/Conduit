@@ -38,11 +38,28 @@ export class ReceiptClient {
     const { limit = 20, offset = 0 } = options;
     const iface = new ethers.Interface(ROUTER_ABI);
 
-    // Arc testnet RPC caps eth_getLogs at 10,000 blocks per request.
-    // Fetch the last 40,000 blocks in 4 chunks of 10,000 and merge results.
+    // Arc testnet RPC caps eth_getLogs at 10,000 blocks per request AND
+    // aggressively rate-limits bursts (-32011 / plain 429 without CORS
+    // headers, which a browser surfaces as an opaque "Failed to fetch").
+    // So: fewer chunks, fetched STRICTLY SEQUENTIALLY with a retry+backoff
+    // per call — never a parallel fan-out.
     const CHUNK = 9_000; // stay under the 10k limit
     const CHUNKS = 4;
-    const latest = await this.provider.getBlockNumber();
+
+    const withRetry = async <T>(call: () => Promise<T>): Promise<T> => {
+      let lastErr: unknown;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          return await call();
+        } catch (err) {
+          lastErr = err;
+          await new Promise((r) => setTimeout(r, 400 * (attempt + 1) ** 2));
+        }
+      }
+      throw lastErr;
+    };
+
+    const latest = await withRetry(() => this.provider.getBlockNumber());
     const fromBlock = Math.max(0, latest - CHUNK * CHUNKS);
 
     const ranges: [number, number][] = [];
@@ -50,29 +67,35 @@ export class ReceiptClient {
       ranges.push([start, Math.min(start + CHUNK - 1, latest)]);
     }
 
-    const fetchChunks = async (topics: (string | null)[]) => {
-      const results = await Promise.allSettled(
-        ranges.map(([from, to]) =>
-          this.provider.getLogs({
-            address: ARC_TESTNET.contracts.conduitRouter,
-            topics,
-            fromBlock: from,
-            toBlock: to,
-          })
-        )
-      );
-      return results
-        .filter((r): r is PromiseFulfilledResult<ethers.Log[]> => r.status === "fulfilled")
-        .flatMap((r) => r.value);
-    };
-
     const eventTopic = iface.getEvent("PaymentSettled")!.topicHash;
 
     // payer is topic[2], recipient is topic[3] (receiptId=topic[1])
-    const [payerLogs, recipientLogs] = await Promise.all([
-      fetchChunks([eventTopic, null, ethers.zeroPadValue(wallet, 32), null]),
-      fetchChunks([eventTopic, null, null, ethers.zeroPadValue(wallet, 32)]),
-    ]);
+    const topicSets: (string | null)[][] = [
+      [eventTopic, null, ethers.zeroPadValue(wallet, 32), null],
+      [eventTopic, null, null, ethers.zeroPadValue(wallet, 32)],
+    ];
+
+    const payerLogs: ethers.Log[] = [];
+    const recipientLogs: ethers.Log[] = [];
+    for (const [i, topics] of topicSets.entries()) {
+      const sink = i === 0 ? payerLogs : recipientLogs;
+      for (const [from, to] of ranges) {
+        try {
+          const logs = await withRetry(() =>
+            this.provider.getLogs({
+              address: ARC_TESTNET.contracts.conduitRouter,
+              topics,
+              fromBlock: from,
+              toBlock: to,
+            })
+          );
+          sink.push(...logs);
+        } catch {
+          // A permanently-failing range loses part of the window, not the
+          // whole page — history stays best-effort.
+        }
+      }
+    }
 
     const allEvents = [...payerLogs, ...recipientLogs];
 

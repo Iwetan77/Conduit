@@ -26,15 +26,9 @@ export default function LinksPage() {
     if (!address) return;
     setIsLoading(true);
     try {
-      const [{ ConduitClient, ReceiptClient, ARC_TESTNET }, { ethers }] = await Promise.all([
-        import("@conduit/sdk"),
-        import("ethers"),
-      ]);
-
-      const provider = new ethers.JsonRpcProvider(ARC_TESTNET.rpc, {
-        chainId: ARC_TESTNET.chainId,
-        name: "arc-testnet",
-      });
+      const { ConduitClient, ReceiptClient } = await import("@conduit/sdk");
+      const { arcReadProvider } = await import("@/lib/arc-provider");
+      const provider = arcReadProvider();
       const mockSigner = {
         getAddress: async () => address,
         sendTransaction: async () => ({ hash: "0x", wait: async () => ({ status: 1, blockNumber: 0 }) }),

@@ -15,32 +15,31 @@ export default function HistoryPage() {
   const [mounted, setMounted] = useState(false);
   useEffect(() => { setMounted(true); }, []);
 
+  const load = async () => {
+    if (!isConnected || !address) return;
+    setIsLoading(true);
+    setError("");
+    try {
+      const { ReceiptClient } = await import("@conduit/sdk");
+      const { arcReadProvider } = await import("@/lib/arc-provider");
+
+      const receiptClient = new ReceiptClient(arcReadProvider());
+      const receipts = await receiptClient.getHistory(address as `0x${string}`, { limit: 50 });
+      setHistory(receipts);
+    } catch (err) {
+      console.error("Failed to load history:", err);
+      // "Failed to fetch" = Arc's public RPC rate-limiting the browser —
+      // say that, not a bare fetch error.
+      setError("Arc's public RPC is rate-limiting right now. Wait a few seconds and retry.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   useEffect(() => {
     if (!mounted || !isConnected || !address) return;
-
-    const load = async () => {
-      setIsLoading(true);
-      setError("");
-      try {
-        const { ReceiptClient, ARC_TESTNET } = await import("@conduit/sdk");
-        const { ethers } = await import("ethers");
-
-        const provider = new ethers.JsonRpcProvider(ARC_TESTNET.rpc, {
-          chainId: ARC_TESTNET.chainId,
-          name: "arc-testnet",
-        });
-        const receiptClient = new ReceiptClient(provider);
-        const receipts = await receiptClient.getHistory(address as `0x${string}`, { limit: 50 });
-        setHistory(receipts);
-      } catch (err) {
-        console.error("Failed to load history:", err);
-        setError(err instanceof Error ? err.message : "Failed to load history");
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
     load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mounted, isConnected, address]);
 
   return (
@@ -60,8 +59,16 @@ export default function HistoryPage() {
         ) : (
           <>
             {error && (
-              <div className="mb-4 p-3 bg-danger/10 border border-danger/30">
+              <div className="mb-4 p-3 bg-danger/10 border border-danger/30 flex items-center justify-between gap-3">
                 <p className="text-danger text-sm font-mono">{error}</p>
+                <button
+                  onClick={load}
+                  disabled={isLoading}
+                  className="shrink-0 px-3 py-1.5 text-scale-2 font-mono border border-danger/40
+                             text-danger hover:bg-danger/10 transition-colors disabled:opacity-50"
+                >
+                  {isLoading ? "Retrying…" : "Retry"}
+                </button>
               </div>
             )}
             <HistoryTable

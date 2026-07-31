@@ -3,8 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { listAccounts, createSubAccount, type Account, ConduitApiError } from "@/lib/conduit-api";
-
-const CURRENCIES = ["EUR", "USD", "BRL", "AUD", "MXN", "CAD", "GBP", "ZAR", "KRW"];
+import { SETTLE_CURRENCIES as CURRENCIES, currencyFlag } from "@/lib/currencies";
 
 function DownloadableQR({ value, filename }: { value: string; filename: string }) {
   const svgRef = useRef<SVGSVGElement>(null);
@@ -106,7 +105,7 @@ export default function LocationsPage() {
             value={settleCurrency}
             onChange={(e) => setSettleCurrency(e.target.value)}
           >
-            {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
+            {CURRENCIES.map((c) => <option key={c} value={c}>{currencyFlag(c)} {c}</option>)}
           </select>
           <input
             className="w-full bg-surface border border-border px-3 py-2 text-sm font-mono focus:border-signal focus:outline-none"

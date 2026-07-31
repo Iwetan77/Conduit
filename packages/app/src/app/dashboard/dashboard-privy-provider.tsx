@@ -28,7 +28,9 @@ export function DashboardPrivyProvider({ children }: { children: React.ReactNode
     <PrivyProvider
       appId={appId}
       config={{
-        loginMethods: ["email"],
+        // Google bypasses the OTP step entirely (Privy's own modal handles
+        // both); email still falls back to OTP.
+        loginMethods: ["email", "google"],
         // v3 of the SDK splits this per-chain-family (was a flat
         // createOnLogin in the version the spec assumed) -- only ethereum
         // matters here since merchants log in with email, not a Solana

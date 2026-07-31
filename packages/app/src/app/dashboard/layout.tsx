@@ -3,9 +3,10 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { usePrivy, useLoginWithEmail } from "@privy-io/react-auth";
+import { usePrivy, useLogin, useCreateWallet } from "@privy-io/react-auth";
 import { DashboardPrivyProvider } from "./dashboard-privy-provider";
 import { clearSessionToken, createAccountFromPrivy, setSessionToken } from "@/lib/conduit-api";
+import { SETTLE_CURRENCIES, currencyFlag } from "@/lib/currencies";
 
 // Signature moment: the major gridlines draw in once, here specifically —
 // the dashboard is the main surface, not every page. Reuses the single
@@ -32,94 +33,28 @@ const NAV = [
   { href: "/dashboard/reconciliation", label: "Reconciliation" },
 ];
 
-// Email OTP login. Shown whenever Privy reports the merchant isn't
-// authenticated yet. Only signs in with Privy -- account bootstrap happens
-// separately in AccountGate once `authenticated` flips true, so this
-// doesn't need to distinguish first-time vs. returning merchants.
+// Opens Privy's own login modal (configured with loginMethods: ['email',
+// 'google'] in DashboardPrivyProvider) rather than a custom in-page form --
+// this is what actually gives merchants a choice between Google (skips the
+// OTP step entirely) and email OTP in one place, themed dark/green via the
+// same `appearance` config. Account bootstrap happens separately in
+// AccountGate once `authenticated` flips true.
 function LoginGate() {
-  const { sendCode, loginWithCode } = useLoginWithEmail();
-  const [step, setStep] = useState<"email" | "code">("email");
-  const [email, setEmail] = useState("");
-  const [code, setCode] = useState("");
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-
-  const handleSendCode = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError("");
-    setBusy(true);
-    try {
-      await sendCode({ email });
-      setStep("code");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to send code");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const handleVerifyCode = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError("");
-    setBusy(true);
-    try {
-      await loginWithCode({ code });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Invalid code");
-    } finally {
-      setBusy(false);
-    }
-  };
+  const { login } = useLogin();
 
   return (
     <div className="min-h-screen bg-bg text-ink flex items-center justify-center p-6">
-      <div className="w-full max-w-md space-y-8">
+      <div className="w-full max-w-md space-y-8 text-center">
         <div>
           <h1 className="font-display text-3xl font-bold">Conduit Dashboard</h1>
-          <p className="text-ink-dim text-sm mt-1">Sign in with your email to continue.</p>
+          <p className="text-ink-dim text-sm mt-1">Sign in to continue.</p>
         </div>
-
-        {step === "email" && (
-          <form onSubmit={handleSendCode} className="space-y-3 border border-border p-4">
-            <input
-              type="email"
-              className="w-full bg-surface border border-border px-3 py-2 text-sm"
-              placeholder="you@company.com"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-            />
-            <button
-              type="submit"
-              disabled={busy}
-              className="w-full bg-signal text-signal-ink font-medium py-2 text-sm disabled:opacity-50"
-            >
-              {busy ? "Sending..." : "Send code"}
-            </button>
-          </form>
-        )}
-
-        {step === "code" && (
-          <form onSubmit={handleVerifyCode} className="space-y-3 border border-border p-4">
-            <h2 className="font-medium text-sm text-ink-dim">Enter the code sent to {email}</h2>
-            <input
-              className="w-full bg-surface border border-border px-3 py-2 text-sm font-mono"
-              placeholder="123456"
-              value={code}
-              onChange={(e) => setCode(e.target.value)}
-              required
-            />
-            <button
-              type="submit"
-              disabled={busy}
-              className="w-full bg-signal text-signal-ink font-medium py-2 text-sm disabled:opacity-50"
-            >
-              {busy ? "Verifying..." : "Verify"}
-            </button>
-          </form>
-        )}
-
-        {error && <p className="text-danger text-sm">{error}</p>}
+        <button
+          onClick={() => login()}
+          className="w-full bg-signal text-signal-ink font-medium py-2 text-sm"
+        >
+          Sign in
+        </button>
       </div>
     </div>
   );
@@ -131,6 +66,7 @@ function LoginGate() {
 // no account exists yet for this Privy user (first-ever login).
 function AccountGate({ onReady }: { onReady: () => void }) {
   const { user, getAccessToken } = usePrivy();
+  const { createWallet } = useCreateWallet();
   const [needsOnboarding, setNeedsOnboarding] = useState(false);
   const [name, setName] = useState("");
   const [settleCurrency, setSettleCurrency] = useState("EUR");
@@ -138,11 +74,26 @@ function AccountGate({ onReady }: { onReady: () => void }) {
   const [busy, setBusy] = useState(false);
   const attempted = useRef(false);
 
+  // The embedded wallet from `embeddedWallets: { ethereum: { createOnLogin:
+  // 'users-without-wallets' } }` isn't always present on `user` the instant
+  // `authenticated` flips true -- creation can still be in flight. Try
+  // creating one explicitly; if it already exists, createWallet() rejects
+  // and the address is already on `user.wallet` by then.
+  const ensureLoginWallet = async (): Promise<string> => {
+    if (user?.wallet?.address) return user.wallet.address;
+    try {
+      const wallet = await createWallet();
+      return wallet.address;
+    } catch {
+      if (user?.wallet?.address) return user.wallet.address;
+      throw new Error("No embedded wallet on this Privy user yet");
+    }
+  };
+
   const bootstrap = async (extra?: { name: string; settle_currency: string }) => {
     const token = await getAccessToken();
     if (!token) throw new Error("No Privy access token");
-    const loginWallet = user?.wallet?.address;
-    if (!loginWallet) throw new Error("No embedded wallet on this Privy user yet");
+    const loginWallet = await ensureLoginWallet();
     await createAccountFromPrivy(token, { login_wallet: loginWallet, ...extra });
     setSessionToken(token);
   };
@@ -197,8 +148,8 @@ function AccountGate({ onReady }: { onReady: () => void }) {
             value={settleCurrency}
             onChange={(e) => setSettleCurrency(e.target.value)}
           >
-            {["EUR", "USD", "BRL", "AUD", "MXN", "CAD", "GBP", "ZAR", "KRW"].map((c) => (
-              <option key={c} value={c}>{c}</option>
+            {SETTLE_CURRENCIES.map((c) => (
+              <option key={c} value={c}>{currencyFlag(c)} {c}</option>
             ))}
           </select>
           <button

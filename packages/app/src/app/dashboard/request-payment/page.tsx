@@ -2,10 +2,10 @@
 
 import { useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
-import { createSettlementIntent, type SettlementIntent, ConduitApiError } from "@/lib/conduit-api";
+import { createPaymentLink, type PaymentLink, type AmountMode, type ReusePolicy, ConduitApiError } from "@/lib/conduit-api";
 import { SETTLE_CURRENCIES as CURRENCIES, currencyFlag } from "@/lib/currencies";
 
-// This form's amount input assumes 6 fractional digits max for simplicity;
+// This form's amount inputs assume 6 fractional digits max for simplicity;
 // the API stores minor units per the settle currency's real decimals
 // (18dp for BRL/ZAR) — parse defensively rather than hardcoding a factor.
 function toMinorUnits(humanAmount: string): string {
@@ -16,15 +16,20 @@ function toMinorUnits(humanAmount: string): string {
 }
 
 export default function RequestPaymentPage() {
+  const [amountMode, setAmountMode] = useState<AmountMode>("fixed");
   const [amount, setAmount] = useState("");
+  const [minAmount, setMinAmount] = useState("");
+  const [maxAmount, setMaxAmount] = useState("");
   const [settleCurrency, setSettleCurrency] = useState("EUR");
-  const [reference, setReference] = useState("");
+  const [description, setDescription] = useState("");
+  const [merchantReference, setMerchantReference] = useState("");
+  const [reusePolicy, setReusePolicy] = useState<ReusePolicy>("single_use");
   const [expiresIn, setExpiresIn] = useState("3600");
   const [acceptCurrencies, setAcceptCurrencies] = useState<string[]>([]);
   const [settleAddress, setSettleAddress] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [result, setResult] = useState<SettlementIntent | null>(null);
+  const [result, setResult] = useState<PaymentLink | null>(null);
 
   const toggleAccept = (c: string) => {
     setAcceptCurrencies((prev) => (prev.includes(c) ? prev.filter((x) => x !== c) : [...prev, c]));
@@ -35,15 +40,20 @@ export default function RequestPaymentPage() {
     setError("");
     setBusy(true);
     try {
-      const intent = await createSettlementIntent({
-        amount: toMinorUnits(amount),
+      const link = await createPaymentLink({
+        amount_mode: amountMode,
+        amount: amountMode !== "open" ? toMinorUnits(amount) : undefined,
+        min_amount: amountMode !== "fixed" && minAmount ? toMinorUnits(minAmount) : undefined,
+        max_amount: amountMode !== "fixed" && maxAmount ? toMinorUnits(maxAmount) : undefined,
         settle_currency: settleCurrency,
         settle_address: settleAddress,
         accept_currencies: acceptCurrencies.length ? acceptCurrencies : undefined,
-        reference: reference || undefined,
-        expires_in: Number(expiresIn),
+        description: description || undefined,
+        merchant_reference: merchantReference || undefined,
+        reuse_policy: reusePolicy,
+        expires_in: expiresIn === "none" ? undefined : Number(expiresIn),
       });
-      setResult(intent);
+      setResult(link);
     } catch (err) {
       setError(err instanceof ConduitApiError ? err.message : "Failed to create payment request");
     } finally {
@@ -54,12 +64,15 @@ export default function RequestPaymentPage() {
   if (result) {
     return (
       <div className="max-w-md">
-        <h1 className="font-display text-3xl font-bold mb-6">Payment requested</h1>
+        <h1 className="font-display text-3xl font-bold mb-6">Payment link created</h1>
         <div className="border border-border p-6 flex flex-col items-center gap-4">
           <div style={{ background: "var(--bg)", padding: 12, border: "1px solid var(--border)" }}>
             <QRCodeSVG value={result.hosted_url} size={200} bgColor="#050505" fgColor="#B2F55A" level="H" />
           </div>
-          <p className="text-sm text-ink-dim">{result.reference || result.id}</p>
+          <p className="text-sm text-ink-dim">{result.merchant_reference || result.id}</p>
+          <p className="text-xs text-ink-dim">
+            {result.reuse_policy === "multi_use" ? "Reusable" : "Single use"} · {result.amount_mode.replace(/_/g, " ")}
+          </p>
           <div className="w-full flex gap-2">
             <input
               readOnly
@@ -79,7 +92,8 @@ export default function RequestPaymentPage() {
             onClick={() => {
               setResult(null);
               setAmount("");
-              setReference("");
+              setMerchantReference("");
+              setDescription("");
             }}
           >
             Create another
@@ -94,17 +108,43 @@ export default function RequestPaymentPage() {
       <h1 className="font-display text-3xl font-bold mb-6">Request payment</h1>
       <form onSubmit={handleSubmit} className="space-y-4 border border-border p-6">
         <div>
-          <label className="text-scale-1 font-mono text-ink-dim uppercase tracking-wider block mb-1">Amount</label>
+          <label className="text-scale-1 font-mono text-ink-dim uppercase tracking-wider block mb-2">Amount mode</label>
           <div className="flex gap-2">
-            <input
-              className="flex-1 bg-surface border border-border px-3 py-2 text-sm focus:border-signal focus:outline-none"
-              placeholder="0.00"
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-              required
-            />
+            {([
+              ["fixed", "Fixed"],
+              ["open", "Open (payer decides)"],
+              ["open_with_suggested", "Suggested"],
+            ] as [AmountMode, string][]).map(([mode, label]) => (
+              <button
+                type="button"
+                key={mode}
+                onClick={() => setAmountMode(mode)}
+                className={`flex-1 text-xs px-2 py-2 border ${
+                  amountMode === mode ? "border-signal text-signal" : "border-border text-ink-dim"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div>
+          <label className="text-scale-1 font-mono text-ink-dim uppercase tracking-wider block mb-1">
+            {amountMode === "fixed" ? "Amount" : amountMode === "open_with_suggested" ? "Suggested amount" : "Currency"}
+          </label>
+          <div className="flex gap-2">
+            {amountMode !== "open" && (
+              <input
+                className="flex-1 bg-surface border border-border px-3 py-2 text-sm focus:border-signal focus:outline-none"
+                placeholder="0.00"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                required
+              />
+            )}
             <select
-              className="bg-surface border border-border px-3 py-2 text-sm focus:border-signal focus:outline-none"
+              className={`bg-surface border border-border px-3 py-2 text-sm focus:border-signal focus:outline-none ${amountMode === "open" ? "flex-1" : ""}`}
               value={settleCurrency}
               onChange={(e) => setSettleCurrency(e.target.value)}
             >
@@ -114,6 +154,29 @@ export default function RequestPaymentPage() {
             </select>
           </div>
         </div>
+
+        {amountMode !== "fixed" && (
+          <div className="flex gap-2">
+            <div className="flex-1">
+              <label className="text-scale-1 font-mono text-ink-dim uppercase tracking-wider block mb-1">Min (optional)</label>
+              <input
+                className="w-full bg-surface border border-border px-3 py-2 text-sm focus:border-signal focus:outline-none"
+                placeholder="0.00"
+                value={minAmount}
+                onChange={(e) => setMinAmount(e.target.value)}
+              />
+            </div>
+            <div className="flex-1">
+              <label className="text-scale-1 font-mono text-ink-dim uppercase tracking-wider block mb-1">Max (optional)</label>
+              <input
+                className="w-full bg-surface border border-border px-3 py-2 text-sm focus:border-signal focus:outline-none"
+                placeholder="0.00"
+                value={maxAmount}
+                onChange={(e) => setMaxAmount(e.target.value)}
+              />
+            </div>
+          </div>
+        )}
 
         <div>
           <label className="text-scale-1 font-mono text-ink-dim uppercase tracking-wider block mb-1">Settle to address</label>
@@ -127,13 +190,44 @@ export default function RequestPaymentPage() {
         </div>
 
         <div>
-          <label className="text-scale-1 font-mono text-ink-dim uppercase tracking-wider block mb-1">Reference (optional)</label>
+          <label className="text-scale-1 font-mono text-ink-dim uppercase tracking-wider block mb-1">Description (shown to payer)</label>
+          <input
+            className="w-full bg-surface border border-border px-3 py-2 text-sm focus:border-signal focus:outline-none"
+            placeholder="What is this payment for?"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+          />
+        </div>
+
+        <div>
+          <label className="text-scale-1 font-mono text-ink-dim uppercase tracking-wider block mb-1">Your reference (optional)</label>
           <input
             className="w-full bg-surface border border-border px-3 py-2 text-sm focus:border-signal focus:outline-none"
             placeholder="INV-2026-0412"
-            value={reference}
-            onChange={(e) => setReference(e.target.value)}
+            value={merchantReference}
+            onChange={(e) => setMerchantReference(e.target.value)}
           />
+        </div>
+
+        <div>
+          <label className="text-scale-1 font-mono text-ink-dim uppercase tracking-wider block mb-2">Reuse</label>
+          <div className="flex gap-2">
+            {([
+              ["single_use", "Single use (invoice)"],
+              ["multi_use", "Reusable (café QR)"],
+            ] as [ReusePolicy, string][]).map(([policy, label]) => (
+              <button
+                type="button"
+                key={policy}
+                onClick={() => setReusePolicy(policy)}
+                className={`flex-1 text-xs px-2 py-2 border ${
+                  reusePolicy === policy ? "border-signal text-signal" : "border-border text-ink-dim"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
         </div>
 
         <div>
@@ -147,6 +241,7 @@ export default function RequestPaymentPage() {
             <option value="3600">1 hour</option>
             <option value="86400">24 hours</option>
             <option value="604800">7 days</option>
+            <option value="none">No expiry</option>
           </select>
         </div>
 
@@ -177,7 +272,7 @@ export default function RequestPaymentPage() {
           disabled={busy}
           className="w-full bg-signal text-signal-ink font-medium py-2 text-sm disabled:opacity-50"
         >
-          {busy ? "Creating..." : "Create payment request"}
+          {busy ? "Creating..." : "Create payment link"}
         </button>
       </form>
     </div>

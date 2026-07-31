@@ -328,3 +328,56 @@ export interface CurrencyInfo {
 export function listCurrencies() {
   return request<{ data: CurrencyInfo[] }>("/v1/currencies");
 }
+
+// ── Payment links (Phase 3: amount modes, lifecycle, void) ──────────────────
+
+export type AmountMode = "fixed" | "open" | "open_with_suggested";
+export type ReusePolicy = "single_use" | "multi_use";
+export type LinkStatus = "draft" | "active" | "viewed" | "paid" | "settled" | "expired" | "void";
+
+export interface PaymentLink {
+  id: string;
+  amount_mode: AmountMode;
+  amount?: string;
+  min_amount?: string;
+  max_amount?: string;
+  settle_currency: string;
+  settle_address: string;
+  accept_currencies: string[];
+  description?: string;
+  merchant_reference?: string;
+  reuse_policy: ReusePolicy;
+  status: LinkStatus;
+  expires_at?: string;
+  created: string;
+  hosted_url: string;
+  qr_payload: string;
+}
+
+export function createPaymentLink(body: {
+  amount_mode: AmountMode;
+  amount?: string;
+  min_amount?: string;
+  max_amount?: string;
+  settle_currency: string;
+  settle_address: string;
+  accept_currencies?: string[];
+  description?: string;
+  merchant_reference?: string;
+  reuse_policy?: ReusePolicy;
+  expires_in?: number;
+}) {
+  return request<PaymentLink>("/v1/payment_links", { method: "POST", body });
+}
+
+export function listPaymentLinks() {
+  return request<{ data: PaymentLink[] }>("/v1/payment_links");
+}
+
+export function getPaymentLink(id: string) {
+  return request<PaymentLink>(`/v1/payment_links/${id}`);
+}
+
+export function voidPaymentLink(id: string) {
+  return request<{ id: string; status: string }>(`/v1/payment_links/${id}/void`, { method: "POST" });
+}

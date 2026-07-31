@@ -27,6 +27,7 @@ function GridSignature() {
 const NAV = [
   { href: "/dashboard/settlements", label: "Settlements" },
   { href: "/dashboard/request-payment", label: "Request payment" },
+  { href: "/dashboard/links", label: "Links & invoices" },
   { href: "/dashboard/locations", label: "Locations" },
   { href: "/dashboard/settings", label: "Settings" },
   { href: "/dashboard/developers", label: "Developers" },

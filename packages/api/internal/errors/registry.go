@@ -24,6 +24,12 @@ const (
 	CodeUnauthorized          Code = "unauthorized"
 	CodeForbidden             Code = "forbidden"
 	CodeInternal              Code = "internal_error"
+
+	CodeLinkExpired           Code = "payment_link_expired"
+	CodeLinkVoided            Code = "payment_link_voided"
+	CodeLinkAlreadyUsed       Code = "payment_link_already_used"
+	CodeLinkAmountOutOfBounds Code = "payment_link_amount_out_of_bounds"
+	CodeLinkAmountRequired    Code = "payment_link_amount_required"
 )
 
 type entry struct {
@@ -47,6 +53,12 @@ var registry = map[Code]entry{
 	CodeUnauthorized:          {http.StatusUnauthorized, "Missing or invalid API key."},
 	CodeForbidden:             {http.StatusForbidden, "This API key is not permitted to perform this action."},
 	CodeInternal:              {http.StatusInternalServerError, "An internal error occurred."},
+
+	CodeLinkExpired:           {http.StatusConflict, "This payment link has expired."},
+	CodeLinkVoided:            {http.StatusConflict, "This payment link has been voided."},
+	CodeLinkAlreadyUsed:       {http.StatusConflict, "This single-use payment link has already been paid."},
+	CodeLinkAmountOutOfBounds: {http.StatusUnprocessableEntity, "The amount is outside this link's allowed range."},
+	CodeLinkAmountRequired:    {http.StatusBadRequest, "An amount is required for this payment link."},
 }
 
 // APIError is what handlers return; the HTTP layer renders it to the

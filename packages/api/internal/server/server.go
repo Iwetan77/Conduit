@@ -69,6 +69,7 @@ func New(cfg Config) http.Handler {
 	webhookEndpointsH := &handlers.WebhookEndpoints{Pool: cfg.Pool, Dispatcher: dispatcher}
 	balanceTxH := &handlers.BalanceTransactions{Pool: cfg.Pool}
 	settlementsH := &handlers.Settlements{Pool: cfg.Pool}
+	paymentLinksH := &handlers.PaymentLinks{Pool: cfg.Pool, AppBaseURL: cfg.AppBaseURL}
 	bridgeH, err := newBridgeHandler(cfg, stableFX, dispatcher)
 	if err != nil {
 		log.Printf("bridge: CCTP cross-chain inbound disabled: %v", err)
@@ -118,6 +119,12 @@ func New(cfg Config) http.Handler {
 		// account_id/settle_address/reference/metadata.
 		r.Get("/settlement_intents/{id}/public", intentsH.GetPublic)
 
+		// Payment links: same "no API key" reasoning as the settlement_intent
+		// public route above -- a payer opening a bare link/QR has no
+		// credentials. GetPublic and Pay are the two payer-facing calls.
+		r.Get("/payment_links/{id}/public", paymentLinksH.GetPublic)
+		r.Post("/payment_links/{id}/pay", paymentLinksH.Pay)
+
 		// Cross-chain bridge endpoints are deliberately unauthenticated: this
 		// is the payer surface (see spec), and a Solana-side payer has no
 		// Conduit API key or Arc wallet at all. Only registered when
@@ -151,6 +158,11 @@ func New(cfg Config) http.Handler {
 
 			r.Get("/settlements", settlementsH.List)
 			r.Get("/settlements/{id}", settlementsH.Get)
+
+			r.Post("/payment_links", paymentLinksH.Create)
+			r.Get("/payment_links", paymentLinksH.List)
+			r.Get("/payment_links/{id}", paymentLinksH.Get)
+			r.Post("/payment_links/{id}/void", paymentLinksH.Void)
 			r.Get("/balance_transactions", balanceTxH.List)
 			r.Get("/balance_transactions/export", balanceTxH.Export)
 		})

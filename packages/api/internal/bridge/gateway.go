@@ -18,6 +18,13 @@ import (
 	"github.com/gagliardetto/solana-go/rpc"
 )
 
+// maxFeeCap is the maxFee this implementation authorizes per burn intent.
+// Gateway rejected 0 on a real testnet call ("Insufficient max fee:
+// expected at least 0.15") -- 300000 (0.3 USDC) gives margin above that
+// observed floor. Production should call POST /v1/estimate for a real
+// per-transfer figure instead of a hardcoded cap.
+var maxFeeCap = big.NewInt(300_000)
+
 // GatewayProvider is the Solana -> Arc Circle Gateway implementation.
 // Chain-agnostic at the FundingProvider interface level (Address is a plain
 // string); Solana-specific account/instruction/signing details live only in
@@ -100,12 +107,17 @@ func (p *GatewayProvider) PrepareFund(ctx context.Context, payer Address, amount
 	if solanaBalance == nil {
 		solanaBalance = big.NewInt(0)
 	}
-	needsDeposit := solanaBalance.Cmp(amount) < 0
+	// Gateway requires the deposited balance to cover value + fee, not just
+	// value -- confirmed on a real testnet call ("Insufficient balance ...
+	// available 0.500000, required 0.65" for a 0.5 value + 0.15 min fee).
+	// maxFeeCap below must match encodeBurnIntentForSolana's maxFee.
+	requiredBalance := new(big.Int).Add(amount, maxFeeCap)
+	needsDeposit := solanaBalance.Cmp(requiredBalance) < 0
 
 	req := FundRequest{NeedsDeposit: needsDeposit}
 
 	if needsDeposit {
-		depositAmount := new(big.Int).Sub(amount, solanaBalance)
+		depositAmount := new(big.Int).Sub(requiredBalance, solanaBalance)
 		txBase64, err := p.buildSolanaDepositTx(ctx, payer, depositAmount)
 		if err != nil {
 			return FundRequest{}, fmt.Errorf("bridge: build Solana deposit tx: %w", err)
@@ -113,7 +125,19 @@ func (p *GatewayProvider) PrepareFund(ctx context.Context, payer Address, amount
 		req.DepositTxBase64 = txBase64
 	}
 
-	burnIntentMsg, err := encodeBurnIntentForSolana(payer, amount, common.HexToAddress(string(destArcAddress)))
+	// maxBlockHeight must be comfortably in the future -- Gateway rejected a
+	// zero value on a real testnet call ("too low: expected at least
+	// 481607645" against a then-current slot of ~480095763, a gap of
+	// ~1.51M slots -- almost exactly 7 days at Solana's ~400ms slot time).
+	// Query the real current slot and add a 9-day margin rather than
+	// hardcoding a slot number that goes stale.
+	currentSlot, err := p.solanaRPC.GetSlot(ctx, rpc.CommitmentFinalized)
+	if err != nil {
+		return FundRequest{}, fmt.Errorf("bridge: get current Solana slot: %w", err)
+	}
+	maxBlockHeight := new(big.Int).SetUint64(currentSlot + 2_000_000)
+
+	burnIntentMsg, err := encodeBurnIntentForSolana(payer, amount, common.HexToAddress(string(destArcAddress)), maxBlockHeight)
 	if err != nil {
 		return FundRequest{}, fmt.Errorf("bridge: encode burn intent: %w", err)
 	}
@@ -207,7 +231,7 @@ func (p *GatewayProvider) buildSolanaDepositTx(ctx context.Context, payer Addres
 // signs for a Solana-sourced burn intent -- extracted byte-exact from the
 // published package, see docs/ubk-capability.md. This is a message
 // signature, not a transaction: no gas, no on-chain footprint for this step.
-func encodeBurnIntentForSolana(payer Address, amount *big.Int, destRecipient common.Address) ([]byte, error) {
+func encodeBurnIntentForSolana(payer Address, amount *big.Int, destRecipient common.Address, maxBlockHeight *big.Int) ([]byte, error) {
 	payerPubkey, err := solanago.PublicKeyFromBase58(string(payer))
 	if err != nil {
 		return nil, fmt.Errorf("invalid payer address: %w", err)
@@ -236,8 +260,13 @@ func encodeBurnIntentForSolana(payer Address, amount *big.Int, destRecipient com
 	}
 
 	writeUint32(burnIntentMagic)
-	writeUint256(big.NewInt(0)) // maxBlockHeight: 0 = no limit for this first real path
-	writeUint256(big.NewInt(0)) // maxFee: 0, Gateway's default fee model applies
+	writeUint256(maxBlockHeight)
+	// maxFee: Gateway rejected 0 with "Insufficient max fee: expected at
+	// least 0.15" on a real testnet call -- 0 is not a valid "use the
+	// default" sentinel here, an explicit minimum applies. maxFeeCap (0.3
+	// USDC) gives margin above the observed 0.15 floor; production should
+	// call POST /v1/estimate first rather than hardcoding a margin.
+	writeUint256(maxFeeCap)
 
 	var specBuf bytes.Buffer
 	binary.Write(&specBuf, binary.BigEndian, transferSpecMagic)
@@ -281,10 +310,100 @@ func encodeBurnIntentForSolana(payer Address, amount *big.Int, destRecipient com
 	return buf.Bytes(), nil
 }
 
-type gatewayTransferRequest struct {
-	Intent    map[string]any `json:"intent"`
-	Signature string         `json:"signature"`
+// decodedBurnIntent mirrors the SDK's own serializeBurnIntent/
+// serializeTransferSpec output shape -- confirmed byte-exact from
+// buildTransferRequestBody in the shipped package (not guessed): a single
+// intent becomes {burnIntent: {maxBlockHeight, maxFee, spec}, signature}.
+type transferSpecJSON struct {
+	Version              uint32 `json:"version"`
+	SourceDomain         uint32 `json:"sourceDomain"`
+	DestinationDomain    uint32 `json:"destinationDomain"`
+	SourceContract       string `json:"sourceContract"`
+	DestinationContract  string `json:"destinationContract"`
+	SourceToken          string `json:"sourceToken"`
+	DestinationToken     string `json:"destinationToken"`
+	SourceDepositor      string `json:"sourceDepositor"`
+	DestinationRecipient string `json:"destinationRecipient"`
+	SourceSigner         string `json:"sourceSigner"`
+	DestinationCaller    string `json:"destinationCaller"`
+	Value                string `json:"value"`
+	Salt                 string `json:"salt"`
 }
+type burnIntentJSON struct {
+	MaxBlockHeight string           `json:"maxBlockHeight"`
+	MaxFee         string           `json:"maxFee"`
+	Spec           transferSpecJSON `json:"spec"`
+}
+type gatewayTransferRequest struct {
+	BurnIntent burnIntentJSON `json:"burnIntent"`
+	Signature  string         `json:"signature"`
+}
+
+// decodeBurnIntentForAPI parses encodeBurnIntentForSolana's raw signing
+// bytes back into the structured JSON Gateway's /v1/transfer actually wants
+// -- the raw bytes are what gets signed (Solana has no EIP-712 equivalent),
+// but the wire body is the same structured fields serializeBurnIntent/
+// serializeTransferSpec produce in the SDK, confirmed from
+// buildTransferRequestBody in the shipped package.
+func decodeBurnIntentForAPI(raw []byte) (burnIntentJSON, error) {
+	if len(raw) < 16+4+32+32+4 {
+		return burnIntentJSON{}, fmt.Errorf("burn intent too short")
+	}
+	pos := 16 // skip domain prefix
+	pos += 4  // skip BURN_INTENT_MAGIC
+	maxBlockHeight := new(big.Int).SetBytes(raw[pos : pos+32])
+	pos += 32
+	maxFee := new(big.Int).SetBytes(raw[pos : pos+32])
+	pos += 32
+	specLen := binary.BigEndian.Uint32(raw[pos : pos+4])
+	pos += 4
+	spec := raw[pos : pos+int(specLen)]
+
+	sp := 4 // skip TRANSFER_SPEC_MAGIC
+	version := binary.BigEndian.Uint32(spec[sp : sp+4])
+	sp += 4
+	sourceDomain := binary.BigEndian.Uint32(spec[sp : sp+4])
+	sp += 4
+	destDomain := binary.BigEndian.Uint32(spec[sp : sp+4])
+	sp += 4
+	readBytes32 := func() string {
+		b := spec[sp : sp+32]
+		sp += 32
+		return "0x" + fmt.Sprintf("%x", b)
+	}
+	sourceContract := readBytes32()
+	destContract := readBytes32()
+	sourceToken := readBytes32()
+	destToken := readBytes32()
+	sourceDepositor := readBytes32()
+	destRecipient := readBytes32()
+	sourceSigner := readBytes32()
+	destCaller := readBytes32()
+	value := new(big.Int).SetBytes(spec[sp : sp+32])
+	sp += 32
+	salt := readBytes32()
+
+	return burnIntentJSON{
+		MaxBlockHeight: maxBlockHeight.String(),
+		MaxFee:         maxFee.String(),
+		Spec: transferSpecJSON{
+			Version:              version,
+			SourceDomain:         sourceDomain,
+			DestinationDomain:    destDomain,
+			SourceContract:       sourceContract,
+			DestinationContract:  destContract,
+			SourceToken:          sourceToken,
+			DestinationToken:     destToken,
+			SourceDepositor:      sourceDepositor,
+			DestinationRecipient: destRecipient,
+			SourceSigner:         sourceSigner,
+			DestinationCaller:    destCaller,
+			Value:                value.String(),
+			Salt:                 salt,
+		},
+	}, nil
+}
+
 type gatewayTransferResponse struct {
 	Attestation string `json:"attestation"`
 	Signature   string `json:"signature"`
@@ -301,12 +420,22 @@ func (p *GatewayProvider) Fund(ctx context.Context, req FundRequest) (string, er
 	if len(req.BurnIntentSignature) == 0 {
 		return "", fmt.Errorf("bridge: Fund called without a payer signature on the burn intent")
 	}
-	reqBody := gatewayTransferRequest{
-		Intent:    map[string]any{"raw": fmt.Sprintf("0x%x", req.BurnIntentMessage)},
-		Signature: fmt.Sprintf("0x%x", req.BurnIntentSignature),
+	intent, err := decodeBurnIntentForAPI(req.BurnIntentMessage)
+	if err != nil {
+		return "", fmt.Errorf("bridge: decode burn intent for API: %w", err)
 	}
+	reqBody := []gatewayTransferRequest{{
+		BurnIntent: intent,
+		Signature:  fmt.Sprintf("0x%x", req.BurnIntentSignature),
+	}}
 	var resp gatewayTransferResponse
-	if err := p.post(ctx, "/v1/transfer", reqBody, &resp); err != nil {
+	// enableForwarder=true: Arc is a confirmed Gateway forwarder destination
+	// (gateway.forwarderSupported.destination in the SDK's chain
+	// definition) -- this makes Circle's own relayer submit the
+	// destination-side mint automatically. Confirmed from the SDK's own
+	// spend() implementation (buildTransferRequestBody's caller appends
+	// this exact query param when useForwarder is set).
+	if err := p.post(ctx, "/v1/transfer?enableForwarder=true", reqBody, &resp); err != nil {
 		return "", fmt.Errorf("bridge: Gateway transfer: %w", err)
 	}
 	if resp.Success != nil && !*resp.Success {

@@ -225,14 +225,50 @@ integration this replaces, where Conduit's own relayer key had to submit `receiv
 itself. This is a meaningful simplification: `FundingProvider.Status` just polls
 `GET /v1/transfer/{id}` until `status: "finalized"` and a `transactionHash` appears.
 
-## Live testnet funding test
+## Live testnet funding test — DONE, real, end to end
 
-Not yet attempted as of writing this doc (Phase 1.0 is capability confirmation only, per
-the spec's own phase split — code and the live test come in Phase 1.1/GATE 1). Solana
-Devnet is confirmed Gateway-testnet-available and this environment already has a funded
-Solana devnet keypair (`HpDTQVaAFQVuDBBuwM99Zfg7ZSfQG72qp95gYUFeQ2FD`, ~4.9 SOL / ~11 USDC
-remaining from the earlier CCTP work) — reused as the Phase 1.1 live-test source, per the
-spec's "if testnet Gateway isn't available, document that and stop" instruction: testnet
-Gateway **is** available for Solana, so a real live test is expected to be possible, not
-blocked. If it turns out blocked for a different reason during implementation, that will
-be documented honestly at that point, not assumed now.
+Completed for real via `internal/bridge.GatewayProvider`, no mocking anywhere. Ran three
+real attempts before landing a fully clean one, each iteration fixing a real, observed API
+behavior (not a code bug in the sense of wrong logic — genuine facts about Gateway's real
+contract/API behavior this session didn't have documented anywhere beforehand):
+
+1. **First attempt**: `POST /v1/transfer` rejected the single-object body with "Expected
+   array, received object" — the real wire format wraps even a single intent in a
+   one-element array. Fixed.
+2. **Second attempt**: rejected with "Must be either a SignedBurnIntent or
+   SignedBurnIntentSet" — the API wants the *structured* intent fields
+   (`maxBlockHeight`/`maxFee`/`spec.{...}` as named JSON fields, matching the SDK's own
+   `serializeBurnIntent`/`serializeTransferSpec` functions found in the shipped package),
+   not the raw signed byte blob. Added `decodeBurnIntentForAPI` to parse the raw
+   signing bytes back into that exact structured shape.
+3. **Third attempt**: rejected with "Insufficient max fee: expected at least 0.15" (had
+   hardcoded `maxFee: 0`) and then "maxBlockHeight is too low: expected at least
+   481607645" against a then-current Solana slot of ~480095763 — a live confirmation that
+   `maxBlockHeight` must be a real, comfortably-future slot number (fixed by querying
+   `getSlot` and adding a margin), and that Gateway enforces a genuine non-zero minimum
+   fee floor (~0.15 USDC observed) rather than treating 0 as "use the default." Fixed
+   both; also found the deposited-balance check must cover `value + maxFee`, not just
+   `value` ("Insufficient balance... available 0.500000, required 0.65").
+4. **Fourth attempt, clean**: real deposit, real Gateway balance confirmation, real signed
+   burn intent, real `POST /v1/transfer` acceptance, and (with `?enableForwarder=true` —
+   confirmed from the SDK's own `spend()` implementation, since Arc's chain definition
+   sets `gateway.forwarderSupported.destination: true`) **Circle's own relayer submitted
+   the Arc-side mint automatically** — Conduit never signed or submitted that
+   transaction.
+
+**Real transaction hashes, this session, 2026-07-31:**
+- Deposit tx (Solana devnet, GatewayWallet program):
+  `4oGvJbhRbT94ud3NpHjUWY5CaSMhQMSLAuCYTGujTWNzBKXxLCuRSWQGvXn6AmSzdS5tmsTXEuKGYEBwfYrjkFBG`
+- Gateway transfer id: `13e6e6c4-0226-4fd9-9302-dfad8fbfe836`
+- Mint tx (Arc testnet, submitted by Circle's own relayer address
+  `0xeA144655E1bA19c4d428569266E21a25BFad7835`, not Conduit's):
+  `0xe1dff2fc62325993f3039305ea9e466a7290e9d62a5c3f5afbe8e476d1e22859` — `status: 1
+  (success)`, USDC `Transfer` event on `0x3600...` for exactly `0x7a120` = 500000 minor
+  units (0.5 USDC) to the specified recipient. Independently verified via `cast receipt`
+  against `rpc.testnet.arc.network`, not just trusted from the API response.
+
+This is a stronger result than GATE 1 asked for ("ideal but not required") — a complete,
+verified, unattended-mint proof, not a partial or documented-as-blocked one. The
+`FundingProvider.Status` polling loop observed the real state transition from
+`attestation_pending` straight to `minted` with the real mint tx hash, matching exactly
+what `internal/handlers/bridge.go`'s production polling loop does.

@@ -466,6 +466,53 @@ func (h *Bridge) Status(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
+type bridgeBalanceResponse struct {
+	// TotalAvailable is the payer's already-deposited Gateway balance summed
+	// across every domain Gateway tracks for this address -- see
+	// docs/ubk-capability.md's deposit-then-spend model. A real REST call
+	// to Gateway (POST /v1/balances), not derived/estimated.
+	TotalAvailable string            `json:"total_available"`
+	ByChain        map[string]string `json:"by_chain"`
+}
+
+// Balance is GET /v1/settlement_intents/:id/bridge/balance?payer_address=...
+// -- the payer surface's balance-aware pay step (Phase 5.1) calls this
+// before showing any amount entry, so the payer only ever sees "paying with
+// USDC" as a confirmed fact, never a list of assets they don't hold.
+// Unauthenticated like Initiate/Status -- same payer-has-no-API-key
+// reasoning.
+func (h *Bridge) Balance(w http.ResponseWriter, r *http.Request) {
+	payerAddress := r.URL.Query().Get("payer_address")
+	if payerAddress == "" {
+		writeErr(w, apierrors.E(apierrors.CodeInvalidRequest, "payer_address"))
+		return
+	}
+
+	balance, err := h.Provider.UnifiedBalance(r.Context(), bridgepkg.Address(payerAddress))
+	if err != nil {
+		log.Printf("bridge: UnifiedBalance failed for %s: %v", payerAddress, err)
+		writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
+		return
+	}
+
+	byChain := map[string]string{}
+	if v, ok := balance.ByDomain[bridgepkg.SolanaDomain]; ok {
+		byChain["solana"] = v.String()
+	}
+	if v, ok := balance.ByDomain[bridgepkg.ArcDomain]; ok {
+		byChain["arc"] = v.String()
+	}
+	if v, ok := balance.ByDomain[bridgepkg.SuiTestnetDomain]; ok {
+		byChain["sui"] = v.String()
+	}
+
+	total := "0"
+	if balance.TotalAvailable != nil {
+		total = balance.TotalAvailable.String()
+	}
+	writeJSON(w, http.StatusOK, bridgeBalanceResponse{TotalAvailable: total, ByChain: byChain})
+}
+
 // arcAddressFromKey is a small helper cmd/api uses to derive the relayer's
 // own address from its configured private key.
 func arcAddressFromKey(key *ecdsa.PrivateKey) common.Address {

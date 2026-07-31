@@ -205,12 +205,20 @@ export function getPublicSettlementIntent(id: string) {
   return request<PublicSettlementIntent>(`/v1/settlement_intents/${id}/public`);
 }
 
-// ── Cross-chain bridge (CCTP Solana -> Arc) ──────────────────────────────────
+// ── Cross-chain funding (Circle Gateway, Solana -> Arc) ──────────────────────
+// Two-call flow matching internal/handlers/bridge.go exactly: the first call
+// returns what to sign (a deposit transaction, only if the payer's Gateway
+// balance is insufficient, plus always a burn-intent message to sign); the
+// second reports the signature(s) back and the funding pipeline runs
+// server-side from there — see docs/ubk-capability.md for why a burn intent
+// is a signed message, not an on-chain transaction.
 
 export interface BridgeInitiateResponse {
   transfer_id: string;
   state: string;
-  unsigned_tx_base64?: string;
+  needs_deposit?: boolean;
+  deposit_tx_base64?: string;
+  burn_intent_message?: string; // hex, 0x-prefixed — sign this, don't submit it
 }
 
 export function initiateBridge(intentId: string, payerAddress: string, usdcAmount: string) {
@@ -220,11 +228,30 @@ export function initiateBridge(intentId: string, payerAddress: string, usdcAmoun
   });
 }
 
-export function reportBridgeBurn(intentId: string, transferId: string, sourceTxHash: string) {
+export function reportBridgeSignature(
+  intentId: string,
+  transferId: string,
+  burnIntentSignature: string,
+  depositTxHash?: string
+) {
   return request<BridgeInitiateResponse>(`/v1/settlement_intents/${intentId}/bridge/initiate`, {
     method: "POST",
-    body: { transfer_id: transferId, source_tx_hash: sourceTxHash },
+    body: { transfer_id: transferId, burn_intent_signature: burnIntentSignature, deposit_tx_hash: depositTxHash },
   });
+}
+
+export interface BridgeBalance {
+  total_available: string;
+  by_chain: Record<string, string>; // "solana" | "arc" | "sui" -> minor-unit string
+}
+
+// Balance-aware paying (Phase 5.1): checked before showing any amount
+// entry, so the payer only ever sees "paying with USDC" as a confirmed
+// fact — never a list of assets they don't hold.
+export function getBridgeBalance(intentId: string, payerAddress: string) {
+  return request<BridgeBalance>(
+    `/v1/settlement_intents/${intentId}/bridge/balance?payer_address=${encodeURIComponent(payerAddress)}`
+  );
 }
 
 export interface BridgeStatus {
@@ -419,4 +446,19 @@ export interface PublicPaymentLink {
 
 export function getPublicPaymentLink(id: string) {
   return request<PublicPaymentLink>(`/v1/payment_links/${id}/public`);
+}
+
+export interface PayLinkResponse {
+  id: string; // the resulting settlement_intent id — hand off to the si_ pay flow with this
+  payment_link_id: string;
+  amount: string;
+  settle_currency: string;
+  hosted_url: string;
+}
+
+// Turns a payment link into an actual payable settlement_intent — enforces
+// single_use/expiry/void/amount-bounds server-side (Phase 3). amount is
+// required for amount_mode=open, optional override for open_with_suggested.
+export function payPaymentLink(id: string, body: { amount?: string; payer_reference?: string }) {
+  return request<PayLinkResponse>(`/v1/payment_links/${id}/pay`, { method: "POST", body });
 }

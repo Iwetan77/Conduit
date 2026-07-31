@@ -482,7 +482,7 @@ func (h *PaymentLinks) toResponse(id, amountMode, amount, minAmount, maxAmount, 
 		SettleCurrency: settleCurrency, SettleAddress: settleAddress, AcceptCurrencies: acceptCurrencies,
 		Description: description, MerchantReference: merchantReference, ReusePolicy: reusePolicy, Status: status,
 		ExpiresAt: expiresAt, Created: created,
-		HostedURL: h.AppBaseURL + "/pay/link/" + id,
+		HostedURL: h.AppBaseURL + "/pay/" + id,
 		QRPayload: id,
 	}
 }

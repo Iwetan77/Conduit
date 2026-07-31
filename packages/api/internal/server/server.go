@@ -132,6 +132,7 @@ func New(cfg Config) http.Handler {
 		if bridgeH != nil {
 			r.Post("/settlement_intents/{id}/bridge/initiate", bridgeH.Initiate)
 			r.Get("/settlement_intents/{id}/bridge/status", bridgeH.Status)
+			r.Get("/settlement_intents/{id}/bridge/balance", bridgeH.Balance)
 		}
 
 		r.Group(func(r chi.Router) {

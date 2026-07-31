@@ -10,6 +10,7 @@ import { getPublicSettlementIntent } from "@/lib/conduit-api";
 import { DeclarationDisplay } from "@/components/PayFlow/DeclarationDisplay";
 import { PayConfirm } from "@/components/PayFlow/PayConfirm";
 import { SettlementIntentPay } from "@/components/PayFlow/SettlementIntentPay";
+import { PaymentLinkPay } from "@/components/PayFlow/PaymentLinkPay";
 import { Logo, Wordmark } from "@/components/Shared/Logo";
 import { motion } from "framer-motion";
 
@@ -35,21 +36,28 @@ function useRecipientTitle(intentId: string) {
 export default function PayPage({ params }: PageParams) {
   const { declarationId } = use(params);
   const isSettlementIntent = declarationId.startsWith("si_");
+  const isPaymentLink = declarationId.startsWith("pl_");
   useRecipientTitle(isSettlementIntent ? declarationId : "");
 
-  // Two payment surfaces share this route: settlement_intents (si_ prefixed
-  // ids, the B2B REST API -- including the CCTP bridge flow) and the older
-  // on-chain PaymentDeclaration flow (bytes32 hashes). Same hosted_url shape
-  // either way (AppBaseURL + "/pay/" + id), so this dispatches on id format
-  // rather than needing a second route.
-  if (isSettlementIntent) {
+  // Three payment surfaces share this route: settlement_intents (si_
+  // prefixed ids, the B2B REST API -- including the cross-chain funding
+  // flow), payment_links (pl_ prefixed ids, Phase 3's lifecycle layer --
+  // turned into a settlement_intent on pay, then handed to the same si_
+  // flow), and the older on-chain PaymentDeclaration flow (bytes32 hashes).
+  // Same hosted_url shape either way (AppBaseURL + "/pay/" + id), so this
+  // dispatches on id format rather than needing separate routes.
+  if (isSettlementIntent || isPaymentLink) {
     return (
       <div className="min-h-screen bg-bg flex flex-col">
         <header className="px-6 py-4 border-b border-border flex justify-center">
           <Logo size="sm" />
         </header>
         <main className="flex-1 max-w-sm mx-auto w-full px-4 py-8 space-y-8">
-          <SettlementIntentPay intentId={declarationId} />
+          {isPaymentLink ? (
+            <PaymentLinkPay linkId={declarationId} />
+          ) : (
+            <SettlementIntentPay intentId={declarationId} />
+          )}
         </main>
         <footer className="px-6 py-4 border-t border-border flex justify-center">
           <div className="flex items-center gap-2 text-ink-dim text-xs font-mono">

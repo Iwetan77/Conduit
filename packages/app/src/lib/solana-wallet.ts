@@ -11,6 +11,7 @@ interface SolanaProvider {
   publicKey?: { toString(): string } | null;
   connect(): Promise<{ publicKey: { toString(): string } }>;
   signTransaction(tx: Transaction): Promise<Transaction>;
+  signMessage(message: Uint8Array, encoding?: string): Promise<{ signature: Uint8Array }>;
 }
 
 export function getSolanaProvider(): SolanaProvider | null {
@@ -28,11 +29,11 @@ export async function connectSolanaWallet(): Promise<string> {
   return publicKey.toString();
 }
 
-// Countersigns the unsigned (payer-signature-missing) burn transaction the
-// API returned and submits it directly to Solana devnet -- Conduit never
-// sees or holds the payer's Solana signing key, only the resulting
-// transaction signature (which becomes the CCTP source_tx_hash).
-export async function signAndSubmitBurn(unsignedTxBase64: string): Promise<string> {
+// Countersigns the deposit transaction the API returned (only needed when
+// the payer's Gateway balance can't cover this payment yet) and submits it
+// directly to Solana devnet. Conduit never sees or holds the payer's Solana
+// signing key, only the resulting transaction signature.
+export async function signAndSubmitDeposit(unsignedTxBase64: string): Promise<string> {
   const provider = getSolanaProvider();
   if (!provider) {
     throw new Error("No Solana wallet found. Install Phantom to bridge from Solana.");
@@ -44,4 +45,28 @@ export async function signAndSubmitBurn(unsignedTxBase64: string): Promise<strin
   const signature = await connection.sendRawTransaction(signedTx.serialize());
   await connection.confirmTransaction(signature, "confirmed");
   return signature;
+}
+
+// Gateway's burn intent is a signed off-chain message, not a transaction --
+// there is nothing to submit to Solana here. This calls Phantom's
+// signMessage (ed25519 over the raw bytes) and returns a 0x-prefixed hex
+// signature for the API's burn_intent_signature field. See
+// docs/ubk-capability.md for the byte-exact encoding these bytes carry.
+export async function signBurnIntent(burnIntentMessageHex: string): Promise<string> {
+  const provider = getSolanaProvider();
+  if (!provider) {
+    throw new Error("No Solana wallet found. Install Phantom to bridge from Solana.");
+  }
+  const bytes = hexToBytes(burnIntentMessageHex);
+  const { signature } = await provider.signMessage(bytes, "utf8");
+  return "0x" + Buffer.from(signature).toString("hex");
+}
+
+function hexToBytes(hex: string): Uint8Array {
+  const clean = hex.startsWith("0x") ? hex.slice(2) : hex;
+  const bytes = new Uint8Array(clean.length / 2);
+  for (let i = 0; i < bytes.length; i++) {
+    bytes[i] = parseInt(clean.substr(i * 2, 2), 16);
+  }
+  return bytes;
 }

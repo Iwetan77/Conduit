@@ -1,21 +1,25 @@
 "use client";
 
-// Cross-chain (CCTP) bridge flow for a payer funding a settlement intent
-// from Solana USDC. This is NOT atomic and never described as such anywhere
-// in this file: it's an honest burn -> attestation -> mint -> settle
-// sequence, ~8-30s on Fast Transfer (see internal/bridge/README.md). The
-// payer signs exactly once, on Solana; everything after that is polled
-// server state, not client-driven animation.
+// Cross-chain (Circle Gateway) funding flow for a payer funding a settlement
+// intent from Solana USDC. This takes real, variable time and is never
+// described as a single immediate step anywhere in this file: it's an
+// honest deposit(if needed) -> signed burn intent -> forwarder mint ->
+// settle sequence (see docs/ubk-capability.md). The payer signs on Solana
+// (a deposit transaction only if their Gateway balance is short, always a
+// burn-intent message); everything after that is polled server state, not
+// client-driven animation.
 import { useEffect, useRef, useState } from "react";
 import {
   connectSolanaWallet,
   getSolanaProvider,
-  signAndSubmitBurn,
+  signAndSubmitDeposit,
+  signBurnIntent,
 } from "@/lib/solana-wallet";
 import {
   initiateBridge,
-  reportBridgeBurn,
+  reportBridgeSignature,
   getBridgeStatus,
+  getBridgeBalance,
   getPublicSettlementIntent,
   ConduitApiError,
   type BridgeStatus,
@@ -28,7 +32,7 @@ interface CrossChainBridgeProps {
   intent: PublicSettlementIntent;
 }
 
-type Phase = "connect" | "amount" | "signing" | "bridging" | "settled" | "error";
+type Phase = "connect" | "checking_balance" | "insufficient" | "confirm" | "signing" | "bridging" | "settled" | "error";
 
 const POLL_INTERVAL_MS = 2500;
 
@@ -42,14 +46,14 @@ const MINTED_OR_LATER = new Set([
 export function CrossChainBridge({ intentId, intent }: CrossChainBridgeProps) {
   const [phase, setPhase] = useState<Phase>("connect");
   const [payerAddress, setPayerAddress] = useState<string | null>(null);
-  const [usdcAmount, setUsdcAmount] = useState(intent.amount);
-  const [transferId, setTransferId] = useState<string | null>(null);
+  const [availableBalance, setAvailableBalance] = useState<string | null>(null);
   const [bridgeStatus, setBridgeStatus] = useState<BridgeStatus | null>(null);
   const [intentStatus, setIntentStatus] = useState(intent.status);
   const [error, setError] = useState("");
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const hasPhantom = typeof window !== "undefined" && !!getSolanaProvider();
+  const requiredAmount = intent.amount;
 
   useEffect(() => {
     return () => {
@@ -59,15 +63,14 @@ export function CrossChainBridge({ intentId, intent }: CrossChainBridgeProps) {
 
   // Orphan-safe: if a bridge for this intent is already in flight (payer
   // reopened the tab after closing it mid-bridge), pick up polling
-  // immediately instead of showing the connect/amount screen again.
+  // immediately instead of showing the connect/balance screen again.
   useEffect(() => {
     getBridgeStatus(intentId)
       .then((status) => {
         setBridgeStatus(status);
-        setTransferId(status.transfer_id);
         if (status.state !== "failed") {
           setPhase("bridging");
-          startPolling(status.transfer_id);
+          startPolling();
         }
       })
       .catch(() => {
@@ -76,7 +79,7 @@ export function CrossChainBridge({ intentId, intent }: CrossChainBridgeProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [intentId]);
 
-  function startPolling(_transferId: string) {
+  function startPolling() {
     if (pollRef.current) clearInterval(pollRef.current);
     pollRef.current = setInterval(async () => {
       try {
@@ -100,14 +103,27 @@ export function CrossChainBridge({ intentId, intent }: CrossChainBridgeProps) {
     }, POLL_INTERVAL_MS);
   }
 
+  // Balance-aware paying (Phase 5.1): the payer never picks from a list of
+  // assets they don't hold. Conduit checks their real Gateway balance and
+  // either confirms "paying with USDC" as a fact or says honestly that
+  // there isn't enough, rather than asking them to type an amount.
   async function handleConnect() {
     setError("");
     try {
       const addr = await connectSolanaWallet();
       setPayerAddress(addr);
-      setPhase("amount");
+      setPhase("checking_balance");
+      const balance = await getBridgeBalance(intentId, addr);
+      const solanaBalance = BigInt(balance.by_chain["solana"] ?? "0");
+      setAvailableBalance(solanaBalance.toString());
+      if (solanaBalance >= BigInt(requiredAmount)) {
+        setPhase("confirm");
+      } else {
+        setPhase("insufficient");
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not connect Solana wallet");
+      setPhase("connect");
     }
   }
 
@@ -116,15 +132,19 @@ export function CrossChainBridge({ intentId, intent }: CrossChainBridgeProps) {
     setError("");
     setPhase("signing");
     try {
-      const init = await initiateBridge(intentId, payerAddress, usdcAmount);
-      if (!init.unsigned_tx_base64) throw new Error("No burn transaction returned");
-      setTransferId(init.transfer_id);
+      const init = await initiateBridge(intentId, payerAddress, requiredAmount);
+      if (!init.burn_intent_message) throw new Error("No burn intent returned");
 
-      const burnSignature = await signAndSubmitBurn(init.unsigned_tx_base64);
-      await reportBridgeBurn(intentId, init.transfer_id, burnSignature);
+      let depositTxHash: string | undefined;
+      if (init.needs_deposit && init.deposit_tx_base64) {
+        depositTxHash = await signAndSubmitDeposit(init.deposit_tx_base64);
+      }
+
+      const burnIntentSignature = await signBurnIntent(init.burn_intent_message);
+      await reportBridgeSignature(intentId, init.transfer_id, burnIntentSignature, depositTxHash);
 
       setPhase("bridging");
-      startPolling(init.transfer_id);
+      startPolling();
     } catch (err) {
       const message = err instanceof ConduitApiError ? err.message : err instanceof Error ? err.message : "Bridge failed to start";
       setError(message);
@@ -157,31 +177,48 @@ export function CrossChainBridge({ intentId, intent }: CrossChainBridgeProps) {
     );
   }
 
-  if (phase === "amount") {
+  if (phase === "checking_balance") {
+    return (
+      <div className="text-center py-8 space-y-3">
+        <div className="w-10 h-10 border-2 border-signal border-t-transparent animate-spin mx-auto" />
+        <p className="text-ink font-mono text-sm">Checking your USDC balance...</p>
+      </div>
+    );
+  }
+
+  if (phase === "insufficient") {
     return (
       <div className="space-y-4">
         <p className="text-ink-dim text-sm">
           Connected: <span className="text-ink font-mono">{payerAddress}</span>
         </p>
-        <label className="block space-y-1">
-          <span className="text-ink-dim text-xs uppercase tracking-wider font-mono">
-            USDC to send from Solana (minor units)
-          </span>
-          <input
-            value={usdcAmount}
-            onChange={(e) => setUsdcAmount(e.target.value)}
-            className="w-full bg-surface border border-border px-3 py-2 font-mono text-ink"
-          />
-        </label>
+        <p className="text-danger text-sm">
+          You need {formatAmountRaw(BigInt(requiredAmount), 6)} USDC on Solana, but Conduit found only{" "}
+          {formatAmountRaw(BigInt(availableBalance ?? "0"), 6)}. Add more USDC to this wallet and try again.
+        </p>
+      </div>
+    );
+  }
+
+  if (phase === "confirm") {
+    return (
+      <div className="space-y-4">
+        <p className="text-ink-dim text-sm">
+          Connected: <span className="text-ink font-mono">{payerAddress}</span>
+        </p>
+        <div className="border border-border bg-surface p-4">
+          <p className="text-ink-dim text-xs uppercase tracking-wider font-mono">Paying with</p>
+          <p className="text-ink font-mono text-xl">{formatAmountRaw(BigInt(requiredAmount), 6)} USDC</p>
+        </div>
         <p className="text-ink-dim text-xs">
-          Your USDC moves from Solana to Arc first (~15s), then converts to{" "}
+          Your USDC is moving from Solana to Arc (~15s), then converts to{" "}
           {intent.settle_currency} and settles. You won&apos;t need to sign again.
         </p>
         <button
           onClick={handleBridge}
           className="w-full py-4 bg-signal text-signal-ink font-mono text-lg hover:bg-signal/90 transition-colors"
         >
-          Bridge {formatAmountRaw(BigInt(usdcAmount || "0"), 6)} USDC
+          Pay {formatAmountRaw(BigInt(requiredAmount), 6)} USDC
         </button>
         {error && <p className="text-danger text-sm">{error}</p>}
       </div>
@@ -192,7 +229,7 @@ export function CrossChainBridge({ intentId, intent }: CrossChainBridgeProps) {
     return (
       <div className="text-center py-8 space-y-3">
         <div className="w-10 h-10 border-2 border-signal border-t-transparent animate-spin mx-auto" />
-        <p className="text-ink font-mono text-sm">Confirm the burn in your Solana wallet...</p>
+        <p className="text-ink font-mono text-sm">Confirm in your Solana wallet...</p>
       </div>
     );
   }
@@ -217,7 +254,7 @@ export function CrossChainBridge({ intentId, intent }: CrossChainBridgeProps) {
 
         {bridgeStatus?.source_tx_hash && (
           <p className="text-ink-dim text-xs font-mono truncate">
-            Burn: {bridgeStatus.source_tx_hash}
+            Deposit: {bridgeStatus.source_tx_hash}
           </p>
         )}
         {bridgeStatus?.mint_tx_hash && (

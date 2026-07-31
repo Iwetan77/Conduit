@@ -25,10 +25,10 @@ type PaymentLinks struct {
 }
 
 type createLinkRequest struct {
-	AmountMode        string   `json:"amount_mode"` // fixed | open | open_with_suggested
-	Amount            *big.Int `json:"amount"`      // required for fixed; suggested default for open_with_suggested; must be omitted for open
-	MinAmount         *big.Int `json:"min_amount"`  // open / open_with_suggested only
-	MaxAmount         *big.Int `json:"max_amount"`  // open / open_with_suggested only
+	AmountMode        string     `json:"amount_mode"` // fixed | open | open_with_suggested
+	Amount            *bigAmount `json:"amount"`      // required for fixed; suggested default for open_with_suggested; must be omitted for open
+	MinAmount         *bigAmount `json:"min_amount"`  // open / open_with_suggested only
+	MaxAmount         *bigAmount `json:"max_amount"`  // open / open_with_suggested only
 	SettleCurrency    string   `json:"settle_currency"`
 	SettleAddress     string   `json:"settle_address"`
 	AcceptCurrencies  []string `json:"accept_currencies"`
@@ -78,7 +78,7 @@ func bigStrDisplay(b *big.Int) string {
 // allows optional min/max; open_with_suggested needs a default amount that
 // (if bounds are set) falls within them.
 func validateAmounts(req createLinkRequest) *apierrors.APIError {
-	if req.MinAmount != nil && req.MaxAmount != nil && req.MinAmount.Cmp(req.MaxAmount) > 0 {
+	if req.MinAmount != nil && req.MaxAmount != nil && req.MinAmount.Cmp(req.MaxAmount.bi()) > 0 {
 		return apierrors.E(apierrors.CodeInvalidRequest, "min_amount must not exceed max_amount")
 	}
 	switch req.AmountMode {
@@ -94,10 +94,10 @@ func validateAmounts(req createLinkRequest) *apierrors.APIError {
 		if req.Amount == nil || req.Amount.Sign() <= 0 {
 			return apierrors.E(apierrors.CodeLinkAmountRequired, "amount")
 		}
-		if req.MinAmount != nil && req.Amount.Cmp(req.MinAmount) < 0 {
+		if req.MinAmount != nil && req.Amount.Cmp(req.MinAmount.bi()) < 0 {
 			return apierrors.E(apierrors.CodeLinkAmountOutOfBounds, "amount")
 		}
-		if req.MaxAmount != nil && req.Amount.Cmp(req.MaxAmount) > 0 {
+		if req.MaxAmount != nil && req.Amount.Cmp(req.MaxAmount.bi()) > 0 {
 			return apierrors.E(apierrors.CodeLinkAmountOutOfBounds, "amount")
 		}
 	default:
@@ -150,7 +150,7 @@ func (h *PaymentLinks) Create(w http.ResponseWriter, r *http.Request) {
 		 (id, account_id, amount_mode, amount, min_amount, max_amount, settle_currency, settle_address,
 		  accept_currencies, description, merchant_reference, reuse_policy, status, expires_at, livemode)
 		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'active',$13,$14)`,
-		id, principal.AccountID, req.AmountMode, bigStrDB(req.Amount), bigStrDB(req.MinAmount), bigStrDB(req.MaxAmount),
+		id, principal.AccountID, req.AmountMode, bigStrDB(req.Amount.bi()), bigStrDB(req.MinAmount.bi()), bigStrDB(req.MaxAmount.bi()),
 		req.SettleCurrency, req.SettleAddress, req.AcceptCurrencies, nullIfEmpty(req.Description),
 		nullIfEmpty(req.MerchantReference), req.ReusePolicy, expiresAt, principal.Livemode,
 	)
@@ -159,7 +159,7 @@ func (h *PaymentLinks) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, h.toResponse(id, req.AmountMode, bigStrDisplay(req.Amount), bigStrDisplay(req.MinAmount), bigStrDisplay(req.MaxAmount),
+	writeJSON(w, http.StatusCreated, h.toResponse(id, req.AmountMode, bigStrDisplay(req.Amount.bi()), bigStrDisplay(req.MinAmount.bi()), bigStrDisplay(req.MaxAmount.bi()),
 		req.SettleCurrency, req.SettleAddress, req.AcceptCurrencies, req.Description, req.MerchantReference,
 		req.ReusePolicy, "active", expiresAt, time.Now()))
 }
@@ -329,8 +329,8 @@ func (h *PaymentLinks) GetPublic(w http.ResponseWriter, r *http.Request) {
 }
 
 type payLinkRequest struct {
-	Amount         *big.Int `json:"amount"` // required for open, optional override for open_with_suggested, ignored for fixed
-	PayerReference string   `json:"payer_reference"`
+	Amount         *bigAmount `json:"amount"` // required for open, optional override for open_with_suggested, ignored for fixed
+	PayerReference string     `json:"payer_reference"`
 }
 
 // Pay implements POST /:id/pay -- unauthenticated (the payer has no API
@@ -394,7 +394,7 @@ func (h *PaymentLinks) Pay(w http.ResponseWriter, r *http.Request) {
 		payAmount, _ = new(big.Int).SetString(*amount, 10)
 	case "open_with_suggested":
 		if req.Amount != nil {
-			payAmount = req.Amount
+			payAmount = req.Amount.bi()
 		} else {
 			payAmount, _ = new(big.Int).SetString(*amount, 10)
 		}
@@ -403,7 +403,7 @@ func (h *PaymentLinks) Pay(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, apierrors.E(apierrors.CodeLinkAmountRequired, "amount"))
 			return
 		}
-		payAmount = req.Amount
+		payAmount = req.Amount.bi()
 	}
 	if (amountMode == "open" || amountMode == "open_with_suggested") && req.Amount != nil {
 		if minAmount != nil {

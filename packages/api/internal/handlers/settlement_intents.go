@@ -24,7 +24,7 @@ type SettlementIntents struct {
 }
 
 type createIntentRequest struct {
-	Amount           *big.Int       `json:"amount"`
+	Amount           *bigAmount     `json:"amount"` // string or number; see big_amount.go
 	SettleCurrency   string         `json:"settle_currency"`
 	SettleAddress    string         `json:"settle_address"`
 	AcceptCurrencies []string       `json:"accept_currencies"`

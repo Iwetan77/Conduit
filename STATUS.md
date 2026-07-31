@@ -1,383 +1,312 @@
 # STATUS.md
 
-Final report for the Conduit B2B rebuild (v2 spec + architecture delta). Every gate below
-was actually run; output is pasted, not reconstructed from memory. Every tx hash was
-independently verified on-chain via `cast receipt` before being included here — none of
-this is taken on the API's word alone.
+Final report for the **CONDUIT — Product Split, Auth, Lifecycle & UI Sharpening** spec
+(phases 0–8 + this report). Every gate below was actually run; outputs are pasted from
+real runs, not reconstructed. Where a gate's non-bash step needed a human (screenshots,
+live OTP), that is disclosed, not simulated. The previous spec's STATUS.md (B2B rebuild
+v2) is preserved in git history at commit `a44eee7`.
+
+Phase commits, all pushed to `main`:
+`edaa7c8` (0) · `a20a5c7` (1) · `cae7fe6` + `2f7f0f4` (2) · `74cc115` (3) · `7025441` (4)
+· `742e29b` (5) · `55d4019` + `722bfb5` (6) · `0e71933` (7) · `d93351b` (8).
 
 ---
 
-## GATE 0 — Audit and capability probe
+## GATE 0 — Bridge-scrap audit
 
 ```
-$ test -f audit/DECIMAL-AUDIT.md && \
-  test -f docs/fx-capability.md && \
-  grep -q "Primary demo pair:" docs/fx-capability.md && \
-  pnpm tsx scripts/stablefx-probe.ts && \
-  cat docs/fx-capability.md
+$ test -f audit/BRIDGE-SCRAP.md && \
+  grep -q "keep-and-generalize\|KEEP-AND-GENERALIZE\|keep and generalize" audit/BRIDGE-SCRAP.md && \
+  grep -qi "bridge_transfers" audit/BRIDGE-SCRAP.md
 ```
 
-**Result: exit 0.** `audit/DECIMAL-AUDIT.md` lists 28 hardcoded-decimal/currency sites
-across `packages/sdk`, `packages/contracts`, and `packages/app`. `scripts/stablefx-probe.ts`
-makes real StableFX sandbox + Arc testnet RPC calls (no mocks) and regenerates
-`docs/fx-capability.md` from live data every run.
+**Result: exit 0** (re-verified 2026-07-31: `GATE0_EXIT=0`). `audit/BRIDGE-SCRAP.md`
+inventories the raw-CCTP bridge and rules **keep-and-generalize** for the
+`bridge_transfers` state machine + reconciler (chain-agnostic by design), scrap for the
+Solana-typed burn path.
 
-**StableFX coverage (observed, quote TTL ~3.5s average — not the 30-60s the architecture
-delta assumed):**
-
-| From | To | Quoted? |
-|---|---|---|
-| USDC | EURC | yes |
-| USDC | BRLA | yes |
-| USDC | AUDF | yes |
-| USDC | MXNB | yes |
-| USDC | QCAD | yes |
-| USDC | KRW1 | yes |
-| USDC | JPYC / JPY | no — code 3008, "invalid currency" |
-| USDC | PHPC / PHP | no — code 3008 |
-| EURC/BRLA/AUDF/MXNB/QCAD/KRW1 | any other non-USDC currency | no — code 3008 |
-
-**Confirmed on-chain (all 8 currently routable currencies):**
-
-| ISO | Symbol | Address | Decimals |
-|---|---|---|---|
-| USD | USDC | `0x3600000000000000000000000000000000000000` | 6 |
-| EUR | EURC | `0x89B50855Aa3bE2F677cD6303Cec089B5F319D72a` | 6 |
-| BRL | BRLA | `0x8629020763F6239643a02e664a25BF4AD7787254` | **18** |
-| AUD | AUDF | `0xd2a530170D71a9Cfe1651Fb468E2B98F7Ed7456b` | 6 |
-| MXN | MXNB | `0x836F73Fbc370A9329Ba4957E47912DfDBA6BA461` | 6 |
-| CAD | QCAD | `0x23d7CFFd0876f3ABb6B074287ba2aeefBc83825d` | 6 |
-| GBP | GBPA | `0xa42e82b5D25E84d107Cd8549CA432ef489CbaD32` | 6 |
-| ZAR | ZARU | `0x47b025D6002234a5038bCD94767bd82b27C2b96F` | **18** |
-
-GBPA and ZARU were **not** in Phase 0.2's candidate list — the user spotted them in
-StableFX's own rates UI and I hadn't tried those currency codes. Found and verified for
-real (on-chain `decimals()`/`symbol()`/`name()`, plus a real quote), then propagated to
-every registry: `CurrencyRegistry.sol`, `internal/currency/currency.go`,
-`packages/sdk/src/currency.ts`, `docs/fx-capability.md`. **This means Phase 0's probe
-script's candidate list was incomplete by construction** — it only tries codes I thought to
-try. A more robust version would enumerate currency codes from somewhere authoritative
-(Circle doesn't appear to publish one) rather than guessing.
-
-**Primary demo pair: BRLA → USDC.** JPY and PHP aren't quotable at all on this sandbox key;
-of the spec's named preference pairs only EUR→USD is routable, but BRLA→USDC ranks higher
-under the spec's own family-priority ordering (JPY > BRL > PHP > EUR) and exercises the
-18-decimal path for real, which EUR→USD wouldn't.
-
-**Testnet hazard found**: searching a block explorer for "JPYC" by symbol returns 7+
-different tokens from unrelated deployers, none authoritative. Token identity was resolved
-only through StableFX's own quote responses (which embed the canonical address), never
-through symbol search.
-
----
-
-## GATE 1 — Generalize the primitive (contracts)
+## GATE 1 — Chain-agnostic FundingProvider (Circle Gateway / UBK)
 
 ```
-$ forge build && forge test -vv
-...
-Ran 5 test suites in 27.52ms: 39 tests passed, 0 failed, 0 skipped (39 total tests)
+$ cd packages/api && go build ./... && \
+  ! grep -rn "solanago\|solana-go" internal/ | grep -v "_test.go\|// " && \
+  go test ./internal/... -run TestFundingProviderStateMachine
 ```
 
-**Deviation from spec, and why:** GATE 1 as literally specified requires
-`testCrossCurrencySettlement_Fork` — a Foundry fork test calling `ConduitRouter.executeWithFX`
-against forked live Arc state. **This is not possible, and not just for tooling reasons:**
+**Result: build + tests exit 0; the middle grep clause fails by design — this is the
+one gate whose literal text was knowingly deviated from, resolved with the project
+owner at the time (Phase 1), not silently.** The grep cannot distinguish "Solana types
+in the *interface*" (forbidden) from "Solana types in a chain-specific *implementation*
+behind the generic interface" (explicitly allowed by the same gate's prose: "If a Solana
+signing branch remains, it's an implementation detail behind the generic interface").
+As built:
 
-`AtomicSettler.settleViaFX` (which `executeWithFX` calls) has `AtomicSettler` itself call
-`Permit2.permitWitnessTransferFrom`. Permit2 authenticates the caller as `msg.sender` and
-requires it to exactly equal the `spender` address baked into the signed permit. StableFX's
-real funding-presign response signs `spender` = **Circle's own relayer contract**
-(`0xd68256f4d69c6bbecb873d8588ae0dc6b8e22e10` on Arc testnet), never our AtomicSettler. So
-`executeWithFX` **always reverts on signature verification** against any real StableFX
-signature — there is no way to make our own contract the valid caller for a signature
-Circle's endpoint issued. This isn't a bug I could fix; it's what the API actually signs.
+- `internal/bridge/provider.go` — the `FundingProvider` interface: **zero** Solana
+  types. Payer addresses are opaque strings, balances are `map[uint32]*big.Int` by
+  Gateway domain.
+- `internal/bridge/gateway.go` — the Solana `GatewayProvider` implementation; this is
+  the only place `solana-go` appears (needed to build the real deposit transaction and
+  derive PDAs — Solana's native tx format doesn't disappear because the API above it
+  is generic).
 
-Confirmed the real, working flow instead: submit the funding signature to Circle's own
-`POST /v1/exchange/stablefx/fund` endpoint. Their relayer settles on FxEscrow directly
-(`recordTrade → takerDeliver → makerDeliver`, three real on-chain transactions, **none of
-which ever call `ConduitRouter`**). This is what `packages/api/internal/fx/stablefx.go`
-actually does, and it's what proves real cross-currency settlement — via the live Go API
-against live Arc testnet (see GATE 2), not a Foundry fork test.
+Re-run 2026-07-31: `go build ./...` exit 0;
+`go test ./internal/... -run 'TestFundingProviderStateMachine|…'` → `ok … internal/bridge`,
+`ok … internal/server 61.909s` (real embedded Postgres, no mocks).
 
-**`ConduitRouter.executeWithFX` and the `AtomicSettler.settleViaFX`/
-`StableFXAdapter.submitFXFunding` path it depends on are consequently dead code for the
-StableFX rail.** Left in place (documented with a long doc comment in `ConduitRouter.sol`
-explaining exactly this) rather than deleted, because a full removal also touches
-`AtomicSettler`, `StableFXAdapter`, and their tests — a larger, separate change than
-appropriate to make silently this late in the build. Fully deleting this dead path is the
-single highest-value cleanup for whoever picks this up next.
+**Beyond the gate:** the full funding flow was proven **live** in Phase 1 — real Solana
+devnet deposit → real Gateway balance → real signed burn intent → real
+`POST /v1/transfer` → Circle's own relayer (`0xeA14…`) minting 500000 minor units
+(0.5 USDC) on Arc, confirmed via `cast receipt` (status 1), not the API's word.
+Full byte-exact encoding + tx hashes: `docs/ubk-capability.md`.
 
-**`executeWithAmm` and same-currency `execute()` are real, tested, and NOT affected** —
-they don't go through Permit2/StableFX at all, so this finding is scoped to the
-cross-currency-via-StableFX path only.
-
-### The `tx.origin` decision (spec explicitly asked for this to be flagged)
-
-`executeWithFX`'s old `require(instruction.payer == msg.sender || instruction.payer ==
-tx.origin)` check was **removed, not replaced with an allowlist.** Reasoning: Permit2's
-signature check already cryptographically authenticates `instruction.payer` as the actual
-signer — the old check was a weaker, spoofable proxy for something Permit2 already
-enforces correctly. Removing it also makes third-party/relayer submission possible, which
-is a prerequisite for the optional Phase 5 gas-sponsorship feature (payer needs no gas
-token). Submission is now open by design; fund authorization is Permit2's signature check,
-not `msg.sender`. See the inline comment at `ConduitRouter.sol:199`.
-
-### `CurrencyRegistry.sol` / `SettlementPreferenceRegistry.sol`
-
-Both built, tested (13 tests combined), and deployed. `CurrencyRegistry.registerCurrency`
-rejects registration if the token's on-chain `decimals()` disagrees with the claimed value
-— verified via `test_registerCurrency_revertsOnDecimalsMismatch`.
-`SettlementPreferenceRegistry` has no admin; a preference belongs to its address (verified
-via `test_preferenceIsPerAddress_noAdminOverride`). The direct-send preference override in
-`ConduitRouter._validateInstruction` rejects a mismatched instruction outright
-(`PreferenceMismatch` error) rather than silently honoring the caller's choice — matches
-the spec's explicit requirement, verified in
-`test_directSend_recipientPreferenceOverride_mismatchReverts`.
-
-### Real deployment
+## GATE 2 — Privy merchant auth
 
 ```
-$ forge script script/Deploy.s.sol --rpc-url arc_testnet --broadcast
+$ cd packages/app && pnpm build && \
+  grep -rq "@privy-io/react-auth" src && \
+  grep -rq "useLoginWithEmail\|PrivyProvider" src && \
+  ! grep -rn "getApiKey\|setApiKey" src/app/dashboard/layout.tsx
 ```
 
-Deployed for real (not a dry run) — `deployments/arc-testnet.json`:
+**Result: exit 0** (grep clauses re-verified 2026-07-31: `GATE2_GREPS_EXIT=0`; the
+build is the same `pnpm build` that passed GATE 8 below, exit 0, 15/15 routes).
+**Manual steps done live by the project owner:** unauthenticated `/dashboard` → Privy
+login modal; real email OTP completed → dashboard; Google login also enabled and used
+(bypasses OTP); modal confirmed dark with the `#B2F55A` green accent, not default
+purple; `/pay` confirmed to need no login.
 
-```json
-{
-  "chainId": 5042002,
-  "deployer": "0xf04a181eaB4CfABf7D13CCe64737782737cD0b22",
-  "declarationRegistry": "0x57B8CF09bCa645E0c7e0c26E9b2edCd1a78E5Ce2",
-  "stableFXAdapter": "0x816eC143E6504E374838CD9675A1F45D1A580585",
-  "atomicSettler": "0x611Fb259c22305AbE4b3f8F4246f2e33F41ca774",
-  "conduitRouter": "0x8FD2695c606d6eB6976D60B119226ed6b615Ee1c",
-  "currencyRegistry": "0x813f4D0b6dC42da94C0499836ea07067780105e5",
-  "settlementPreferenceRegistry": "0xE7eFA65C4B722cB223e7D18ee87D7ACd7403E75c"
-}
-```
-
-All 8 currencies registered on-chain in `CurrencyRegistry`, confirmed via `allCodes()`.
-
----
-
-## GATE 2 — the API service
+## GATE 3 — Payment-link lifecycle
 
 ```
-$ ./scripts/e2e.sh; echo "exit=$?"
+$ cd packages/api && go build ./... && \
+  go test ./internal/... -run 'TestLinkLifecycle|TestSingleUse|TestExpiry|TestVoid|TestAmountBounds'
 ```
 
-Ran multiple times for real across this build (as bugs were found and fixed — see
-"deviations" below). Most recent clean run:
+**Result: exit 0** (re-run 2026-07-31 together with GATE 1's tests: `GO_EXIT=0`,
+`ok github.com/kzn-labs/conduit/api/internal/server 61.909s`). Tests run against a real
+embedded Postgres and prove, server-side: single-use double-payment rejected
+(atomic-claim race included), expired-link payment rejected, void-link payment rejected,
+out-of-bounds open amount rejected.
+
+## GATE 4 — Recipient identity
 
 ```
-=== [1/9] devserver healthy after 6s
-=== [2/9] account created, key prefix: sk_test_uLDY...
-=== [3/9] intent created: si_s4g73vgwe7xkadmxv7tq
-=== [4/9] replay byte-identical: OK
-=== [5/9] real quote rate: 1.1189
-=== [6/9] prepare response: {...}
-=== [7/9] confirm response: {"status":"settled","tx_hash":"0x79fb45e1165ac6d5aa36f41301b5b875d93181effd0c8f9a8154bb530ee04db4"}
-=== [8/9] intent status=settled: OK
-=== [9/9] post-settlement re-quote: {"error":"already settled, expected"}
-=== [10/10] CSV export contains the settlement: OK
-=== GATE 2: PASS ===
-exit=0
+$ cd packages/app && pnpm build && \
+  grep -rq "display_name\|displayName" src/app/pay && \
+  cd ../api && go build ./...
 ```
 
-Tx `0x79fb45e1165ac6d5aa36f41301b5b875d93181effd0c8f9a8154bb530ee04db4` — independently
-verified via `cast receipt`: `status: 1 (success)`, real ERC-20 `Transfer` logs to the
-payer/recipient wallet, not just trusted from the API's self-reported status.
+**Result: exit 0** (re-verified 2026-07-31: `GATE4_GREP_EXIT=0`; app build via GATE 8,
+Go build via GATE 1 re-run). **Confirmed in writing:** the `/pay` page leads with the
+merchant's business name (+ logo when set) from the public endpoints' JOIN on
+`accounts`; the raw settle address is secondary detail, never the headline.
 
-**Uses USDC→EURC, not the primary BRLA→USDC pair** — the funded test wallet held
-USDC/EURC but zero BRLA (BRLA has no public faucet; it's gated behind Circle's Partner
-Stablecoin KYB program, confirmed by checking — `faucet.circle.com` only ever dispenses
-USDC/EURC/cirBTC, and BRLA's `mint()` is role-gated, confirmed on-chain via a reverted
-unpermissioned call). The settlement *logic* is identical for any StableFX-quotable pair —
-proven separately that BRLA's 18-decimal math round-trips correctly in the SDK's property
-tests (Phase 1.1) — but GATE 2's *live* run never actually exercised BRLA on-chain. Swap
-`PAY_CURRENCY`/`SETTLE_ISO` in `scripts/e2e.sh` the moment a BRLA-funded wallet exists.
-
-### Real bugs found and fixed while getting this gate green (not cosmetic — all three
-### would have shipped as real defects)
-
-1. **CSV export emitted raw minor-unit integers, not decimal strings** — direct violation
-   of spec §2.9. Fixed with a pure-`big.Int` `FormatMinorUnits`, no floats anywhere in the
-   export path.
-2. **A masked-error bug in `fx.StableFXProvider.Quote()`**: any StableFX error code other
-   than 3008 fell through to a bare `fmt.Errorf`, which isn't an `*apierrors.APIError`, so
-   the handler's catch-all collapsed it into a useless generic `fx_provider_unavailable`
-   503 — discarding the real cause. Traced this to StableFX code 3005 ("quote amount
-   invalid" — the test amount was below StableFX's quotable minimum, confirmed empirically
-   to be **1 unit of the major currency**, e.g. 1 EUR, not any amount ≥ 1 minor unit).
-   Added `fx_invalid_amount` to the error registry and mapped it properly instead of
-   masking it.
-3. **`Submit()`'s settlement poll loop could burn its full 60s timeout on a trade that had
-   already failed.** It waited on the trade's top-level `status` reaching
-   `"settled"`/`"complete"`, which does not reliably happen — observed live a real trade
-   stuck at `"maker_funded"` forever, with `contractTransactions.makerDeliver` already
-   showing `status:"success"` and a real tx hash, because the *other* leg
-   (`takerDeliver` — our payer funding) had failed with `TRANSFER_FROM_FAILED` (wallet
-   balance too low for that particular trade size). Fixed to check
-   `contractTransactions.makerDeliver.status=="success"` directly as the real completion
-   signal, and to surface a `takerDeliver`/`makerDeliver` `"failed"` immediately with
-   StableFX's own `errorDetails` instead of waiting out a doomed trade.
-
-### Also found and fixed: the "fee gross-up" question
-
-StableFX's quote response's own `to.amount` field echoes back a *grossed-up* figure (e.g.
-requesting settle-amount 100 shows `to.amount: "100.2"` in the immediate quote response).
-Confirmed via a real settlement that **the recipient receives exactly the requested settle
-amount** (EURC balance `+3.000000` exactly for a `to.amount: "3.000000"` request) — the fee
-comes out of the payer's side, never visible in what the recipient actually gets. Trust
-actual on-chain delivery, not the echoed quote field, if you're building against this API.
-
-### Endpoints built beyond the spec's literal list (real gaps that would have blocked the
-### dashboard otherwise)
-
-`GET /v1/settlement_intents` (list), `GET /v1/settlements` + `/:id`, `GET /v1/api_keys`,
-`POST /v1/accounts/sub` (subaccounts — schema already had `parent_id`, nothing exposed it).
-
----
-
-## GATE 3 — dashboard
+## GATE 5 — Balance-aware payer + honest bridge UI
 
 ```
-$ ! grep -rn "declarationRegistry\.\|DeclarationRegistry\|\.resolve(" packages/app/src ... && \
-  ! grep -rn "DATABASE_URL\|postgres\|pg\." packages/app/src && \
-  ! test -f packages/app/src/store/useConduitStore.ts && \
+$ cd packages/app && pnpm build && \
+  ! grep -rn "atomic\|instant" src/app/pay src/components/PayFlow && \
+  ! grep -rn "YOU PAY WITH" src/components/PayFlow
+```
+
+**Result: exit 0** (re-verified 2026-07-31: `GATE5_GREPS_EXIT=0`; build via GATE 8).
+The static nine-currency "you pay with" grid is gone from the payer flow — and, caught
+by the owner after Phase 6, also from the homepage Direct Send flow (`722bfb5`,
+`SendFlow/PayerCurrencyPicker.tsx`: one wagmi `useReadContracts` multicall of real
+`balanceOf` across all Arc tokens; shows only what the wallet holds). Screenshot step:
+I have no browser tool — the balance-aware step and mid-funding bridge flow render from
+polled API state by construction; visual confirmation was done live by the owner where
+noted, and remains open where not.
+
+## GATE 6 — UI sharpening
+
+```
+$ cd packages/app && pnpm build && \
+  grep -rq "@web3icons/react" src && \
+  ! grep -rn "rounded-xl\|rounded-full\|rounded-lg\|shadow-\|blur-" src | grep -v "rounded-none" && \
+  ! grep -rn "text-white\|bg-black" src/app src/components
+```
+
+**Result: exit 0** (re-verified 2026-07-31: `GATE6_GREPS_EXIT=0`; build via GATE 8).
+Token icons via `@web3icons/react` v4.1.19 (`TokenIcon` from `/dynamic`, mono variant),
+with a monogram fallback for exotic tickers (BRLA/QCAD/KRW1/ZARU/AUDF/MXNB/GBPA). No
+rounded corners, shadows, blurs, or raw white/black utilities anywhere in app source.
+
+### Grid bleed — before/after (the honest version)
+
+- **Before:** gridlines visibly crossed text and panels everywhere (owner's screenshot).
+- **Phase 6's fix was the wrong diagnosis.** The spec assumed panels were "too dark to
+  occlude the grid." Lifting `--surface` `#0C0D0A → #141712` and `--border` improved
+  card definition but **could not** stop the bleed.
+- **Real cause (found post-Phase-6, owner-reported):** CSS paint order. `.conduit-grid`
+  was `position: fixed; z-index: 0`, and a positioned element at z-index 0 paints
+  **above** all normal-flow content — the grid was drawing on top of every glyph
+  regardless of panel color.
+- **Real fix (`722bfb5`):** one line — `.conduit-grid { z-index: -1 }`. The grid now
+  paints over the body background but strictly behind all content: lines pass behind
+  glyphs like ink on graph paper, never across them. Surface lift kept as a genuine
+  (separate) improvement.
+
+## GATE 7 — README + docs truth pass
+
+```
+$ cd "$(git rev-parse --show-toplevel)" && \
+  ! grep -rin "agent payment protocol\|x402" README.md && \
+  grep -qi "payer\|merchant" README.md && \
+  cd packages/docs && pnpm build
+```
+
+**Result: exit 0** (run 2026-07-31: `GATE7_EXIT=0`; docs build `✓ Generating static
+pages (14/14)`, including the new `/guides/payment-links` route). README rewritten
+around the two-surface product with the honest Circle-vs-Conduit mechanics;
+`docs/payment-links.md` added and registered in both the guides index and slug loader.
+The two `docs/cctp-*.md` files are historical raw-CCTP records (superseded by
+`docs/ubk-capability.md`) kept for tx-hash provenance; they are not in SLUGS and don't
+render.
+
+## GATE 8 — Cross-surface coherence
+
+```
+$ cd "$(git rev-parse --show-toplevel)" && \
+  ! grep -rn "@privy-io" packages/app/src/app/pay && \
   cd packages/app && pnpm build
-GATE3_EXIT=0
 ```
 
-All 6 screens built: Settlements (landing), Request payment, Locations, Settings,
-Developers, Reconciliation. `store/useConduitStore.ts` deleted per spec's SCRAPPED list —
-its only real consumers used it for transient wizard form state, not history
-reconstruction, so they moved to local component state rather than needing a server-backed
-replacement. The dashboard touches the chain in exactly one place (Settings, writing
-`SettlementPreferenceRegistry` directly via a connected wallet) — everything else is a thin
-client of `packages/api`.
+**Result: exit 0** (run 2026-07-31: `GATE8_EXIT=0`). Grep: zero matches — `@privy-io`
+exists only in `src/app/dashboard/layout.tsx` and
+`src/app/dashboard/dashboard-privy-provider.tsx`; root providers are wagmi +
+react-query only. Build output (tail):
 
-Fixed four pre-existing bugs unrelated to this session's earlier work, found only because
-they blocked `pnpm build`/GATE 3's grep checks: a Next.js 15 dynamic-route `params`-as-Promise
-migration, four mistyped `window.ethereum` casts, a missing SDK constructor argument, and a
-docs-table label that false-positived the contract-read grep.
+```
+ ✓ Generating static pages (15/15)
+└ ƒ /pay/[declarationId]                 73.6 kB         543 kB
++ First Load JS shared by all             135 kB
+GATE8_EXIT=0
+```
+
+Full coherence writeup (auth boundary, shared design tokens, end-to-end flow with
+per-step verification provenance): `audit/PHASE8-COHERENCE.md`.
 
 ---
 
-## GATE 4 — SDK and docs
+## UBK / Gateway — what is actually used
 
-```
-$ cd /tmp && rm -rf qs && mkdir qs && cd qs && time bash /abs/path/docs/quickstart-verbatim.sh; echo "exit=$?"
-{"status":"settled","tx_hash":"0xa7f7bae70b0c318ef46aeb236c458f323535cdd226c9207bbc1513167bac6552"}
-real  0m12.300s
-exit=0
-```
+- **Package verified:** `@circle-fin/unified-balance-kit` **1.3.1**, inspected from the
+  real npm tarball (`npm pack`), not docs summaries. The Go API talks to the underlying
+  **Gateway REST API directly** (`https://gateway-api-testnet.circle.com`):
+  `GET /v1/info`, `POST /v1/balances`, `POST /v1/transfer`, `GET /v1/transfer/{id}`.
+- **Source chains with real Gateway support (testnet), as probed from the package's
+  chain registry:** EVM chains with `gateway` blocks (Ethereum Sepolia, Base Sepolia,
+  Avalanche Fuji, and peers), **Solana devnet (domain 5)** — the implemented source —
+  and **Sui** (domain 8) present in the registry. **Arc is domain 26** with real
+  `gateway.contracts.v1.{wallet,minter}` — a forwarder-supported destination, so
+  Circle's relayer submits the Arc mint itself.
+- Burn intents on Solana are **off-chain ed25519-signed messages** with a byte-exact
+  layout (16-byte `0xff…00` domain prefix + magic-tagged fields — see
+  `docs/ubk-capability.md`), not on-chain transactions.
 
-Run three times total (fixing a location-independence bug in the doc's own bash blocks
-along the way — the first attempt assumed the repo checkout was the cwd, which isn't true
-of GATE 4's actual invocation from an empty scratch directory). All three runs settled for
-real: `0xc7219f42d02d82951e383bb3156bf3dfee0fd317f38d1bb7937a8328f0a53f08`,
-`0x190250cf904b122f87e88b1710a17f9093f06a514da4687914df52037d8ac55c`,
-`0xa7f7bae70b0c318ef46aeb236c458f323535cdd226c9207bbc1513167bac6552` — all independently
-verified via `cast receipt` (`status: 1`). Wall-clock 12.3s–31s, well under the 10-minute
-cap.
+## Privy auth model as built
 
-**Honesty note in the doc itself**: the spec's "four lines to a settled payment" framing
-doesn't survive contact with Permit2 — a real settlement needs a real EIP-712 wallet
-signature, which cannot be a bare `curl` command in any API, ours included. The quickstart
-uses a small Node signing helper to play the payer's wallet non-interactively so the whole
-thing stays scriptable; a real integration signs client-side in a browser wallet instead
-(the hosted checkout flow this dashboard builds).
+- Login: Privy modal, email OTP or Google, `@privy-io/react-auth` 3.36.0. Embedded
+  EVM wallet auto-created on first login (`ethereum.createOnLogin`, with a
+  `useCreateWallet()` fallback for the creation race).
+- Server: ES256 access-token JWTs verified against a **static PEM public key** from the
+  Privy dashboard (not JWKS), `golang-jwt/jwt/v5`.
+- **Login wallet vs settle address are separate fields.** `accounts.login_wallet` is the
+  Privy embedded wallet; `settle_address` *defaults* to it at account creation but is
+  independently editable (`PATCH /v1/accounts/:id`) — a business can settle to a
+  treasury address it never logs in with.
+- `sk_`/`pk_` API keys remain the machine path; Privy is layered for humans, not a
+  replacement.
 
-`@conduit/node` built and tested (5 tests: valid signature, tampered body, wrong secret,
-stale timestamp, malformed header — `constructEvent` verified against an independent
-reimplementation of the Go HMAC algorithm, not just round-tripped through itself).
+## Lifecycle enforcement — what the server actually rejects
 
-**Real gap found while writing `docs/webhooks.md`**: of the 5 webhook events the spec
-lists, only `settlement.succeeded` is actually enqueued anywhere in the handler code.
-`settlement_intent.created/quoted/expired` and `settlement.failed` are defined in the
-schema and spec but nothing calls `Enqueue` for them. Documented plainly in the docs rather
-than silently omitted.
+All at `POST /v1/payment_links/:id/pay`, with typed errors (not UI-only):
 
----
+| Case | Enforcement | Error (HTTP) |
+|---|---|---|
+| Double-pay of single-use link | **Atomic** `UPDATE … WHERE status IN ('active','viewed')`; loser sees 0 rows | `payment_link_already_used` (409) |
+| Pay after `expires_at` | Checked at pay time against the clock, status flipped to `expired` | `payment_link_expired` (409) |
+| Pay a voided link | Status check | `payment_link_voided` (409) |
+| Open amount out of bounds | `[min_amount, max_amount]` big-int comparison | `payment_link_amount_out_of_bounds` (422) |
+| Open link with no amount | Required-field check | `payment_link_amount_required` (400) |
+| Void an already-paid link | Status check in `Void` | `payment_link_already_used` (409) |
 
-## Every deviation from the spec, in one place
+Covered by real Postgres-backed tests (GATE 3). Amounts are integer minor units
+end-to-end (`*big.Int` / `NUMERIC(78,0)`); no floats anywhere in money paths.
 
-1. **`testCrossCurrencySettlement_Fork` (GATE 1) not literally possible** — see GATE 1
-   section above. Real cross-currency settlement proven via the live API instead (GATE 2),
-   with independently-verified tx hashes.
-2. **`ConduitRouter.executeWithFX` is dead code** for the StableFX rail — Permit2's
-   `spender` binding means only Circle's relayer can ever redeem a StableFX-issued funding
-   signature, never our own contract. Documented in-contract, not deleted (see GATE 1).
-3. **`tx.origin`/`msg.sender` payer check removed, no allowlist substituted** — Permit2's
-   signature check is the real authorization; the old check was weaker and blocked Phase 5
-   gas sponsorship. Flagged as explicitly requested by the spec.
-4. **GATE 2's live run uses USDC→EURC, not the primary BRLA→USDC pair** — BRLA has no
-   self-serve faucet (Partner Stablecoin KYB gate). Settlement logic identical for any
-   pair; only the *live proof* used a different pair than the spec's designated primary.
-5. **Only `settlement.succeeded` webhook event is wired up**, not all 5 spec'd events.
-6. **`GET /v1/currencies`, `GET /v1/settlements`, `GET /v1/api_keys`,
-   `POST /v1/accounts/sub`, `GET /v1/settlement_intents` (list)** — endpoints the spec's
-   literal table didn't enumerate but that the dashboard genuinely needed to exist at all.
-   Added, not silently assumed.
-7. **Two-signature StableFX flow, not one** — real StableFX needs a signature over the
-   quote's own typed data *before* trade creation, in addition to the funding presign
-   signature the spec anticipated. Still fits the spec's 3-endpoint shape
-   (`/quote` returns sig #1 target, `/prepare` takes sig #1 and returns sig #2 target,
-   `/confirm` takes sig #2 and submits) — just two signatures inside that shape, not one.
-8. **StableFX trade creation is asynchronous** — `contractTradeId` doesn't exist
-   immediately after `POST /trades`; the API must poll `GET /trades/:id`. Undocumented by
-   Circle, found empirically.
-9. **Quote TTL is ~3.5s, not the 30-60s the architecture delta assumed.** Doesn't break
-   the "firm rate at payment time" design — the payer is still present and signs within
-   that window — but it's a much tighter window than originally planned for, and shapes
-   the checkout UX (rate must be visible before the wallet popup opens, not after).
-10. **New dependency**: `tsx` (root devDependency) — needed to run `scripts/*.ts` directly,
-    per GATE 0's exact invocation command. No other new dependencies were added anywhere
-    in this build.
+## Deviations from the spec, and why
 
----
+1. **GATE 1's literal grep fails while the phase passes** — see GATE 1 above. Surfaced
+   to and resolved with the owner during Phase 1; the interface is genuinely
+   chain-agnostic, the Solana code is implementation detail the gate's own prose allows.
+2. **Screenshots (GATEs 2/5/6/8 manual steps):** I have no browser tool. Every visual
+   claim above is either mechanically verified (greps, token file, build) or was
+   confirmed live by the owner (Phase 2 login, Phase 6 grid report → `722bfb5` fix).
+   Side-by-side Phase 8 screenshots remain a human step.
+3. **Phase 6 shipped the spec's assumed grid fix, which was wrong** — kept as a visual
+   improvement, but the real fix was the post-phase `z-index:-1` (`722bfb5`). The spec's
+   "raise the surface and re-verify" instruction could never have fixed it.
+4. **Phase 5 scope initially followed GATE 5's literal grep paths** (`src/app/pay`,
+   `src/components/PayFlow`) and missed the homepage Direct Send static grid — owner
+   caught it; fixed in `722bfb5`.
+5. **`docs/cctp-*.md` kept, not deleted** (Phase 7): historical tx-hash provenance;
+   unreferenced by the docs site.
+6. **STATUS.md replaces the previous spec's report** — old version preserved in git
+   history (`a44eee7`), matching the established one-report-per-spec convention.
+7. **JPY/PHP not quotable** on the current StableFX key (error 3008) — documented as
+   re-probe-able coverage, not routed around or faked.
 
 ## What breaks first under load
 
-The idempotency middleware and settlement-intent creation path are the load-bearing pieces
-tested for correctness (50-concurrent-identical-request behavior is asserted, not just
-assumed), but nothing in this build has been load-tested for *throughput*. The most likely
-first failure under real concurrent load: **the embedded-Postgres devserver setup is a
-local-dev convenience, not a production posture** — `cmd/devserver` boots a fresh
-Postgres instance per process start, which is fine for one API instance but has no story
-for horizontal scaling, connection pooling limits, or multi-instance coordination on the
-idempotency table. A second, load-bearing gap: the **indexer's 15s polling reconciler**
-re-scans the trailing 200 blocks every cycle — fine at testnet volume, but re-scanning a
-fixed block window on every tick doesn't scale with settlement volume; it should shrink to
-"blocks since last confirmed checkpoint," not a fixed lookback.
+1. **StableFX quote TTL (~3.5s observed)** — under any queueing/latency, quotes expire
+   between quote and fund; payers see re-quote loops. First user-visible failure.
+2. **Payer-side polling** (`bridge/status`, trade status) is per-client HTTP polling
+   against the API, which itself polls Circle — N concurrent payers multiply upstream
+   calls; Circle rate limits would surface as stalled progress UIs before anything
+   corrupts. No websockets/backoff coordination yet.
+3. **Single Postgres pool / single API process** — the reconciler and handlers share
+   one pool; embedded-postgres is dev-only, but there's no horizontal-scale story
+   (no leader election for the reconciler; two instances would double-poll Circle,
+   though DB state transitions stay safe because they're conditional UPDATEs).
+4. **Front-end bundle** — `/pay` first load is 543 kB (Privy/wagmi/web3icons); slow
+   networks feel it. Known, owner-deferred performance work.
 
-## What a hostile integrator can do that we don't prevent
+## What a hostile payer could do that isn't prevented
 
-- **Replay a captured StableFX quote signature within its ~3.5s window** if they can act
-  faster than a human — the API doesn't bind the quote signature to a specific requesting
-  IP/session beyond the signature itself, so a sufficiently fast automated attacker who
-  intercepts a payer's signed quote could theoretically race to submit it first. This is
-  bounded by the tiny TTL window, but it's not *prevented*, only made hard to exploit.
-- **Exhaust the FX-invalid-amount error path as a probing oracle** — repeatedly querying
-  `/quote` with varying amounts (as this report's own investigation did, for free) reveals
-  StableFX's exact quotable minimum/maximum without rate limiting on quote requests beyond
-  whatever StableFX itself enforces upstream. Nothing in our API throttles quote spam per
-  key.
-- **A `pk_` (publishable) key can still hit `/quote` and `/prepare` repeatedly** to probe
-  live FX rates without ever completing a payment — by design (that's what a checkout page
-  needs), but there's no rate limiting distinguishing "a real checkout session" from
-  "someone scraping our FX rates via a leaked publishable key."
+- **Hold a single-use link hostage:** `pay` atomically claims the link (`status='paid'`)
+  *before* funds move. A payer who calls `pay` and never funds burns the link; the
+  merchant must void/reissue. Mitigation exists (merchant sees `viewed`/intent state)
+  but there's no auto-release timer returning a claimed-but-unfunded link to `active`.
+- **Status-flip spam:** the public endpoint flips `active → viewed` unauthenticated —
+  anyone with the URL can mark it viewed. Cosmetic, but it pollutes the merchant's
+  signal.
+- **Poll hammering:** public `pay`/`public`/quote endpoints have no rate limiting and
+  testnet-wildcard CORS; a hostile client can spend the API's Circle quota. Must be
+  fixed before mainnet (also flagged in README).
+- **Not possible:** paying twice on single-use (atomic claim), paying outside bounds,
+  paying expired/void links, spoofing another merchant's identity on the pay page
+  (identity comes from the server-side JOIN, not client input), or moving funds
+  anywhere except the merchant's stored `settle_address`.
 
-## What happens to an in-flight StableFX trade if the API process dies between `prepare`
-## and `confirm`
+## In-flight UBK funding if the API dies mid-bridge
 
-**Nothing automatically recovers it.** The `fx_trades` row sits in `presigned` (or
-`awaiting_signature`) state forever. A sweeper for stale presigned/awaiting_signature rows
-past `quote_expires_at` — which the spec explicitly calls for — **does not exist in this
-build.** Money isn't directly at risk at that specific point (nothing is funded on-chain
-until `confirm` submits the funding signature), but the settlement intent will look
-permanently stuck to an integrator polling its status, rather than cleanly transitioning to
-`expired`. This is the single most important piece of unfinished work in this build for
-anyone taking it further — a cron/background sweeper that finds
-`fx_trades.state IN ('presigned','awaiting_signature') AND quote_expires_at < now()` and
-transitions both the trade and its parent intent to `expired`.
+The burn intent is irreversible once Circle accepts it — the design assumes death at
+any point:
+
+- Every step of the funding flow is persisted in `bridge_transfers` **before** the
+  side effect (state machine: deposit seen → intent signed → transfer submitted →
+  mint confirmed).
+- On restart, the **reconciler** scans non-terminal `bridge_transfers` rows and resumes
+  exactly where a live session would: re-polls `GET /v1/transfer/{id}`, re-checks the
+  Arc mint, and advances the settlement intent when the USDC lands. Orphaned deposits
+  (deposit seen, process died before intent) surface as resumable rows, not lost funds.
+- Because Arc is forwarder-supported, the mint does not depend on the API being alive —
+  Circle's relayer completes it regardless; the API only has to *observe* and settle.
+- Worst case (API down for the whole window): the payer's USDC sits in their Gateway
+  unified balance / arrives on Arc, and settlement completes on the next reconciler
+  pass. Funds are never stranded in a state the reconciler can't see.
+
+---
+
+*All phases pushed to `main` at `d93351b` + this report. Arc Testnet, chain 5042002.*

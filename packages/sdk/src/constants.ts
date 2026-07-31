@@ -47,8 +47,22 @@ function loadDeploymentFile(): DeploymentFile {
 
 const deployment = loadDeploymentFile();
 
+// Next.js only inlines *literal* `process.env.NEXT_PUBLIC_X` member
+// expressions into browser bundles — a dynamic `process.env[envVar]` lookup
+// compiles to `undefined` in the browser even when .env.local is correct
+// (this was the real cause of the "address not found" errors on /create and
+// /history). Each var must be read with the literal dot form, once, here.
+const ENV_ADDRESSES: Record<string, string | undefined> = {
+  NEXT_PUBLIC_CONDUIT_ROUTER: process.env.NEXT_PUBLIC_CONDUIT_ROUTER,
+  NEXT_PUBLIC_DECLARATION_REGISTRY: process.env.NEXT_PUBLIC_DECLARATION_REGISTRY,
+  NEXT_PUBLIC_STABLEFX_ADAPTER: process.env.NEXT_PUBLIC_STABLEFX_ADAPTER,
+  NEXT_PUBLIC_ATOMIC_SETTLER: process.env.NEXT_PUBLIC_ATOMIC_SETTLER,
+  NEXT_PUBLIC_CURRENCY_REGISTRY: process.env.NEXT_PUBLIC_CURRENCY_REGISTRY,
+  NEXT_PUBLIC_SETTLEMENT_PREFERENCE_REGISTRY: process.env.NEXT_PUBLIC_SETTLEMENT_PREFERENCE_REGISTRY,
+};
+
 function resolveAddress(envVar: string, deploymentKey: keyof DeploymentFile, label: string): Address {
-  const fromEnv = typeof process !== "undefined" ? process.env[envVar] : undefined;
+  const fromEnv = ENV_ADDRESSES[envVar];
   const fromFile = deployment[deploymentKey] as string | undefined;
   const value = fromEnv || fromFile;
   if (!value) {

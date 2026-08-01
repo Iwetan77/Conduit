@@ -28,7 +28,18 @@ function GoogleSignIn({ fullWidth = false, short = false }: { fullWidth?: boolea
                  border border-border text-ink-dim hover:text-ink hover:border-ink-dim
                  transition-colors disabled:opacity-50 whitespace-nowrap`}
     >
-      {starting ? "Opening…" : short ? "Google" : "Sign in with Google"}
+      {starting ? (
+        "Opening…"
+      ) : short ? (
+        "Google"
+      ) : (
+        <>
+          {/* Narrow screens can't fit both full labels on one row, and
+              wrapping stacks them into two competing CTAs. */}
+          <span className="sm:hidden">Google</span>
+          <span className="hidden sm:inline">Sign in with Google</span>
+        </>
+      )}
     </button>
   );
 }
@@ -44,7 +55,7 @@ function PrivyConnectWallet({ fullWidth = false }: { fullWidth?: boolean }) {
     <button
       onClick={() => connectWallet()}
       className={`${fullWidth ? "w-full " : ""}px-4 py-2 text-scale-2 font-mono bg-signal text-signal-ink
-                 hover:bg-signal/90 transition-colors`}
+                 hover:bg-signal/90 transition-colors whitespace-nowrap`}
     >
       Connect Wallet
     </button>
@@ -115,7 +126,9 @@ export function WalletConnect() {
   const wc = connectors.find((c) => c.id === "walletConnect");
 
   return (
-    <div className="flex flex-wrap items-center justify-center gap-2">
+    // nowrap: wrapping put Connect Wallet and Google on separate lines on
+    // mobile, reading as two stacked competing CTAs.
+    <div className="flex flex-nowrap items-center justify-center gap-2">
       {privyMounted ? (
         <PrivyConnectWallet />
       ) : (
@@ -125,7 +138,7 @@ export function WalletConnect() {
               onClick={() => connect({ connector: injected })}
               disabled={isPending}
               className="px-4 py-2 text-scale-2 font-mono bg-signal text-signal-ink
-                         hover:bg-signal/90 transition-colors disabled:opacity-50"
+                         hover:bg-signal/90 transition-colors disabled:opacity-50 whitespace-nowrap"
             >
               {isPending ? "Connecting..." : "Connect Wallet"}
             </button>

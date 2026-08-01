@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { DocNav } from "@/components/DocNav";
 
 const GUIDES: { slug: string; title: string; description: string }[] = [
   { slug: "quickstart", title: "Quickstart", description: "Real curl commands to a settled payment, ~15-30s end to end." },
@@ -14,9 +13,7 @@ const GUIDES: { slug: string; title: string; description: string }[] = [
 
 export default function GuidesIndexPage() {
   return (
-    <div className="min-h-screen bg-bg">
-      <DocNav />
-      <main className="relative max-w-3xl mx-auto px-6 pt-28 pb-24">
+    <>
         <h1 className="text-3xl font-bold text-ink mb-2">Guides</h1>
         <p className="text-ink-dim mb-10">
           Real docs generated alongside the build — not written separately from what actually
@@ -26,7 +23,7 @@ export default function GuidesIndexPage() {
           {GUIDES.map((g) => (
             <Link
               key={g.slug}
-              href={`/guides/${g.slug}`}
+              href={`/docs/guides/${g.slug}`}
               className="block p-5 border border-border bg-surface transition-colors hover:border-signal/40"
             >
               <div className="font-mono text-sm text-ink mb-1">{g.title}</div>
@@ -34,7 +31,6 @@ export default function GuidesIndexPage() {
             </Link>
           ))}
         </div>
-      </main>
-    </div>
+    </>
   );
 }

@@ -3,7 +3,6 @@
 import { useState, useEffect } from "react";
 import { useAccount } from "wagmi";
 import { isAddress } from "viem";
-import { ConduitMark } from "@/components/Shared/Logo";
 import { Nav, MobileNav } from "@/components/Shared/Nav";
 import { AddressInput } from "@/components/SendFlow/AddressInput";
 import { AmountInput } from "@/components/SendFlow/AmountInput";
@@ -16,6 +15,14 @@ import type { Currency } from "@conduit/sdk";
 import { motion, AnimatePresence } from "framer-motion";
 import { useRequiredPayerAmount } from "@/lib/use-required-payer-amount";
 import { formatAmount } from "@/lib/format";
+import {
+  Hero,
+  Features,
+  HowItWorks,
+  WaitlistSection,
+  EcosystemBadge,
+  Footer,
+} from "@/components/Landing/LandingSections";
 
 type Step = "input" | "confirm";
 
@@ -47,26 +54,16 @@ export default function HomePage() {
     <div className="min-h-screen">
       <Nav />
 
-      <main className="max-w-lg mx-auto px-4 pt-24 pb-24">
-        {/* Hero */}
-        <div className="text-center mb-10">
-          <div className="flex justify-center mb-4">
-            <ConduitMark height={140} />
-          </div>
-          <p className="text-ink-dim mt-3 text-sm font-mono">
-            Accept any stablecoin, settle in yours
-          </p>
-          <div className="flex items-center justify-center gap-2 mt-2">
-            <span className="w-1.5 h-1.5 bg-signal animate-pulse" />
-            <span className="text-xs font-mono text-signal">
-              Chain ID 5042002 · Arc Testnet
-            </span>
-          </div>
-          {/* Scan-to-pay: the fastest path for someone standing in front of
-              a merchant's printed QR. */}
-          <div className="flex justify-center mt-5">
-            <ScanToPay />
-          </div>
+      {/* Landing hero — moved in from the former marketing site so the whole
+          product is one app: this page introduces Conduit AND lets a payer
+          act immediately, instead of being a separate site that links away. */}
+      <Hero />
+
+      <main id="send" className="max-w-lg mx-auto px-4 pt-4 pb-24 scroll-mt-20">
+        {/* Scan-to-pay: the fastest path for someone standing in front of
+            a merchant's printed QR. */}
+        <div className="flex justify-center mb-8">
+          <ScanToPay />
         </div>
 
         <AnimatePresence mode="wait">
@@ -184,6 +181,14 @@ export default function HomePage() {
           )}
         </AnimatePresence>
       </main>
+
+      {/* The rest of the former marketing site, below the working send card:
+          what Conduit is, how the pipe works, and the waitlist. */}
+      <Features />
+      <HowItWorks />
+      <WaitlistSection />
+      <EcosystemBadge />
+      <Footer />
 
       <MobileNav />
     </div>

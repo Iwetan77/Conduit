@@ -311,10 +311,10 @@ interface PaymentReceipt {
 
       <ul>
         <li>
-          <a href="/">Quickstart</a> — first payment in 5 minutes
+          <a href="/docs">Quickstart</a> — first payment in 5 minutes
         </li>
         <li>
-          <a href="/guides">Guides</a> — the B2B settlement API: errors, webhooks,
+          <a href="/docs/guides">Guides</a> — the B2B settlement API: errors, webhooks,
           currencies, FX timing
         </li>
       </ul>

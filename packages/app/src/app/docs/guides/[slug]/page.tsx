@@ -1,7 +1,6 @@
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { notFound } from "next/navigation";
-import { DocNav } from "@/components/DocNav";
 import { renderMarkdown } from "@/lib/markdown";
 
 // Repo-root docs/*.md — the same files GATE 0/4 generate and check, and the
@@ -24,9 +23,6 @@ export default async function GuidePage({ params }: { params: Promise<{ slug: st
   const source = readFileSync(path, "utf8");
 
   return (
-    <div className="min-h-screen bg-bg">
-      <DocNav />
-      <main className="relative max-w-3xl mx-auto px-6 pt-28 pb-24">{renderMarkdown(source)}</main>
-    </div>
+    <>{renderMarkdown(source)}</>
   );
 }

@@ -5,7 +5,6 @@ export const metadata: Metadata = {
   title: "Quickstart",
 };
 
-const APP_URL = process.env["NEXT_PUBLIC_APP_URL"] ?? "http://localhost:3000";
 
 export default function QuickstartPage() {
   return (
@@ -149,16 +148,16 @@ CCTP Domain:  26`}</code></pre>
 
       <ul>
         <li>
-          <a href="/reference">SDK Reference</a> — full API surface, every method and parameter
+          <a href="/docs/reference">SDK Reference</a> — full API surface, every method and parameter
         </li>
         <li>
-          <a href={`${APP_URL}/dashboard`} target="_blank" rel="noopener noreferrer">
+          <a href="/dashboard">
             Open the dashboard
           </a>{" "}
           — settlements, request payment, locations, developers, reconciliation
         </li>
         <li>
-          <Link href="/guides/quickstart">API quickstart</Link> — the actual
+          <Link href="/docs/guides/quickstart">API quickstart</Link> — the actual
           B2B settlement API this content predates; real curl to a settled payment
         </li>
       </ul>

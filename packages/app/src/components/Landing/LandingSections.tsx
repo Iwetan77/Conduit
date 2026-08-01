@@ -1,86 +1,11 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+// Landing-page sections, moved from the former packages/marketing app when
+// the three Next apps were folded into one. Only the links changed: docs and
+// dashboard are in-app routes now, not cross-origin URLs.
+import { useState } from 'react'
 import { motion } from 'framer-motion'
-import Image from 'next/image'
-import Link from 'next/link'
 
-// Local dev: docs runs on :3002 (see packages/docs' package.json script) —
-// `pnpm dev` at the repo root runs marketing/docs/app together via turbo.
-// Production falls back to the real subdomain.
-// NOTE: literal dot form — Next.js only inlines `process.env.NEXT_PUBLIC_X`
-// member expressions into browser bundles; bracket form reads as undefined.
-const DOCS_URL = process.env.NEXT_PUBLIC_DOCS_URL ?? 'http://localhost:3002'
-// The merchant dashboard (packages/app). Local dev: app runs on :3000.
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000'
-
-// ─────────────────────────────────────────────────────────────────────────────
-// NAV
-// ─────────────────────────────────────────────────────────────────────────────
-
-function Nav() {
-  const [scrolled, setScrolled] = useState(false)
-
-  useEffect(() => {
-    const fn = () => setScrolled(window.scrollY > 30)
-    window.addEventListener('scroll', fn, { passive: true })
-    return () => window.removeEventListener('scroll', fn)
-  }, [])
-
-  return (
-    <header
-      className="fixed top-0 left-0 right-0 z-50 transition-colors duration-300"
-      style={{
-        borderBottom: `1px solid ${scrolled ? 'var(--border)' : 'transparent'}`,
-        background: scrolled ? 'var(--bg)' : 'transparent',
-      }}
-    >
-      <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
-        <Link href="/" className="flex items-center">
-          <Image src="/CONDUIT-MAIN.png" alt="Conduit" height={44} width={140} style={{ height: 44, width: 'auto' }} priority />
-        </Link>
-
-        <nav className="hidden md:flex items-center gap-8">
-          {[
-            { label: 'Docs', href: DOCS_URL },
-            { label: 'Arc Ecosystem', href: 'https://arc.network' },
-          ].map(({ label, href }) => (
-            <a
-              key={href}
-              href={href}
-              className="font-mono text-[10px] uppercase tracking-[0.12em] text-ink-dim hover:text-signal transition-colors duration-200"
-            >
-              {label}
-            </a>
-          ))}
-          {/* The one action that matters: straight into the product. */}
-          <a
-            href={`${APP_URL}/dashboard`}
-            className="font-mono text-[10px] uppercase tracking-widest font-bold bg-signal text-signal-ink px-3 py-1.5 hover:bg-signal/90 transition-colors"
-          >
-            Dashboard →
-          </a>
-        </nav>
-
-        {/* Mobile: dashboard pill */}
-        <a
-          href={`${APP_URL}/dashboard`}
-          className="md:hidden font-mono text-[10px] uppercase tracking-widest bg-signal text-signal-ink px-3 py-1.5"
-        >
-          Dashboard →
-        </a>
-      </div>
-    </header>
-  )
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// WAITLIST FORM
-// ─────────────────────────────────────────────────────────────────────────────
-
-// To collect emails, replace YOUR_FORM_ID with your Formspree form ID.
-// Sign up free at formspree.io — create a form and paste the ID here.
-// Replace with your Formspree form ID from formspree.io/f/{id}
 const FORMSPREE_ID = 'mzdwlelo'
 
 function WaitlistForm() {
@@ -158,9 +83,12 @@ const wordVariant = {
   },
 }
 
-function Hero() {
+export function Hero() {
   return (
-    <section className="relative min-h-screen flex flex-col items-center justify-center text-center px-4 pt-24 pb-20">
+    // Deliberately NOT min-h-screen: the send card sits directly below and
+    // paying is the primary action, so the hero must not push it a full
+    // viewport down the page.
+    <section className="relative flex flex-col items-center justify-center text-center px-4 pt-28 pb-12">
       <motion.div
         className="flex flex-col items-center gap-0"
         initial={{ opacity: 0 }}
@@ -202,13 +130,13 @@ function Hero() {
         {/* Two doors, one product: payers send/scan, merchants run a dashboard. */}
         <div className="flex flex-wrap items-center justify-center gap-3 mb-8">
           <a
-            href={APP_URL}
+            href="#send"
             className="px-6 py-3 font-mono font-bold text-[12px] uppercase tracking-widest bg-signal text-signal-ink hover:bg-signal/90 transition-colors"
           >
             Send money →
           </a>
           <a
-            href={`${APP_URL}/dashboard`}
+            href="/dashboard"
             className="px-6 py-3 font-mono text-[12px] uppercase tracking-widest border border-border text-ink-dim hover:text-ink hover:border-ink-dim transition-colors"
           >
             Merchant dashboard →
@@ -219,7 +147,7 @@ function Hero() {
         <div className="flex flex-col items-center gap-4 mb-16 w-full">
           <WaitlistForm />
           <a
-            href={DOCS_URL}
+            href="/docs"
             className="font-mono text-[11px] text-ink-dim hover:text-signal transition-colors uppercase tracking-widest"
           >
             Read the docs →
@@ -237,12 +165,7 @@ function Hero() {
         </div>
       </motion.div>
 
-      {/* Scroll indicator — static, no ambient loop */}
-      <div className="absolute bottom-10 left-1/2 -translate-x-1/2 flex flex-col items-center gap-2">
-        <span className="font-mono text-[9px] uppercase tracking-widest text-ink-dim">scroll</span>
-        <div className="w-px h-10" style={{ background: 'linear-gradient(to bottom, var(--signal), transparent)' }} />
-      </div>
-    </section>
+</section>
   )
 }
 
@@ -393,14 +316,14 @@ function BuildPanel() {
         </div>
       </div>
 
-      <a href={DOCS_URL} className="font-mono text-[11px] text-signal hover:underline mt-auto">
+      <a href="/docs" className="font-mono text-[11px] text-signal hover:underline mt-auto">
         Read the docs →
       </a>
     </PanelShell>
   )
 }
 
-function Features() {
+export function Features() {
   return (
     <section className="relative z-10 w-full border-t border-b border-border">
       <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-3 divide-y md:divide-y-0 md:divide-x divide-border">
@@ -416,7 +339,7 @@ function Features() {
 // HOW IT WORKS — THE PIPE (static, no looping highlight cycle)
 // ─────────────────────────────────────────────────────────────────────────────
 
-function HowItWorks() {
+export function HowItWorks() {
   const nodes = ['Declaration', 'Quote', 'Route', 'Settle', 'Receipt']
 
   return (
@@ -469,7 +392,7 @@ function HowItWorks() {
 // WAITLIST SECTION (second CTA before footer)
 // ─────────────────────────────────────────────────────────────────────────────
 
-function WaitlistSection() {
+export function WaitlistSection() {
   return (
     <section className="relative z-10 py-32 px-4 border-t border-border text-center">
       <div className="max-w-xl mx-auto flex flex-col items-center gap-6">
@@ -494,7 +417,7 @@ function WaitlistSection() {
 // ECOSYSTEM BADGE
 // ─────────────────────────────────────────────────────────────────────────────
 
-function EcosystemBadge() {
+export function EcosystemBadge() {
   return (
     <section className="relative z-10 py-16 px-4 border-t border-border text-center">
       <div className="flex flex-col items-center gap-5">
@@ -528,7 +451,7 @@ function EcosystemBadge() {
 // FOOTER
 // ─────────────────────────────────────────────────────────────────────────────
 
-function Footer() {
+export function Footer() {
   return (
     <footer className="relative z-10 border-t border-border bg-bg px-6 py-14">
       <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between gap-10">
@@ -546,7 +469,7 @@ function Footer() {
 
         <div className="flex flex-col gap-2.5">
           {[
-            { label: 'Docs', href: DOCS_URL },
+            { label: 'Docs', href: '/docs' },
             { label: 'X / Twitter', href: 'https://x.com/conduit' },
             { label: 'Arc', href: 'https://arc.network' },
           ].map(({ label, href }) => (
@@ -566,23 +489,3 @@ function Footer() {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // PAGE
-// ─────────────────────────────────────────────────────────────────────────────
-
-export default function Page() {
-  return (
-    <>
-      {/* The grid is the only background layer — no orbs, no particles, no scanline. */}
-      <div className="conduit-grid" aria-hidden="true" />
-
-      <div className="relative z-10">
-        <Nav />
-        <Hero />
-        <Features />
-        <HowItWorks />
-        <WaitlistSection />
-        <EcosystemBadge />
-        <Footer />
-      </div>
-    </>
-  )
-}

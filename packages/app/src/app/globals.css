@@ -7,6 +7,9 @@
   /* Self-hosted via @fontsource (imported in layout.tsx) — was a next/font
      variable when the font came from Google. */
   --font-mono: "JetBrains Mono";
+  /* Docs prose (folded in from packages/docs) styles headings with
+     var(--font-anton); without this they'd silently fall back to sans-serif. */
+  --font-anton: "Anton";
 
   /* Graph-paper token set — engineer's grid, one accent, sharp corners.
      See CONDUIT design system spec. Same variable names/values must land
@@ -145,3 +148,23 @@ input[type="number"]::-webkit-outer-spin-button {
     display: block !important;
   }
 }
+
+
+/* ── Docs prose styles ──────────────────────────────────────────────
+   Moved verbatim from the former packages/docs globals.css when docs were
+   folded into this app. Scoped to .prose-conduit, so nothing else inherits. */
+/* Prose utilities */
+.prose-conduit h1 { font-family: var(--font-anton), sans-serif; font-size: 2.5rem; color: var(--ink); line-height: 1.1; margin-bottom: 1rem; letter-spacing: 0.01em; }
+.prose-conduit h2 { font-family: var(--font-anton), sans-serif; font-size: 1.5rem; color: var(--ink); margin-top: 2.5rem; margin-bottom: 0.75rem; letter-spacing: 0.01em; }
+.prose-conduit h3 { font-family: var(--font-mono), monospace; font-size: 0.85rem; color: var(--signal); text-transform: uppercase; letter-spacing: 0.12em; margin-top: 2rem; margin-bottom: 0.5rem; }
+.prose-conduit p  { color: var(--ink-dim); font-size: 0.9rem; line-height: 1.8; margin-bottom: 1rem; }
+.prose-conduit a  { color: var(--signal); text-decoration: none; }
+.prose-conduit a:hover { text-decoration: underline; }
+.prose-conduit code { font-family: var(--font-mono), monospace; font-size: 0.78rem; color: var(--signal); background: var(--surface); padding: 0.1em 0.35em; border-radius: 0; }
+.prose-conduit pre { background: var(--surface); border: 1px solid var(--border); border-radius: 0; padding: 1.25rem; overflow-x: auto; margin-bottom: 1.25rem; }
+.prose-conduit pre code { background: none; padding: 0; color: var(--ink); }
+.prose-conduit ul { list-style: none; padding: 0; margin-bottom: 1rem; }
+.prose-conduit ul li { padding-left: 1.2rem; position: relative; color: var(--ink-dim); font-size: 0.9rem; line-height: 1.8; }
+.prose-conduit ul li::before { content: '→'; position: absolute; left: 0; color: var(--signal); }
+.prose-conduit strong { color: var(--ink); font-weight: 600; }
+.prose-conduit hr { border: none; border-top: 1px solid var(--border); margin: 2rem 0; }

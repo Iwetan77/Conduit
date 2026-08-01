@@ -123,7 +123,6 @@ export function WalletConnect() {
   }
 
   const injected = connectors.find((c) => c.id === "injected" || c.type === "injected");
-  const wc = connectors.find((c) => c.id === "walletConnect");
 
   return (
     // nowrap: wrapping put Connect Wallet and Google on separate lines on
@@ -141,17 +140,6 @@ export function WalletConnect() {
                          hover:bg-signal/90 transition-colors disabled:opacity-50 whitespace-nowrap"
             >
               {isPending ? "Connecting..." : "Connect Wallet"}
-            </button>
-          )}
-          {wc && (
-            <button
-              onClick={() => connect({ connector: wc })}
-              disabled={isPending}
-              className="px-3 py-2 text-scale-2 font-mono border border-border
-                         text-ink-dim hover:text-ink hover:border-ink-dim
-                         transition-colors disabled:opacity-50"
-            >
-              WalletConnect
             </button>
           )}
         </>

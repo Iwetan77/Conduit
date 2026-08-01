@@ -23,5 +23,6 @@
     "turbo": "^2.0.0",
     "typescript": "^5.4.0",
     "tsx": "^4.19.0"
-  }
+  },
+  "license": "SEE LICENSE IN LICENSE"
 }

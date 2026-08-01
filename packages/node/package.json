@@ -1,7 +1,7 @@
 {
   "name": "@conduit/node",
   "version": "0.1.0",
-  "description": "Server-side Node SDK for the Conduit API (packages/api). Not the on-chain/browser SDK — see @conduit/sdk for that.",
+  "description": "Server-side Node SDK for the Conduit API (packages/api). Not the on-chain/browser SDK \u2014 see @conduit/sdk for that.",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
   "types": "./dist/index.d.ts",
@@ -12,7 +12,9 @@
       "require": "./dist/index.js"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsup src/index.ts --format cjs,esm --dts --clean",
     "dev": "tsup src/index.ts --format cjs,esm --dts --watch",
@@ -26,5 +28,7 @@
     "tsup": "^8.0.0",
     "typescript": "^5.4.0",
     "vitest": "^1.6.0"
-  }
+  },
+  "license": "SEE LICENSE IN LICENSE",
+  "private": true
 }

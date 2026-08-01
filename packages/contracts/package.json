@@ -11,5 +11,6 @@
   },
   "dependencies": {
     "ethers": "^6.11.0"
-  }
+  },
+  "license": "SEE LICENSE IN LICENSE"
 }

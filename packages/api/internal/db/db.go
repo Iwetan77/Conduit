@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/golang-migrate/migrate/v4"
 	_ "github.com/golang-migrate/migrate/v4/database/postgres"
@@ -14,7 +15,26 @@ import (
 // pgtype.Numeric — callers must convert through our internal/models amount
 // helpers rather than reading numbers directly, or precision silently drops.
 func Connect(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
-	pool, err := pgxpool.New(ctx, databaseURL)
+	cfg, err := pgxpool.ParseConfig(databaseURL)
+	if err != nil {
+		return nil, fmt.Errorf("db: parse config: %w", err)
+	}
+	// Tuned for a serverless Postgres that bills for compute uptime (Neon
+	// scales to zero after ~5 minutes idle, and the free plan is capped at
+	// 100 CU-hours/month -- exceeding it suspends the database until the
+	// next billing month). pgx's 30-minute default idle time would hold a
+	// connection open long past that window and keep compute billing, so
+	// idle connections are dropped well inside it. MinConns stays 0 so an
+	// idle API holds nothing open at all.
+	cfg.MaxConnIdleTime = 3 * time.Minute
+	cfg.MaxConnLifetime = 30 * time.Minute
+	cfg.HealthCheckPeriod = 1 * time.Minute
+	cfg.MinConns = 0
+	// Render's free instance is small; an unbounded pool would let a burst
+	// open more server-side connections than either side handles well.
+	cfg.MaxConns = 10
+
+	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("db: connect: %w", err)
 	}

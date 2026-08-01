@@ -65,8 +65,19 @@ export function CrossChainBridge({ intentId, intent }: CrossChainBridgeProps) {
   // reopened the tab after closing it mid-bridge), pick up polling
   // immediately instead of showing the connect/balance screen again.
   useEffect(() => {
+    let cancelled = false;
+    // Per-intent state must not survive an intent change: bridge phase and
+    // status from one payment rendering on another is the same class of bug
+    // as showing the wrong merchant.
+    if (pollRef.current) clearInterval(pollRef.current);
+    setBridgeStatus(null);
+    setPayerAddress("");
+    setAvailableBalance(null);
+    setError("");
+
     getBridgeStatus(intentId)
       .then((status) => {
+        if (cancelled) return;
         setBridgeStatus(status);
         if (status.state !== "failed") {
           setPhase("bridging");
@@ -76,6 +87,7 @@ export function CrossChainBridge({ intentId, intent }: CrossChainBridgeProps) {
       .catch(() => {
         // No transfer yet -- expected for a fresh payment link.
       });
+    return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [intentId]);
 

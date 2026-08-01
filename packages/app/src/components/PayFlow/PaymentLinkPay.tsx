@@ -41,16 +41,34 @@ export function PaymentLinkPay({ linkId }: PaymentLinkPayProps) {
   const [busy, setBusy] = useState(false);
   const [intentId, setIntentId] = useState<string | null>(null);
 
+  // Every piece of per-link state resets when linkId changes. Without this,
+  // opening a second payment link showed the FIRST link's merchant name and
+  // prefilled amount, and — most seriously — a stale `intentId` meant the
+  // payer could be handed the previous link's settlement intent to pay.
+  // The cancelled flag additionally stops a slow response for the old link
+  // from overwriting the new one.
   useEffect(() => {
+    let cancelled = false;
+    setLink(null);
+    setError("");
+    setAmount("");
+    setPayerReference("");
+    setIntentId(null);
+    setShowAddress(false);
+
     getPublicPaymentLink(linkId)
       .then((l) => {
+        if (cancelled) return;
         setLink(l);
         document.title = `Pay ${l.display_name} · Conduit`;
         if (l.amount_mode === "open_with_suggested" && l.amount) {
           setAmount(formatAmountRaw(BigInt(l.amount), currencyDecimals(isoToToken(l.settle_currency))));
         }
       })
-      .catch(() => setError("This payment link was not found or is no longer available."));
+      .catch(() => {
+        if (!cancelled) setError("This payment link was not found or is no longer available.");
+      });
+    return () => { cancelled = true; };
   }, [linkId]);
 
   const handlePay = async (e: React.FormEvent) => {

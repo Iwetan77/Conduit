@@ -25,11 +25,19 @@ interface PageParams {
 function useRecipientTitle(intentId: string) {
   useEffect(() => {
     if (!intentId) return;
+    let cancelled = false;
+    const previousTitle = document.title;
     getPublicSettlementIntent(intentId)
       .then((intent) => {
-        document.title = `Pay ${intent.display_name} · Conduit`;
+        if (!cancelled) document.title = `Pay ${intent.display_name} · Conduit`;
       })
       .catch(() => {});
+    // Without this the browser tab kept showing the previous merchant's
+    // name after navigating away from their invoice.
+    return () => {
+      cancelled = true;
+      document.title = previousTitle;
+    };
   }, [intentId]);
 }
 
@@ -54,9 +62,9 @@ export default function PayPage({ params }: PageParams) {
         </header>
         <main className="flex-1 max-w-sm mx-auto w-full px-4 py-8 space-y-8">
           {isPaymentLink ? (
-            <PaymentLinkPay linkId={declarationId} />
+            <PaymentLinkPay key={declarationId} linkId={declarationId} />
           ) : (
-            <SettlementIntentPay intentId={declarationId} />
+            <SettlementIntentPay key={declarationId} intentId={declarationId} />
           )}
         </main>
         <footer className="px-6 py-4 border-t border-border flex justify-center">

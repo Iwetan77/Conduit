@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { usePrivy, useLogin, useCreateWallet } from "@privy-io/react-auth";
+import { useQueryClient } from "@tanstack/react-query";
 import { clearSessionToken, createAccountFromPrivy, setSessionToken } from "@/lib/conduit-api";
 import { SETTLE_CURRENCIES, currencyFlag } from "@/lib/currencies";
 
@@ -170,6 +171,7 @@ function AccountGate({ onReady }: { onReady: () => void }) {
 function DashboardShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { ready, authenticated, logout, getAccessToken } = usePrivy();
+  const queryClient = useQueryClient();
   const [accountReady, setAccountReady] = useState(false);
   const refreshing = useRef(false);
 
@@ -205,6 +207,13 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
 
   const signOut = async () => {
     clearSessionToken();
+    // Drop every cached query too. Without this, a second merchant signing
+    // in on the same machine could be served the previous merchant's cached
+    // data before their own request resolves.
+    queryClient.clear();
+    try {
+      localStorage.removeItem("conduit.lastMerchant");
+    } catch {}
     await logout();
   };
 

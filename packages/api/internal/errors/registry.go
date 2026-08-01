@@ -4,7 +4,11 @@
 // must translate through Lookup() or E() before writing a response.
 package errors
 
-import "net/http"
+import (
+	"net/http"
+	"os"
+	"strings"
+)
 
 type Code string
 
@@ -77,6 +81,18 @@ func (e *APIError) Error() string { return e.Message }
 // E constructs an APIError from a registered code. Panics on an unregistered
 // code — that's a programmer error caught at development time, not something
 // that should ever reach a client as a 500 with no explanation.
+// docsBaseURL is where error codes are documented. Docs now live inside the
+// app at /docs (packages/docs was folded in), so the old hardcoded
+// docs.conduit.xyz was a dead link on every single error response. Set
+// CONDUIT_DOCS_BASE_URL to the deployment's docs root; the default matches
+// local development.
+var docsBaseURL = func() string {
+	if v := strings.TrimRight(strings.TrimSpace(os.Getenv("CONDUIT_DOCS_BASE_URL")), "/"); v != "" {
+		return v
+	}
+	return "http://localhost:3000/docs"
+}()
+
 func E(code Code, param string) *APIError {
 	entry, ok := registry[code]
 	if !ok {
@@ -87,7 +103,7 @@ func E(code Code, param string) *APIError {
 		Type:    "conduit_error",
 		Message: entry.message,
 		Param:   param,
-		DocURL:  "https://docs.conduit.xyz/errors/" + string(code),
+		DocURL:  docsBaseURL + "/errors/" + string(code),
 		Status:  entry.status,
 	}
 }

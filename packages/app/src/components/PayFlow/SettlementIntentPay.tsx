@@ -27,10 +27,21 @@ export function SettlementIntentPay({ intentId }: SettlementIntentPayProps) {
   const [error, setError] = useState("");
   const [showAddress, setShowAddress] = useState(false);
 
+  // Two separate leaks fixed here, both of which showed one invoice's data
+  // on another invoice's page:
+  //   1. `intent` was not cleared when intentId changed, so the previous
+  //      merchant's name and amount rendered until the new fetch resolved.
+  //   2. A slow response for the OLD intent could resolve after the new one
+  //      and overwrite it, leaving the wrong merchant on screen for good.
+  // Reset synchronously, then ignore any response that is no longer current.
   useEffect(() => {
+    let cancelled = false;
+    setIntent(null);
+    setError("");
     getPublicSettlementIntent(intentId)
-      .then(setIntent)
-      .catch(() => setError("This payment link was not found or has expired."));
+      .then((i) => { if (!cancelled) setIntent(i); })
+      .catch(() => { if (!cancelled) setError("This payment link was not found or has expired."); });
+    return () => { cancelled = true; };
   }, [intentId]);
 
   if (error) {

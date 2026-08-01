@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { TokenIcon as Web3TokenIcon } from "@web3icons/react/dynamic";
 import type { Currency } from "@conduit/sdk";
 import { CURRENCIES } from "@conduit/sdk";
 // Real SVG flags — flag EMOJI render as bare letters ("BR") on Windows
@@ -25,6 +24,40 @@ const FLAG_TOKENS: Record<string, FlagComponent> = {
   ZARU: ZA,
   KRW1: KR,
 };
+
+// @web3icons/react was a 116 MB dependency serving exactly TWO icons here:
+// USDC and EURC. Every other currency renders a country flag (below), so the
+// package was almost entirely dead weight in the module graph — it dominated
+// both bundle size and compile time. These two inline marks replace it.
+// Circular and currentColor-driven, matching the previous `mono` variant.
+function CoinMark({ glyph, px }: { glyph: string; px: number }) {
+  return (
+    <svg
+      width={px}
+      height={px}
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-hidden="true"
+      className="shrink-0"
+    >
+      <circle cx="12" cy="12" r="11" stroke="currentColor" strokeWidth="1.5" opacity="0.5" />
+      <text
+        x="12"
+        y="12"
+        textAnchor="middle"
+        dominantBaseline="central"
+        fill="currentColor"
+        fontSize="13"
+        fontWeight="600"
+        fontFamily="var(--font-mono), ui-monospace, monospace"
+      >
+        {glyph}
+      </text>
+    </svg>
+  );
+}
+
+const COIN_GLYPHS: Record<string, string> = { USDC: "$", EURC: "€" };
 
 function MonogramFallback({ symbol, px }: { symbol: string; px: number }) {
   return (
@@ -57,15 +90,9 @@ export function TokenIcon({ currency, px }: { currency: Currency; px: number }) 
       </span>
     );
   }
-  return (
-    <Web3TokenIcon
-      symbol={currency}
-      variant="mono"
-      size={px}
-      color="currentColor"
-      fallback={<MonogramFallback symbol={currency} px={px} />}
-    />
-  );
+  const glyph = COIN_GLYPHS[currency];
+  if (glyph) return <CoinMark glyph={glyph} px={px} />;
+  return <MonogramFallback symbol={currency} px={px} />;
 }
 
 export function TokenBadge({ currency, size = "md" }: TokenBadgeProps) {

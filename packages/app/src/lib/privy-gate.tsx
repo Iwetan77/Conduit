@@ -36,6 +36,21 @@ export function requestGoogleLogin() {
   window.dispatchEvent(new Event(GOOGLE_LOGIN_EVENT));
 }
 
+// True when we've just been redirected back from an OAuth provider. Privy's
+// initOAuth() sends the browser to Google and returns to the app with these
+// query params; the Privy stack MUST be mounted for that callback to be
+// consumed, or the sign-in silently does nothing. On a first-ever login
+// there is no privy: localStorage key yet and the sessionStorage intent flag
+// is already spent, so this is the only signal that a login is in flight.
+export function hasOAuthCallback(): boolean {
+  try {
+    const q = new URLSearchParams(window.location.search);
+    return q.has("privy_oauth_code") || q.has("privy_oauth_state");
+  } catch {
+    return false;
+  }
+}
+
 // Heuristic for "this browser has a Privy session worth restoring" — Privy
 // persists its auth state under privy: keys in localStorage.
 export function hasPrivySession(): boolean {

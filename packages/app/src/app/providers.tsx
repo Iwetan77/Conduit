@@ -9,6 +9,7 @@ import { wagmiConfig } from "@/lib/wagmi";
 import {
   GOOGLE_LOGIN_EVENT,
   PrivyGateContext,
+  hasOAuthCallback,
   hasPrivySession,
 } from "@/lib/privy-gate";
 
@@ -36,7 +37,10 @@ export function Providers({ children }: { children: React.ReactNode }) {
   const requestMount = useCallback(() => setWantPrivy(true), []);
 
   useEffect(() => {
-    if (hasPrivySession()) setWantPrivy(true);
+    // hasOAuthCallback: we're returning from Google. Without this the stack
+    // stays unmounted, the callback is never consumed, and Google sign-in
+    // appears to do nothing on a first login.
+    if (hasPrivySession() || hasOAuthCallback()) setWantPrivy(true);
     const onLoginRequest = () => setWantPrivy(true);
     window.addEventListener(GOOGLE_LOGIN_EVENT, onLoginRequest);
     return () => window.removeEventListener(GOOGLE_LOGIN_EVENT, onLoginRequest);

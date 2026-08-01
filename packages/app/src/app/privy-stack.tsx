@@ -9,7 +9,7 @@ import {
   createConfig as createPrivyWagmiConfig,
 } from "@privy-io/wagmi";
 import { wagmiConfigParams, arcTestnet } from "@/lib/wagmi";
-import { GOOGLE_LOGIN_EVENT, GOOGLE_LOGIN_FLAG } from "@/lib/privy-gate";
+import { GOOGLE_LOGIN_EVENT, GOOGLE_LOGIN_FLAG, hasOAuthCallback } from "@/lib/privy-gate";
 
 // Privy-synced wagmi config: same chains/connectors as the plain one, but
 // Privy-managed wallets (Google-login embedded wallets included) are synced
@@ -64,6 +64,9 @@ function StartGoogleOAuth() {
 
   useEffect(() => {
     const start = () => {
+      // Never restart OAuth while consuming a callback — that would bounce
+      // the user back to Google in a loop.
+      if (hasOAuthCallback()) return;
       try {
         sessionStorage.removeItem(GOOGLE_LOGIN_FLAG);
       } catch {}

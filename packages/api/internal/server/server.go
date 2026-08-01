@@ -8,6 +8,7 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -66,6 +67,13 @@ func New(cfg Config) http.Handler {
 	apiKeysH := &handlers.ApiKeys{Pool: cfg.Pool}
 	intentsH := &handlers.SettlementIntents{Pool: cfg.Pool, StableFX: stableFX, AppBaseURL: cfg.AppBaseURL, Webhooks: dispatcher}
 	currenciesH := &handlers.Currencies{}
+	// Server-side balance reads with a short cache. Keeps N browsers from
+	// each fanning out their own RPC calls and tripping Arc's rate limiter.
+	arcRPCForBalances := cfg.ArcRPC
+	if arcRPCForBalances == "" {
+		arcRPCForBalances = "https://rpc.testnet.arc.network"
+	}
+	balancesH := &handlers.Balances{ArcRPC: arcRPCForBalances}
 	webhookEndpointsH := &handlers.WebhookEndpoints{Pool: cfg.Pool, Dispatcher: dispatcher}
 	balanceTxH := &handlers.BalanceTransactions{Pool: cfg.Pool}
 	settlementsH := &handlers.Settlements{Pool: cfg.Pool}
@@ -86,8 +94,22 @@ func New(cfg Config) http.Handler {
 	// product with no cookie-based auth to leak (API keys are bearer tokens
 	// in a header, never sent implicitly) -- tighten to an explicit
 	// allowlist before any mainnet/production deployment.
+	// Explicit allowlist when CONDUIT_ALLOWED_ORIGINS is set (comma-separated,
+	// e.g. "https://conduit.vercel.app"); wildcard only as the local/testnet
+	// default. Bearer tokens are sent in a header and AllowCredentials is
+	// false, so a wildcard leaks no ambient credentials — but a public
+	// deployment should still name its origins rather than accept every site.
+	allowedOrigins := []string{"*"}
+	if raw := strings.TrimSpace(os.Getenv("CONDUIT_ALLOWED_ORIGINS")); raw != "" {
+		allowedOrigins = nil
+		for _, o := range strings.Split(raw, ",") {
+			if o = strings.TrimSpace(o); o != "" {
+				allowedOrigins = append(allowedOrigins, o)
+			}
+		}
+	}
 	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   []string{"*"},
+		AllowedOrigins:   allowedOrigins,
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Authorization", "Content-Type", "Idempotency-Key", "Conduit-Account"},
 		AllowCredentials: false,
@@ -104,6 +126,8 @@ func New(cfg Config) http.Handler {
 		// "Conduit-Account" header flow) still require an authenticated parent
 		// account key — this only covers creating a brand new top-level account.
 		r.Get("/currencies", currenciesH.List)
+		// Public: a payer has no API key, and this is read-only chain data.
+		r.Get("/balances", balancesH.List)
 		r.Post("/accounts", accountsH.Create)
 		// Privy-authenticated account bootstrap: verifies the bearer token
 		// itself (not gated by auth.Middleware, since a brand-new Privy user

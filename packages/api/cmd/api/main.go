@@ -88,7 +88,15 @@ func loadStableFXKey() string {
 	return ""
 }
 
+// runtime.Caller returns the path this file had at BUILD time, which does
+// not exist inside a container image — migrations would fail to load on any
+// real deployment. CONDUIT_MIGRATIONS_DIR is the deployment override (the
+// Dockerfile copies migrations to /migrations); the source-relative path
+// stays as the local-development default.
 func findMigrationsDir() string {
+	if dir := strings.TrimSpace(os.Getenv("CONDUIT_MIGRATIONS_DIR")); dir != "" {
+		return dir
+	}
 	_, thisFile, _, _ := runtime.Caller(0)
 	return filepath.Join(filepath.Dir(thisFile), "..", "..", "migrations")
 }

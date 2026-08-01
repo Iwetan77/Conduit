@@ -462,3 +462,24 @@ export interface PayLinkResponse {
 export function payPaymentLink(id: string, body: { amount?: string; payer_reference?: string }) {
   return request<PayLinkResponse>(`/v1/payment_links/${id}/pay`, { method: "POST", body });
 }
+
+// ── Balances ────────────────────────────────────────────────────────────────
+
+export interface BalanceRow {
+  iso: string;
+  symbol: string;
+  token: string;
+  decimals: number;
+  amount: string; // integer minor units
+}
+
+// Public (no auth): a payer has no API key. Reading balances through the API
+// instead of from the browser is what keeps Arc's public RPC from being hit
+// once per visitor — the server does one cached Multicall3 read and serves
+// everyone from it.
+export async function getBalances(address: string): Promise<BalanceRow[]> {
+  const res = await fetch(`${API_BASE}/v1/balances?address=${address}`);
+  if (!res.ok) throw new Error(`balances: ${res.status}`);
+  const body = (await res.json()) as { data: BalanceRow[] };
+  return body.data;
+}

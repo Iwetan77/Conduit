@@ -2,14 +2,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useAccount, useDisconnect, useChainId, useSwitchChain, useReadContracts } from "wagmi";
-import { keepPreviousData } from "@tanstack/react-query";
+import { useAccount, useDisconnect, useChainId, useSwitchChain } from "wagmi";
 import { useEffect, useRef, useState } from "react";
 import { CURRENCIES, type Currency } from "@conduit/sdk";
 import { Logo } from "./Logo";
 import { TokenIcon } from "./TokenBadge";
 import { WalletConnect } from "./WalletConnect";
 import { arcTestnet } from "@/lib/wagmi";
+import { useBalances } from "@/lib/use-balances";
 import { shortenAddress } from "@/lib/format";
 
 // Public payer-side nav. The merchant side is entered from the landing
@@ -30,16 +30,6 @@ function formatBalance(raw: bigint | undefined, decimals: number): string {
   return `${whole}.${frac}`;
 }
 
-const ERC20_BALANCE_ABI = [
-  {
-    name: "balanceOf",
-    type: "function",
-    stateMutability: "view",
-    inputs: [{ name: "account", type: "address" }],
-    outputs: [{ name: "", type: "uint256" }],
-  },
-] as const;
-
 const TOKEN_LIST = Object.keys(CURRENCIES) as Currency[];
 
 function WalletMenu({ address }: { address: `0x${string}` }) {
@@ -48,38 +38,16 @@ function WalletMenu({ address }: { address: `0x${string}` }) {
   const ref = useRef<HTMLDivElement>(null);
   const { disconnect } = useDisconnect();
 
-  // One multicall over every registered stablecoin. Balances are SPLIT per
-  // token on purpose: USDC and EURC are different assets — a "unified"
-  // total would need a live FX rate and imply fungibility that doesn't
-  // exist at pay time. (wagmi v2 removed useBalance's `token:` param, which
-  // is why the old per-token useBalance calls always showed "—".)
-  const { data: balanceData } = useReadContracts({
-    contracts: TOKEN_LIST.map((c) => ({
-      address: CURRENCIES[c].token as `0x${string}`,
-      abi: ERC20_BALANCE_ABI,
-      functionName: "balanceOf",
-      args: [address],
-    })),
-    query: {
-      enabled: open,
-      refetchInterval: 10000,
-      // Arc's public RPC rate-limits; retry and keep the last good data so
-      // a single failed refetch doesn't make real balances vanish.
-      retry: 3,
-      retryDelay: (attempt: number) => 500 * 2 ** attempt,
-      placeholderData: keepPreviousData,
-    },
-  });
+  // Balances come from the Conduit API's cached endpoint (one server-side
+  // Multicall3 read shared by every visitor), not from this browser. Split
+  // per token on purpose: USDC and EURC are different assets, so a "unified"
+  // total would need a live FX rate and imply a fungibility that doesn't
+  // exist at pay time.
+  const { balances, settled } = useBalances(address, open);
 
-  const rows = TOKEN_LIST.map((currency, i) => ({
-    currency,
-    // undefined = read failed/unknown → rendered as "—" (USDC row only).
-    raw: balanceData?.[i]?.status === "success" ? (balanceData[i].result as bigint) : undefined,
-  }));
-  const held = rows.filter(
+  const held = TOKEN_LIST.map((currency) => ({ currency, raw: balances[currency] })).filter(
     // USDC (the hub currency) always shows so the menu never looks empty;
-    // every other row appears only with a confirmed non-zero balance —
-    // zero and unknown rows are just noise in a wallet menu.
+    // every other row needs a confirmed non-zero balance.
     (b) => b.currency === "USDC" || (b.raw !== undefined && b.raw > 0n)
   );
 
@@ -148,7 +116,7 @@ function WalletMenu({ address }: { address: `0x${string}` }) {
                   <span className="text-scale-1 text-ink-dim font-mono">{currency}</span>
                 </div>
                 <span className="text-scale-2 font-mono text-ink">
-                  {formatBalance(raw, CURRENCIES[currency].decimals)}
+                  {settled || raw !== undefined ? formatBalance(raw ?? 0n, CURRENCIES[currency].decimals) : "—"}
                 </span>
               </div>
             ))}

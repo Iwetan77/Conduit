@@ -3,7 +3,7 @@
 // intent state (spec Phase 3 preamble). The only on-chain touch allowed from
 // the app is the payer signing/submitting a transaction at checkout.
 
-const API_BASE = process.env["NEXT_PUBLIC_CONDUIT_API_URL"] ?? "http://localhost:8080";
+const API_BASE = process.env.NEXT_PUBLIC_CONDUIT_API_URL ?? "http://localhost:8080";
 const STORAGE_KEY = "conduit_dashboard_session_token";
 
 // Bearer token used for dashboard requests. Holds either a Privy access

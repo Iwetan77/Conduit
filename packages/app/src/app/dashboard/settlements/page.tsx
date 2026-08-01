@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { listSettlements, type Settlement, ConduitApiError } from "@/lib/conduit-api";
 import { formatDate, shortenAddress } from "@/lib/format";
 
-const EXPLORER = process.env["NEXT_PUBLIC_EXPLORER"] ?? "https://testnet.arcscan.app";
+const EXPLORER = process.env.NEXT_PUBLIC_EXPLORER ?? "https://testnet.arcscan.app";
 
 function formatMinor(amount: string, currency: string): string {
   // Settlement rows carry pre-formatted decimal strings from the API (Postgres

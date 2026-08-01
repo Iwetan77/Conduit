@@ -124,7 +124,7 @@ function BusinessIdentity() {
   );
 }
 
-const SETTLEMENT_PREFERENCE_REGISTRY = process.env["NEXT_PUBLIC_SETTLEMENT_PREFERENCE_REGISTRY"] as `0x${string}` | undefined;
+const SETTLEMENT_PREFERENCE_REGISTRY = process.env.NEXT_PUBLIC_SETTLEMENT_PREFERENCE_REGISTRY as `0x${string}` | undefined;
 
 const PREF_REGISTRY_ABI = [
   "function setPreference(address token) external",

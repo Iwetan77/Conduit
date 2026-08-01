@@ -1,0 +1,44 @@
+# Render Blueprint for the Conduit settlement API.
+#
+# Postgres is NOT declared here on purpose: Render's free Postgres expires
+# and is deleted after 30 days. Use Neon's free tier instead (no expiry) and
+# paste its connection string into DATABASE_URL below.
+#
+# The app (Next.js) deploys to Vercel separately — see DEPLOY.md.
+services:
+  - type: web
+    name: conduit-api
+    runtime: docker
+    plan: free
+    # Build only the Go module, not the whole monorepo.
+    dockerfilePath: ./packages/api/Dockerfile
+    dockerContext: ./packages/api
+    healthCheckPath: /healthz
+    envVars:
+      # ── Required ──────────────────────────────────────────────────────
+      # Neon connection string. Must include ?sslmode=require.
+      - key: DATABASE_URL
+        sync: false
+      # Circle StableFX sandbox key.
+      - key: STABLEFX_API_KEY
+        sync: false
+
+      # ── Strongly recommended ──────────────────────────────────────────
+      # CORS allowlist. Unset means wildcard: any site could call this API
+      # from a visitor's browser. Set to the Vercel origin.
+      - key: CONDUIT_ALLOWED_ORIGINS
+        sync: false
+      # Public app origin, used to build hosted_url on payment links. Get
+      # this wrong and every generated link/QR points at the wrong host.
+      - key: CONDUIT_APP_BASE_URL
+        sync: false
+
+      # ── Optional: merchant login (both required, or neither) ───────────
+      - key: PRIVY_APP_ID
+        sync: false
+      - key: PRIVY_VERIFICATION_KEY
+        sync: false
+
+      # ── Optional: cross-chain funding (signs only, holds no gas) ───────
+      - key: ARC_RELAYER_KEY
+        sync: false

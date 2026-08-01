@@ -73,15 +73,14 @@ function WalletMenu({ address }: { address: `0x${string}` }) {
 
   const rows = TOKEN_LIST.map((currency, i) => ({
     currency,
-    // undefined = read failed/unknown → rendered as "—", never dropped.
+    // undefined = read failed/unknown → rendered as "—" (USDC row only).
     raw: balanceData?.[i]?.status === "success" ? (balanceData[i].result as bigint) : undefined,
   }));
-  const anyKnown = rows.some((b) => b.raw !== undefined);
   const held = rows.filter(
-    // Always show USDC (the hub currency) so the menu never looks empty.
-    // Once at least one read succeeded, also keep held currencies and the
-    // ones still unknown (shown as "—") — never silently drop a balance.
-    (b) => b.currency === "USDC" || (anyKnown && (b.raw === undefined || b.raw > 0n))
+    // USDC (the hub currency) always shows so the menu never looks empty;
+    // every other row appears only with a confirmed non-zero balance —
+    // zero and unknown rows are just noise in a wallet menu.
+    (b) => b.currency === "USDC" || (b.raw !== undefined && b.raw > 0n)
   );
 
   const copyAddress = async () => {

@@ -192,11 +192,28 @@ function Hero() {
           </div>
         </motion.h1>
 
-        {/* Sub */}
-        <p className="font-body text-[1rem] text-ink-dim max-w-[520px] leading-[1.75] mb-10">
-          Accept any stablecoin, settle in yours.{' '}
-          Conduit routes and settles B2B payments atomically, in under a second.
+        {/* Sub — honest: "atomic, sub-second" is the DIRECT path only. */}
+        <p className="font-body text-[1rem] text-ink-dim max-w-[560px] leading-[1.75] mb-10">
+          Accept any stablecoin, settle in yours. Direct payments settle on Arc in about a
+          second; cross-currency payments route through Circle StableFX with real, live
+          progress — never a fake spinner.
         </p>
+
+        {/* Two doors, one product: payers send/scan, merchants run a dashboard. */}
+        <div className="flex flex-wrap items-center justify-center gap-3 mb-8">
+          <a
+            href={APP_URL}
+            className="px-6 py-3 font-mono font-bold text-[12px] uppercase tracking-widest bg-signal text-signal-ink hover:bg-signal/90 transition-colors"
+          >
+            Send money →
+          </a>
+          <a
+            href={`${APP_URL}/dashboard`}
+            className="px-6 py-3 font-mono text-[12px] uppercase tracking-widest border border-border text-ink-dim hover:text-ink hover:border-ink-dim transition-colors"
+          >
+            Merchant dashboard →
+          </a>
+        </div>
 
         {/* Waitlist form */}
         <div className="flex flex-col items-center gap-4 mb-16 w-full">
@@ -212,8 +229,8 @@ function Hero() {
         {/* Stats */}
         <div className="flex items-stretch flex-wrap justify-center">
           {[
-            { value: '<1s', label: 'Settlement Time' },
-            { value: '1', label: 'Instruction' },
+            { value: '<1s', label: 'Direct Settlement' },
+            { value: '2', label: 'Surfaces, One Engine' },
             { value: '9', label: 'Currencies' },
             { value: '0', label: 'Stuck Funds' },
           ].map(s => <StatPill key={s.value} {...s} />)}
@@ -264,11 +281,12 @@ function SendPanel() {
   return (
     <PanelShell>
       <div className="space-y-2">
-        <PanelLabel>For Senders</PanelLabel>
-        <PanelTitle>Direct Send</PanelTitle>
+        <PanelLabel>For Payers</PanelLabel>
+        <PanelTitle>Send &amp; Scan to Pay</PanelTitle>
         <PanelDesc>
-          Paste any wallet address. Pick the currency they should receive. Conduit finds the best
-          route and settles atomically — even if you&apos;re holding a completely different stablecoin.
+          Connect a wallet — or just sign in with Google and get one. Paste an address or scan a
+          merchant&apos;s QR, and pay from whatever stablecoin you actually hold; Conduit routes the
+          conversion so the other side receives exactly the currency they asked for.
         </PanelDesc>
       </div>
 
@@ -300,11 +318,12 @@ function ReceivePanel() {
   return (
     <PanelShell>
       <div className="space-y-2">
-        <PanelLabel>For Creators &amp; Businesses</PanelLabel>
-        <PanelTitle>Links &amp; QR Codes</PanelTitle>
+        <PanelLabel>For Merchants</PanelLabel>
+        <PanelTitle>Dashboard, Links &amp; QR Codes</PanelTitle>
         <PanelDesc>
-          Create a payment link or print-ready QR code. Share it anywhere. Anyone pays in whatever
-          stablecoin they hold — you receive exactly what you asked for.
+          Sign in, set your settle currency once, and issue payment links and print-ready QR codes
+          with real policy — fixed or open amounts, expiry, single-use or reusable, voidable.
+          Payers need no account; you receive exactly what you asked for.
         </PanelDesc>
       </div>
 
@@ -421,10 +440,12 @@ function HowItWorks() {
           </p>
           <p>
             A declaration says what the recipient wants. Conduit&apos;s routing engine figures out how to
-            get there from whatever the sender holds. The conversion, the route selection, the atomic
-            settlement — all happen inside the pipe.
+            get there from whatever the sender holds. Conversion, route selection, settlement —
+            all happen inside the pipe, with real progress shown at every step.
           </p>
-          <p className="text-ink-dim">Built on Arc. Powered by Circle StableFX.</p>
+          <p className="text-ink-dim">
+            Built on Arc. FX by Circle StableFX. Cross-chain USDC funding by Circle Gateway.
+          </p>
         </div>
 
         <div className="flex items-center overflow-x-auto pb-4">

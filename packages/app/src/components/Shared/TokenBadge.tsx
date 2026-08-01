@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef, useState } from "react";
 import { TokenIcon as Web3TokenIcon } from "@web3icons/react/dynamic";
 import type { Currency } from "@conduit/sdk";
 import { CURRENCIES } from "@conduit/sdk";
@@ -39,9 +40,11 @@ function MonogramFallback({ symbol, px }: { symbol: string; px: number }) {
 export function TokenIcon({ currency, px }: { currency: Currency; px: number }) {
   const Flag = FLAG_TOKENS[currency];
   if (Flag) {
+    // Circular crop so flags sit next to the round USDC/EURC coin marks as
+    // equals — the 3:2 flag is center-cropped by the rounded-full clip.
     return (
       <span
-        className="flex items-center justify-center shrink-0 overflow-hidden border border-border"
+        className="flex items-center justify-center shrink-0 overflow-hidden rounded-full border border-border"
         style={{ width: px, height: px }}
       >
         <Flag style={{ height: "100%", width: "auto", maxWidth: "none" }} />
@@ -84,35 +87,76 @@ interface TokenSelectorProps {
   label?: string;
 }
 
+// Dropdown, not a 9-chip spread — one compact control that scales as more
+// currencies come online.
 export function TokenSelector({ value, onChange, label }: TokenSelectorProps) {
   const currencies: Currency[] = Object.keys(CURRENCIES);
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, []);
 
   return (
-    <div className="flex flex-col gap-1.5">
+    <div className="flex flex-col gap-1.5" ref={ref}>
       {label && (
         <label className="text-scale-1 font-mono text-ink-dim uppercase tracking-wider">
           {label}
         </label>
       )}
-      <div className="flex gap-2 flex-wrap">
-        {currencies.map((currency) => {
-          const isSelected = value === currency;
-          return (
-            <button
-              key={currency}
-              onClick={() => onChange(currency)}
-              className={`flex items-center gap-2 px-3 py-2 text-scale-2 font-mono
-                          border transition-colors ${
-                            isSelected
-                              ? "border-signal text-ink"
-                              : "border-border text-ink-dim hover:border-ink-dim"
-                          }`}
-            >
-              <TokenIcon currency={currency} px={22} />
-              {currency}
-            </button>
-          );
-        })}
+      <div className="relative">
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          aria-haspopup="listbox"
+          aria-expanded={open}
+          className="flex w-full items-center justify-between gap-2 px-3 py-2 text-scale-2
+                     font-mono border border-border bg-surface text-ink
+                     hover:border-ink-dim transition-colors"
+        >
+          <span className="flex items-center gap-2">
+            <TokenIcon currency={value} px={20} />
+            {value}
+          </span>
+          <svg
+            className={`w-3 h-3 text-ink-dim transition-transform ${open ? "rotate-180" : ""}`}
+            fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+          </svg>
+        </button>
+
+        {open && (
+          <div
+            role="listbox"
+            className="absolute left-0 right-0 top-full mt-1 z-40 border border-border
+                       bg-surface max-h-64 overflow-y-auto"
+          >
+            {currencies.map((currency) => (
+              <button
+                key={currency}
+                type="button"
+                role="option"
+                aria-selected={value === currency}
+                onClick={() => { onChange(currency); setOpen(false); }}
+                className={`flex w-full items-center gap-2 px-3 py-2 text-scale-2 font-mono
+                            text-left transition-colors ${
+                              value === currency
+                                ? "text-signal bg-signal/5"
+                                : "text-ink-dim hover:text-ink hover:bg-bg/40"
+                            }`}
+              >
+                <TokenIcon currency={currency} px={18} />
+                {currency}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

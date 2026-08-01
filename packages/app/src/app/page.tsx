@@ -14,6 +14,8 @@ import { WalletConnect } from "@/components/Shared/WalletConnect";
 import { ScanToPay } from "@/components/PayFlow/ScanToPay";
 import type { Currency } from "@conduit/sdk";
 import { motion, AnimatePresence } from "framer-motion";
+import { useRequiredPayerAmount } from "@/lib/use-required-payer-amount";
+import { formatAmount } from "@/lib/format";
 
 type Step = "input" | "confirm";
 
@@ -28,8 +30,18 @@ export default function HomePage() {
   const [amount, setAmount] = useState("");
   const [recipientCurrency, setRecipientCurrency] = useState<Currency>("USDC");
   const [payerCurrency, setPayerCurrency] = useState<Currency>("USDC");
+  const [payerBalances, setPayerBalances] = useState<Partial<Record<Currency, bigint>>>({});
 
-  const canProceed = isAddress(recipient) && parseFloat(amount) > 0 && isConnected;
+  // What this send actually costs in the payer's currency (AMM exact-out
+  // quote for cross-currency, 1:1 for same). Validated against the payer's
+  // real balance BEFORE the confirm step — no more walking into a revert.
+  const required = useRequiredPayerAmount(payerCurrency, recipientCurrency, amount);
+  const payerBalance = payerBalances[payerCurrency];
+  const insufficient =
+    required.data !== undefined && payerBalance !== undefined && payerBalance < required.data;
+
+  const canProceed =
+    isAddress(recipient) && parseFloat(amount) > 0 && isConnected && !insufficient;
 
   return (
     <div className="min-h-screen">
@@ -88,13 +100,31 @@ export default function HomePage() {
                 {/* Balance-aware payer currency (Phase 5.1): only what this
                     wallet actually holds, never a static list of every
                     currency that exists. */}
-                <PayerCurrencyPicker value={payerCurrency} onChange={setPayerCurrency} />
+                <PayerCurrencyPicker
+                  value={payerCurrency}
+                  onChange={setPayerCurrency}
+                  onBalancesChange={setPayerBalances}
+                />
+
+                {insufficient && required.data !== undefined && payerBalance !== undefined && (
+                  <p className="text-danger text-sm font-mono">
+                    Insufficient {payerCurrency}: this payment needs ~
+                    {formatAmount(required.data, payerCurrency)} {payerCurrency}, you have{" "}
+                    {formatAmount(payerBalance, payerCurrency)}.
+                  </p>
+                )}
 
                 {amount && recipient && (
                   <RoutePreview
                     payerCurrency={payerCurrency}
                     recipientCurrency={recipientCurrency}
                     recipientAmount={amount}
+                    payerAmount={
+                      required.data !== undefined
+                        ? `${payerCurrency === recipientCurrency ? "" : "~"}${formatAmount(required.data, payerCurrency)}`
+                        : undefined
+                    }
+                    isLoading={required.isLoading}
                   />
                 )}
               </div>

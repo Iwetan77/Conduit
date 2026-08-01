@@ -28,9 +28,33 @@ const ERC20_BALANCE_ABI = [
 interface PayerCurrencyPickerProps {
   value: Currency;
   onChange: (currency: Currency) => void;
+  onBalancesChange?: (balances: Partial<Record<Currency, bigint>>) => void;
 }
 
-export function PayerCurrencyPicker({ value, onChange }: PayerCurrencyPickerProps) {
+// Last-known balances per address, so a returning payer sees their held
+// currencies instantly instead of "Checking your balances…" while the
+// (rate-limited) RPC round-trip happens in the background.
+function readSnapshot(address: string): Partial<Record<Currency, bigint>> | null {
+  try {
+    const raw = localStorage.getItem(`conduit.balances.${address.toLowerCase()}`);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Record<string, string>;
+    return Object.fromEntries(Object.entries(parsed).map(([k, v]) => [k, BigInt(v)]));
+  } catch {
+    return null;
+  }
+}
+
+function writeSnapshot(address: string, balances: Partial<Record<Currency, bigint>>) {
+  try {
+    localStorage.setItem(
+      `conduit.balances.${address.toLowerCase()}`,
+      JSON.stringify(Object.fromEntries(Object.entries(balances).map(([k, v]) => [k, String(v)])))
+    );
+  } catch {}
+}
+
+export function PayerCurrencyPicker({ value, onChange, onBalancesChange }: PayerCurrencyPickerProps) {
   const { address, isConnected } = useAccount();
 
   // Hydration guard: wagmi's connection/query state differs between the
@@ -40,7 +64,7 @@ export function PayerCurrencyPicker({ value, onChange }: PayerCurrencyPickerProp
   const [mounted, setMounted] = useState(false);
   useEffect(() => { setMounted(true); }, []);
 
-  const { data, isLoading } = useReadContracts({
+  const { data } = useReadContracts({
     contracts: CURRENCY_LIST.map((c) => ({
       address: CURRENCIES[c].token as `0x${string}`,
       abi: ERC20_BALANCE_ABI,
@@ -49,29 +73,38 @@ export function PayerCurrencyPicker({ value, onChange }: PayerCurrencyPickerProp
     })),
     query: {
       enabled: isConnected && !!address,
-      refetchInterval: 15000,
+      refetchInterval: 30000,
       // Arc's public RPC rate-limits; without retries + kept data a single
-      // failed refetch made real balances vanish from the UI.
-      retry: 3,
-      retryDelay: (attempt: number) => 500 * 2 ** attempt,
+      // failed refetch made real balances vanish from the UI. Two quick
+      // retries, not slow exponential ones — the snapshot below covers the
+      // wait, so long backoffs only make the UI feel broken.
+      retry: 2,
+      retryDelay: (attempt: number) => 300 * (attempt + 1),
       placeholderData: keepPreviousData,
     },
   });
 
   // A failed read is UNKNOWN, never zero. Claiming "you hold nothing" off a
   // rate-limited RPC response was a real user-visible bug.
+  const fresh = !!data && data.some((d) => d.status === "success");
   const allKnown = !!data && data.every((d) => d.status === "success");
-  const held = (data ?? [])
-    .map((d, i) => ({
-      currency: CURRENCY_LIST[i] as Currency,
-      balance: d.status === "success" ? (d.result as bigint) : 0n,
-      known: d.status === "success",
-    }))
-    .filter((c) => c.known && c.balance > 0n)
+  const snapshot = !fresh && mounted && address ? readSnapshot(address) : null;
+  const balances: Partial<Record<Currency, bigint>> = fresh
+    ? Object.fromEntries(
+        (data ?? []).flatMap((d, i) =>
+          d.status === "success" ? [[CURRENCY_LIST[i] as Currency, d.result as bigint]] : []
+        )
+      )
+    : snapshot ?? {};
+
+  const held = (Object.entries(balances) as [Currency, bigint][])
+    .filter(([, b]) => b > 0n)
+    .map(([currency, balance]) => ({ currency, balance }))
     .sort((a, b) => (b.balance > a.balance ? 1 : b.balance < a.balance ? -1 : 0));
 
   // Keep the selected currency inside the held set (prefer the largest
-  // balance). Done in an effect, not during render.
+  // balance), persist the snapshot, and report balances up to the page for
+  // sufficiency checks. Effects, never during render.
   const heldKey = held.map((h) => h.currency).join(",");
   useEffect(() => {
     if (held.length > 0 && !held.some((h) => h.currency === value)) {
@@ -79,10 +112,18 @@ export function PayerCurrencyPicker({ value, onChange }: PayerCurrencyPickerProp
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [heldKey]);
+  useEffect(() => {
+    if (fresh && address && allKnown) writeSnapshot(address, balances);
+    onBalancesChange?.(balances);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fresh, allKnown, address, heldKey]);
 
   if (!mounted || !isConnected) return null;
 
-  if (isLoading || !data || (held.length === 0 && !allKnown)) {
+  // Nothing to show yet and results not conclusive → "checking". A snapshot
+  // (or partial success) skips this entirely; a conclusive all-zero result
+  // falls through to the honest empty-wallet message below.
+  if (held.length === 0 && !allKnown) {
     // Includes the partially-failed case: better to say "checking" a beat
     // longer than to tell someone with money that they're broke.
     return (

@@ -14,7 +14,7 @@ const PRIVY_ENABLED = Boolean(process.env.NEXT_PUBLIC_PRIVY_APP_ID);
 // The button doesn't touch Privy hooks itself: it flags intent and lets
 // providers.tsx lazily mount the Privy stack (see lib/privy-gate.tsx), so
 // payer pages don't ship @privy-io/* until someone actually wants it.
-function GoogleSignIn({ fullWidth = false }: { fullWidth?: boolean }) {
+function GoogleSignIn({ fullWidth = false, short = false }: { fullWidth?: boolean; short?: boolean }) {
   const [starting, setStarting] = useState(false);
 
   return (
@@ -26,9 +26,9 @@ function GoogleSignIn({ fullWidth = false }: { fullWidth?: boolean }) {
       disabled={starting}
       className={`${fullWidth ? "w-full " : ""}px-4 py-2 text-scale-2 font-mono
                  border border-border text-ink-dim hover:text-ink hover:border-ink-dim
-                 transition-colors disabled:opacity-50`}
+                 transition-colors disabled:opacity-50 whitespace-nowrap`}
     >
-      {starting ? "Opening Google…" : "Sign in with Google"}
+      {starting ? "Opening…" : short ? "Google" : "Sign in with Google"}
     </button>
   );
 }
@@ -164,21 +164,25 @@ export function WalletConnectCompact() {
   const connector =
     connectors.find((c) => c.id === "injected" || c.type === "injected") ?? connectors[0];
 
+  // Side-by-side on one row — a stacked pair of full-width buttons read as
+  // two competing CTAs on mobile.
   return (
-    <div className="flex flex-col gap-2 w-full">
-      {privyMounted ? (
-        <PrivyConnectWallet fullWidth />
-      ) : (
-        <button
-          onClick={() => connector && connect({ connector })}
-          disabled={isPending || !connector}
-          className="px-4 py-2 text-scale-2 font-medium font-mono bg-signal text-signal-ink
-                     w-full hover:bg-signal/90 transition-colors disabled:opacity-50"
-        >
-          {isPending ? "Connecting..." : "Connect Wallet"}
-        </button>
-      )}
-      {PRIVY_ENABLED && <GoogleSignIn fullWidth />}
+    <div className="flex flex-row gap-2 w-full">
+      <div className="flex-1">
+        {privyMounted ? (
+          <PrivyConnectWallet fullWidth />
+        ) : (
+          <button
+            onClick={() => connector && connect({ connector })}
+            disabled={isPending || !connector}
+            className="px-4 py-2 text-scale-2 font-medium font-mono bg-signal text-signal-ink
+                       w-full hover:bg-signal/90 transition-colors disabled:opacity-50 whitespace-nowrap"
+          >
+            {isPending ? "Connecting..." : "Connect Wallet"}
+          </button>
+        )}
+      </div>
+      {PRIVY_ENABLED && <GoogleSignIn short />}
     </div>
   );
 }

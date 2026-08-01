@@ -128,6 +128,22 @@ async function executeSwap(
 
 // ── Server-side swap (private key) ───────────────────────────────────────────
 
+// ── Read-only estimate (no signer, no tx): how much tokenIn is required
+// for the recipient to receive exactly amountOut of tokenOut. Same routing
+// rule as the real swap (best of ArcSwap/UnitFlow, direct pair), so what a
+// UI validates against is what execution would actually charge — before the
+// 1% slippage cap. Throws if no router can quote the pair.
+export async function estimateRequiredIn(
+  provider: ethers.Provider,
+  tokenIn: Currency,
+  tokenOut: Currency,
+  amountOut: bigint
+): Promise<bigint> {
+  const path = [currencyToAddress(tokenIn), currencyToAddress(tokenOut)];
+  const { requiredIn } = await getBestRouter(provider, amountOut, path);
+  return requiredIn;
+}
+
 export async function swap(
   privateKey: string,
   tokenIn: Currency,

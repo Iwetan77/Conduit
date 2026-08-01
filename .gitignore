@@ -47,3 +47,7 @@ Thumbs.db
 whereistopped.md
 WHERE-I-STOPPED.md
 DESIGN-NOTES.md
+
+# Internal working notes — process records, not product docs. Kept local.
+audit/
+packages/app/audit/

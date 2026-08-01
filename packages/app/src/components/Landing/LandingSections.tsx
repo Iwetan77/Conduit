@@ -1,5 +1,7 @@
 'use client'
 
+import Link from 'next/link'
+
 // Landing-page sections, moved from the former packages/marketing app when
 // the three Next apps were folded into one. Only the links changed: docs and
 // dashboard are in-app routes now, not cross-origin URLs.
@@ -130,29 +132,29 @@ export function Hero() {
 
         {/* Two doors, one product: payers send/scan, merchants run a dashboard. */}
         <div className="flex flex-wrap items-center justify-center gap-3 mb-8">
-          <a
+          <Link
             href="/send"
             className="px-6 py-3 font-mono font-bold text-[12px] uppercase tracking-widest bg-signal text-signal-ink hover:bg-signal/90 transition-colors"
           >
             Send money →
-          </a>
-          <a
+          </Link>
+          <Link
             href="/dashboard"
             className="px-6 py-3 font-mono text-[12px] uppercase tracking-widest border border-border text-ink-dim hover:text-ink hover:border-ink-dim transition-colors"
           >
             Merchant dashboard →
-          </a>
+          </Link>
         </div>
 
         {/* Waitlist form */}
         <div className="flex flex-col items-center gap-4 mb-16 w-full">
           <WaitlistForm />
-          <a
+          <Link
             href="/docs"
             className="font-mono text-[11px] text-ink-dim hover:text-signal transition-colors uppercase tracking-widest"
           >
             Read the docs →
-          </a>
+          </Link>
         </div>
 
         {/* Stats */}
@@ -319,9 +321,9 @@ function BuildPanel() {
         </div>
       </div>
 
-      <a href="/docs" className="font-mono text-[11px] text-signal hover:underline mt-auto">
+      <Link href="/docs" className="font-mono text-[11px] text-signal hover:underline mt-auto">
         Read the docs →
-      </a>
+      </Link>
     </PanelShell>
   )
 }

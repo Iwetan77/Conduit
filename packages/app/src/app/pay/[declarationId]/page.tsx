@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+
 // /pay/[declarationId] — The most public-facing page.
 // Someone who has never heard of Conduit lands here after clicking a link or scanning a QR.
 // Rules: no crypto jargon, mobile-first, works without wallet connected, 3 taps to pay.
@@ -137,9 +139,9 @@ function DeclarationPay({ declarationId }: { declarationId: string }) {
           <div className="text-center py-16 space-y-3">
             <p className="text-4xl">⚠</p>
             <p className="text-ink font-medium">{error}</p>
-            <a href="/" className="text-signal text-sm hover:underline">
+            <Link href="/" className="text-signal text-sm hover:underline">
               Go to Conduit →
-            </a>
+            </Link>
           </div>
         )}
 

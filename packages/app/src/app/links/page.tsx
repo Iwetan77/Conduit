@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+
 import { useEffect, useState } from "react";
 import { useAccount } from "wagmi";
 import type { PaymentDeclaration } from "@conduit/sdk/lite";
@@ -93,13 +95,13 @@ export default function LinksPage() {
             <h1 className="text-3xl font-anton text-ink">My Links</h1>
             <p className="text-ink-dim text-sm mt-1">Manage your payment declarations</p>
           </div>
-          <a
+          <Link
             href="/create"
             className="px-4 py-2 bg-signal text-signal-ink
                        text-sm font-mono hover:bg-signal/90 transition-colors"
           >
             + New Link
-          </a>
+          </Link>
         </div>
 
         {!mounted || !isConnected ? (
@@ -116,9 +118,9 @@ export default function LinksPage() {
         ) : declarations.length === 0 ? (
           <div className="text-center py-16">
             <p className="text-ink-dim mb-4">No payment links yet.</p>
-            <a href="/create" className="px-6 py-3 bg-signal text-signal-ink font-mono">
+            <Link href="/create" className="px-6 py-3 bg-signal text-signal-ink font-mono">
               Create your first link
-            </a>
+            </Link>
           </div>
         ) : (
           <div className="space-y-3">

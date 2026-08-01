@@ -81,11 +81,12 @@ func (e *APIError) Error() string { return e.Message }
 // E constructs an APIError from a registered code. Panics on an unregistered
 // code — that's a programmer error caught at development time, not something
 // that should ever reach a client as a 500 with no explanation.
-// docsBaseURL is where error codes are documented. Docs now live inside the
-// app at /docs (packages/docs was folded in), so the old hardcoded
-// docs.conduit.xyz was a dead link on every single error response. Set
-// CONDUIT_DOCS_BASE_URL to the deployment's docs root; the default matches
-// local development.
+// docsBaseURL is the docs ROOT (e.g. https://your-app/docs). Error codes are
+// documented in the errors guide, so links are built as
+// {root}/guides/errors#{code} — the route that actually exists. The old
+// hardcoded https://docs.conduit.xyz/errors/{code} was a dead link on every
+// error response: that domain does not exist and docs were folded into the
+// app. Set CONDUIT_DOCS_BASE_URL per deployment; the default is local dev.
 var docsBaseURL = func() string {
 	if v := strings.TrimRight(strings.TrimSpace(os.Getenv("CONDUIT_DOCS_BASE_URL")), "/"); v != "" {
 		return v
@@ -103,7 +104,7 @@ func E(code Code, param string) *APIError {
 		Type:    "conduit_error",
 		Message: entry.message,
 		Param:   param,
-		DocURL:  docsBaseURL + "/errors/" + string(code),
+		DocURL:  docsBaseURL + "/guides/errors#" + string(code),
 		Status:  entry.status,
 	}
 }

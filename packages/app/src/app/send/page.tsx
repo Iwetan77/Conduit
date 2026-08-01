@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+
 import { useState, useEffect } from "react";
 import { useAccount } from "wagmi";
 import { isAddress } from "viem";
@@ -137,9 +139,9 @@ export default function SendPage() {
               <div className="text-center">
                 <p className="text-ink-dim text-sm">
                   Running a business?{" "}
-                  <a href="/dashboard" className="text-signal hover:underline">
+                  <Link href="/dashboard" className="text-signal hover:underline">
                     Sign in as a merchant →
-                  </a>
+                  </Link>
                 </p>
               </div>
             </motion.div>

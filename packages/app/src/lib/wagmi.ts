@@ -23,6 +23,17 @@ export const arcTestnet = defineChain({
       url: "https://testnet.arcscan.app",
     },
   },
+  // REQUIRED, not cosmetic. wagmi/viem only batch a useReadContracts into a
+  // single Multicall3 call when the chain declares this address; without it
+  // they silently fall back to one eth_call PER contract. Reading 9 token
+  // balances then fired 9 parallel requests, and Arc's public RPC rejected a
+  // random subset of them with "request limit reached" every time — which is
+  // why balances appeared, vanished, and read as zero at random. Measured on
+  // the live endpoint: 9 parallel calls returned 7-9 of 9; one Multicall3
+  // returned all 9 in ~200ms, three times out of three.
+  contracts: {
+    multicall3: { address: "0xcA11bde05977b3631167028862bE2a173976CA11" },
+  },
   testnet: true,
 });
 

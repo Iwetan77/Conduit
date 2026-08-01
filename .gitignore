@@ -51,3 +51,4 @@ DESIGN-NOTES.md
 # Internal working notes — process records, not product docs. Kept local.
 audit/
 packages/app/audit/
+.vercel

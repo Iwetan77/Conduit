@@ -97,7 +97,7 @@ export function Hero() {
       >
         {/* Eyebrow */}
         <p className="font-mono text-[11px] text-signal uppercase tracking-[0.22em] mb-8">
-          Arc-native · B2B Settlement · Testnet 2026
+          B2B Stablecoin Settlement · Built on Arc · Testnet 2026
         </p>
 
         {/* Headline — the signature entrance, per-word stagger, once */}
@@ -122,9 +122,10 @@ export function Hero() {
 
         {/* Sub — honest: "atomic, sub-second" is the DIRECT path only. */}
         <p className="font-body text-[1rem] text-ink-dim max-w-[560px] leading-[1.75] mb-10">
-          Accept any stablecoin, settle in yours. Direct payments settle on Arc in about a
-          second; cross-currency payments route through Circle StableFX with real, live
-          progress, never a fake spinner.
+          Settlement infrastructure for businesses. Invoice in the currency you keep your
+          books in, and let customers and suppliers pay in whatever stablecoin they hold.
+          Direct payments settle on Arc in about a second; cross-currency payments route
+          through Circle StableFX.
         </p>
 
         {/* Two doors, one product: payers send/scan, merchants run a dashboard. */}
@@ -424,7 +425,7 @@ export function EcosystemBadge() {
     <section className="relative z-10 py-16 px-4 border-t border-border text-center">
       <div className="flex flex-col items-center gap-5">
         <p className="font-mono text-[10px] text-ink-dim uppercase tracking-[0.18em]">
-          Built on Arc · Circle StableFX · Chain ID 5042002
+          Built on Arc · FX by Circle StableFX
         </p>
 
         <div className="flex items-center gap-8">
@@ -463,9 +464,9 @@ export function Footer() {
             <span className="text-ink">DUIT</span>
           </span>
           <p className="font-mono text-[9px] text-ink-dim mt-3 leading-[1.8]">
-            Accept any stablecoin, settle in yours
+            B2B stablecoin settlement
             <br />
-            Chain ID 5042002 · Testnet 2026
+            Arc Testnet · 2026
           </p>
         </div>
 

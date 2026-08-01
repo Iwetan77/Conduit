@@ -142,7 +142,11 @@ function ConnectButton() {
   return <WalletConnect />;
 }
 
-export function Nav() {
+// `minimal` strips the app nav links (Send/Create/Links/History), leaving
+// only the logo and the connect controls. The landing page uses it: those
+// links are app navigation and belong on the app pages, not on a page whose
+// job is to explain the product and hand you one CTA.
+export function Nav({ minimal = false }: { minimal?: boolean } = {}) {
   const pathname = usePathname();
   const { address, isConnected } = useAccount();
   const chainId = useChainId();
@@ -160,7 +164,7 @@ export function Nav() {
         </div>
 
         <nav className="hidden md:flex items-center gap-1">
-          {NAV_LINKS.map(({ href, label }) => {
+          {(minimal ? [] : NAV_LINKS).map(({ href, label }) => {
             const isActive = href === "/" ? pathname === "/" : pathname.startsWith(href);
             return (
               <Link
@@ -198,8 +202,10 @@ export function Nav() {
   );
 }
 
-export function MobileNav() {
+export function MobileNav({ minimal = false }: { minimal?: boolean } = {}) {
   const pathname = usePathname();
+
+  if (minimal) return null;
 
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-50 border-t border-border bg-bg md:hidden">

@@ -18,7 +18,9 @@ import {
 export default function LandingPage() {
   return (
     <div className="min-h-screen">
-      <Nav />
+      {/* Landing shows only the connect controls — Send/Create/Links/History
+          are app navigation and live on the app pages. */}
+      <Nav minimal />
 
       <Hero />
 
@@ -34,7 +36,7 @@ export default function LandingPage() {
       <EcosystemBadge />
       <Footer />
 
-      <MobileNav />
+      <MobileNav minimal />
     </div>
   );
 }

@@ -3,12 +3,17 @@
 import { useEffect, useRef, useState } from "react";
 import { TokenIcon } from "@/components/Shared/TokenBadge";
 
-// A scripted walkthrough of the send flow: the fields type themselves so a
-// first-time visitor sees how paying works without connecting a wallet.
-// Deliberately NOT the real form — nothing here touches a chain, a balance,
-// or a signer. The real thing lives at /send.
-const RECIPIENT = "0x8F2c...A31b";
-const AMOUNT = "250.00";
+// A scripted walkthrough of a customer settling a supplier invoice: the
+// fields type themselves so a first-time visitor sees how the flow works
+// without connecting a wallet. Deliberately NOT the real form — nothing here
+// touches a chain, a balance, or a signer. The real thing lives at /send.
+//
+// Framed as a business paying a business, because that is who Conduit is
+// for: a named merchant, an invoice reference, an amount with an invoice
+// shape rather than a round consumer number.
+const RECIPIENT = "Meridian Supply Co.";
+const INVOICE = "INV-2041";
+const AMOUNT = "4,250.00";
 
 type Phase = "typing-address" | "typing-amount" | "routing" | "settled";
 
@@ -59,16 +64,16 @@ export function SendDemo() {
       <div className="border border-border bg-surface p-5 space-y-4">
         <div className="flex items-center justify-between">
           <span className="text-[10px] font-mono text-ink-dim uppercase tracking-widest">
-            Direct Send
+            Supplier invoice
           </span>
           <span className="text-[9px] font-mono text-ink-dim uppercase tracking-widest border border-border px-1.5 py-0.5">
-            demo
+            {INVOICE}
           </span>
         </div>
 
         {/* Recipient */}
         <div className="space-y-1.5">
-          <p className="text-[10px] font-mono text-ink-dim uppercase tracking-wider">To</p>
+          <p className="text-[10px] font-mono text-ink-dim uppercase tracking-wider">Pay</p>
           <div className="border border-border bg-bg px-3 py-2.5 font-mono text-sm text-ink min-h-[38px]">
             {address}
             {phase === "typing-address" && <Caret />}
@@ -100,12 +105,12 @@ export function SendDemo() {
           <div className="flex items-center justify-between text-xs font-mono">
             <span className="flex items-center gap-1.5 text-ink-dim">
               <TokenIcon currency="USDC" px={16} />
-              You pay USDC
+              You hold USDC
             </span>
             <span className="text-signal">→</span>
             <span className="flex items-center gap-1.5 text-ink-dim">
               <TokenIcon currency="EURC" px={16} />
-              They get EURC
+              They invoice EURC
             </span>
           </div>
           <div className="flex items-center gap-2 text-[10px] font-mono text-ink-dim">
@@ -125,9 +130,6 @@ export function SendDemo() {
         </div>
       </div>
 
-      <p className="text-center text-[10px] font-mono text-ink-dim mt-3">
-        An illustration, not a live payment.
-      </p>
     </div>
   );
 }

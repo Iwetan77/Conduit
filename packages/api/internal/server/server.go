@@ -149,6 +149,18 @@ func New(cfg Config) http.Handler {
 		r.Get("/payment_links/{id}/public", paymentLinksH.GetPublic)
 		r.Post("/payment_links/{id}/pay", paymentLinksH.Pay)
 
+		// Cross-currency FX for the payer surface. Same "no API key" reasoning
+		// as the routes above: a payer opening a link or QR has no
+		// credentials, and Circle StableFX is the ONLY working cross-currency
+		// path (the old on-chain AMM route had no USDC/EURC pool on Arc and
+		// could never settle). Scoped by intent ID, which is the capability.
+		// Authenticated callers are still restricted to their own account --
+		// see resolveIntentAccount. No funds move without the payer's own
+		// wallet signature on the quote and funding payloads.
+		r.Post("/settlement_intents/{id}/quote", intentsH.Quote)
+		r.Post("/settlement_intents/{id}/prepare", intentsH.Prepare)
+		r.Post("/settlement_intents/{id}/confirm", intentsH.Confirm)
+
 		// Cross-chain bridge endpoints are deliberately unauthenticated: this
 		// is the payer surface (see spec), and a Solana-side payer has no
 		// Conduit API key or Arc wallet at all. Only registered when
@@ -173,9 +185,6 @@ func New(cfg Config) http.Handler {
 			r.Post("/settlement_intents", intentsH.Create)
 			r.Get("/settlement_intents", intentsH.List)
 			r.Get("/settlement_intents/{id}", intentsH.Get)
-			r.Post("/settlement_intents/{id}/quote", intentsH.Quote)
-			r.Post("/settlement_intents/{id}/prepare", intentsH.Prepare)
-			r.Post("/settlement_intents/{id}/confirm", intentsH.Confirm)
 			r.Post("/settlement_intents/{id}/cancel", intentsH.Cancel)
 
 			r.Post("/webhook_endpoints", webhookEndpointsH.Create)

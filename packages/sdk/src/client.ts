@@ -3,7 +3,6 @@ import { ARC_TESTNET, QUOTE_TTL_SECONDS, DEFAULT_APP_URL } from "./constants.js"
 import { DeclarationClient } from "./declaration.js";
 import { RouterClient } from "./router.js";
 import { ReceiptClient } from "./receipt.js";
-import { swap, swapWithBrowserWallet } from "./swap.js";
 import { toHumanAmount, fromHumanAmount } from "./amount.js";
 import { currencyToAddress, currencyDecimals } from "./currency.js";
 import type {
@@ -111,8 +110,7 @@ export class ConduitClient {
   ///     Single tx: ConduitRouter.execute()
   ///
   ///   Cross-currency (USDC→EURC or EURC→USDC):
-  ///     Server path: swap() via privateKey → ConduitRouter.execute()
-  ///     Browser path: swapWithBrowserWallet() → ConduitRouter.execute()
+  ///     Not handled here — Circle StableFX via the Conduit API.
   ///
   async pay(options: PayOptions): Promise<PaymentReceipt> {
     const signerAddr = await this.getSignerAddress();
@@ -121,58 +119,19 @@ export class ConduitClient {
     const deadline = Math.floor(Date.now() / 1000) + QUOTE_TTL_SECONDS;
 
     if (payerToken !== recipientToken) {
-      // ── Cross-currency: swap via AMM, then transfer ────────────────────────
-      const humanAmount = toHumanAmount(options.amount, currencyDecimals(options.currency));
-
-      // Detect environment: server (Node.js) vs browser
-      const isServer = typeof window === "undefined";
-      let swapResult;
-
-      if (isServer) {
-        // Server/agent path — requires privateKey in config
-        if (!this.privateKey) {
-          throw new Error(
-            "Server-side cross-currency payments require privateKey in ConduitClient config. " +
-            "Example: new ConduitClient({ privateKey: process.env.PRIVATE_KEY, kitKey: '...' })"
-          );
-        }
-        swapResult = await swap(
-          this.privateKey,
-          options.payerToken ?? options.currency,
-          options.currency,
-          humanAmount,
-          this.kitKey
-        );
-      } else {
-        // Browser path — uses EIP-1193 provider
-        swapResult = await swapWithBrowserWallet(
-          this.getEip1193Provider(),
-          options.payerToken ?? options.currency,
-          options.currency,
-          humanAmount,
-          this.kitKey
-        );
-      }
-
-      const receivedAmount = swapResult.amountOutRaw
-        ? BigInt(swapResult.amountOutRaw)
-        : options.amount;
-
-      // Recompute deadline after swap — swap txs can take 60+ seconds and the
-      // original deadline would be expired by the time execute() is submitted.
-      const freshDeadline = Math.floor(Date.now() / 1000) + QUOTE_TTL_SECONDS;
-
-      const instruction = {
-        payer: signerAddr,
-        recipient: options.recipient,
-        payerToken: recipientToken, // now same as recipient (post-swap)
-        recipientToken,
-        amount: receivedAmount,
-        deadline: freshDeadline,
-        declarationId: "0x0000000000000000000000000000000000000000000000000000000000000000" as Bytes32,
-      };
-
-      return this.routerClient.execute(instruction, this.getSignerProvider());
+      // Cross-currency FX is Circle StableFX, orchestrated by the Conduit
+      // API (settlement intents: quote -> prepare -> confirm). It is NOT an
+      // on-chain AMM swap: the old ArcSwap/UnitFlow path was pre-StableFX
+      // demo scaffolding and there is no USDC/EURC pool on Arc testnet, so
+      // it could only ever fail with "no AMM router could quote this swap".
+      // Failing loudly here is correct — silently routing money through a
+      // non-existent pool is worse than refusing.
+      throw new Error(
+        "Cross-currency payments go through Circle StableFX via the Conduit API " +
+        "(settlement intents), not through this client. Use a payment link or a " +
+        "settlement intent for " +
+        (options.payerToken ?? options.currency) + " -> " + options.currency + "."
+      );
     }
 
     // ── Same-currency: single tx ──────────────────────────────────────────

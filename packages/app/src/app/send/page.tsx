@@ -45,8 +45,17 @@ export default function SendPage() {
   const insufficient =
     required.data !== undefined && payerBalance !== undefined && payerBalance < required.data;
 
+  // Direct send is on-chain and same-currency only. Cross-currency FX runs
+  // through Circle StableFX, which the Conduit API drives via settlement
+  // intents — a public payer here has no API key to reach it. Blocked in the
+  // UI rather than failing at signing time.
+  const crossCurrency = payerCurrency !== recipientCurrency;
   const canProceed =
-    isAddress(recipient) && parseFloat(amount) > 0 && isConnected && !insufficient;
+    isAddress(recipient) &&
+    parseFloat(amount) > 0 &&
+    isConnected &&
+    !insufficient &&
+    !crossCurrency;
 
   return (
     <div className="min-h-screen">
@@ -94,7 +103,24 @@ export default function SendPage() {
                   onBalancesChange={setPayerBalances}
                 />
 
-                {insufficient && required.data !== undefined && payerBalance !== undefined && (
+                {crossCurrency && (
+                  <div className="border border-border bg-surface p-3 space-y-1">
+                    <p className="text-ink text-sm font-mono">
+                      Direct send is same-currency only.
+                    </p>
+                    <p className="text-ink-dim text-sm">
+                      You hold {payerCurrency} but chose to send {recipientCurrency}.
+                      Cross-currency payments settle through Circle StableFX, which runs
+                      on payment links — create one from the{" "}
+                      <a href="/dashboard/request-payment" className="text-signal hover:underline">
+                        merchant dashboard
+                      </a>
+                      , or set both currencies to {payerCurrency}.
+                    </p>
+                  </div>
+                )}
+
+                {!crossCurrency && insufficient && required.data !== undefined && payerBalance !== undefined && (
                   <p className="text-danger text-sm font-mono">
                     Insufficient {payerCurrency}: this payment needs ~
                     {formatAmount(required.data, payerCurrency)} {payerCurrency}, you have{" "}

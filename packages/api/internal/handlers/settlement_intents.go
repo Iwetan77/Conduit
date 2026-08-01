@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"math/big"
 	"net/http"
@@ -260,7 +261,11 @@ type quoteResponse struct {
 // speculatively or re-calling it on expiry.
 func (h *SettlementIntents) Quote(w http.ResponseWriter, r *http.Request) {
 	id := pathParam(r, "id")
-	principal, _ := auth.FromContext(r.Context())
+	accountID, acctErr := h.resolveIntentAccount(r.Context(), id)
+	if acctErr != nil {
+		writeErr(w, apierrors.E(apierrors.CodeNotFound, "id"))
+		return
+	}
 
 	var quoteBody struct {
 		PayCurrency string `json:"pay_currency"`
@@ -274,7 +279,7 @@ func (h *SettlementIntents) Quote(w http.ResponseWriter, r *http.Request) {
 	var amountStr, settleCurrencyISO, settleAddress, status string
 	err := h.Pool.QueryRow(r.Context(),
 		`SELECT amount::text, settle_currency, settle_address, status FROM settlement_intents WHERE id = $1 AND account_id = $2`,
-		id, principal.AccountID,
+		id, accountID,
 	).Scan(&amountStr, &settleCurrencyISO, &settleAddress, &status)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -363,7 +368,11 @@ type prepareResponse struct {
 // the funding typed data for the payer to sign next (sig #2, -> /confirm).
 func (h *SettlementIntents) Prepare(w http.ResponseWriter, r *http.Request) {
 	id := pathParam(r, "id")
-	principal, _ := auth.FromContext(r.Context())
+	accountID, acctErr := h.resolveIntentAccount(r.Context(), id)
+	if acctErr != nil {
+		writeErr(w, apierrors.E(apierrors.CodeNotFound, "id"))
+		return
+	}
 
 	var req prepareRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.QuoteSignature == "" {
@@ -382,7 +391,7 @@ func (h *SettlementIntents) Prepare(w http.ResponseWriter, r *http.Request) {
 		 FROM fx_trades ft JOIN settlement_intents si ON si.id = ft.intent_id
 		 WHERE ft.intent_id = $1 AND si.account_id = $2 AND ft.state = 'quoted'
 		 ORDER BY ft.created_at DESC LIMIT 1`,
-		id, principal.AccountID,
+		id, accountID,
 	).Scan(&trade.id, &trade.payCurrency, &trade.payAmount, &trade.settleCurrencyISO, &trade.payAddress, &trade.rate, &trade.quoteID, &trade.quoteExpiresAt)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -452,7 +461,11 @@ type confirmResponse struct {
 // an on-chain transaction Conduit constructs itself.
 func (h *SettlementIntents) Confirm(w http.ResponseWriter, r *http.Request) {
 	id := pathParam(r, "id")
-	principal, _ := auth.FromContext(r.Context())
+	accountID, acctErr := h.resolveIntentAccount(r.Context(), id)
+	if acctErr != nil {
+		writeErr(w, apierrors.E(apierrors.CodeNotFound, "id"))
+		return
+	}
 
 	var req confirmRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.FundingSignature == "" {
@@ -466,7 +479,7 @@ func (h *SettlementIntents) Confirm(w http.ResponseWriter, r *http.Request) {
 		 FROM fx_trades ft JOIN settlement_intents si ON si.id = ft.intent_id
 		 WHERE ft.intent_id = $1 AND si.account_id = $2 AND ft.state = 'presigned'
 		 ORDER BY ft.created_at DESC LIMIT 1`,
-		id, principal.AccountID,
+		id, accountID,
 	).Scan(&tradeID, &tradeUUID, &permit2JSON, &witnessMessage)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -523,11 +536,11 @@ func (h *SettlementIntents) Confirm(w http.ResponseWriter, r *http.Request) {
 	h.Pool.Exec(r.Context(),
 		`INSERT INTO balance_transactions (id, account_id, settlement_id, type, gross, fee, net, currency)
 		 VALUES ($1,$2,$3,'settlement',$4,0,$4,$5)`,
-		balanceTxID, principal.AccountID, settlementRowID, settleAmount, settleCurrency,
+		balanceTxID, accountID, settlementRowID, settleAmount, settleCurrency,
 	)
 
 	if h.Webhooks != nil {
-		_ = h.Webhooks.Enqueue(r.Context(), principal.AccountID, "settlement.succeeded", map[string]any{
+		_ = h.Webhooks.Enqueue(r.Context(), accountID, "settlement.succeeded", map[string]any{
 			"intent_id": id, "tx_hash": makerTxHash, "status": "settled",
 		})
 	}
@@ -552,4 +565,27 @@ func nullIfEmpty(s string) any {
 		return nil
 	}
 	return s
+}
+
+// resolveIntentAccount returns the account that owns an intent.
+//
+// Authenticated callers resolve to their OWN account, so the callers' queries
+// (which all carry `AND account_id = $2`) still refuse to touch another
+// account's intent -- ownership enforcement is unchanged.
+//
+// Unauthenticated payer calls resolve to the intent's own account. The intent
+// ID is the capability, exactly as it already is for
+// POST /payment_links/{id}/pay, GET /settlement_intents/{id}/public and the
+// bridge routes: a payer opening a link or QR has no API key, and every path
+// beyond this still requires the payer's own wallet signature before any
+// funds move.
+func (h *SettlementIntents) resolveIntentAccount(ctx context.Context, intentID string) (string, error) {
+	if p, ok := auth.FromContext(ctx); ok && p.AccountID != "" {
+		return p.AccountID, nil
+	}
+	var accountID string
+	err := h.Pool.QueryRow(ctx,
+		`SELECT account_id FROM settlement_intents WHERE id = $1`, intentID,
+	).Scan(&accountID)
+	return accountID, err
 }

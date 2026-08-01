@@ -5,10 +5,11 @@ import type { Currency } from "@conduit/sdk/lite";
 import { parseAmount } from "@/lib/format";
 
 // How much of `payerCurrency` this send will actually cost, in the payer
-// token's minor units. Same-currency is exact (1:1). Cross-currency asks the
-// same AMM routers the real swap uses (exact-out getAmountsIn), so the UI
-// validates against what execution would genuinely charge — before the 1%
-// slippage cap. Estimator failure returns an error, never a fake number.
+// token's minor units. Direct send is same-currency only, so this is exact
+// (1:1). Cross-currency is Circle StableFX via the Conduit API's settlement
+// intents — it is never quoted here, and the old AMM estimate was removed:
+// there is no USDC/EURC pool on Arc testnet, so it only ever produced an
+// error while implying an on-chain swap route existed.
 export function useRequiredPayerAmount(
   payerCurrency: Currency,
   recipientCurrency: Currency,
@@ -24,12 +25,10 @@ export function useRequiredPayerAmount(
     retryDelay: (attempt: number) => 300 * 2 ** attempt,
     queryFn: async (): Promise<bigint> => {
       const recipientUnits = parseAmount(amount, recipientCurrency);
-      if (payerCurrency === recipientCurrency) return recipientUnits;
-      const [{ estimateRequiredIn }, { arcReadProvider }] = await Promise.all([
-        import("@conduit/sdk"),
-        import("@/lib/arc-provider"),
-      ]);
-      return estimateRequiredIn(arcReadProvider(), payerCurrency, recipientCurrency, recipientUnits);
+      if (payerCurrency !== recipientCurrency) {
+        throw new Error("Cross-currency is not available on direct send.");
+      }
+      return recipientUnits;
     },
   });
 }

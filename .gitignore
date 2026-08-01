@@ -43,10 +43,6 @@ Thumbs.db
 *.swp
 *.swo
 
-# Claude's own resumability notes -- never commit, local scratch only
-whereistopped.md
-WHERE-I-STOPPED.md
-DESIGN-NOTES.md
 
 # Internal working notes — process records, not product docs. Kept local.
 audit/

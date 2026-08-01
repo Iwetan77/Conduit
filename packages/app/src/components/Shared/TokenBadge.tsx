@@ -41,13 +41,19 @@ export function TokenIcon({ currency, px }: { currency: Currency; px: number }) 
   const Flag = FLAG_TOKENS[currency];
   if (Flag) {
     // Circular crop so flags sit next to the round USDC/EURC coin marks as
-    // equals — the 3:2 flag is center-cropped by the rounded-full clip.
+    // equals. borderRadius MUST be an inline style, not Tailwind's
+    // `rounded-full`: this design system sets borderRadius.full = "0" (see
+    // tailwind.config.ts — sharp corners everywhere), so the utility class
+    // compiles to `border-radius: 0` and silently does nothing here.
+    // flexShrink: 0 on the SVG keeps the 3:2 flag at full width so the
+    // circle center-CROPS it; without it flex squeezes the flag into a
+    // distorted square.
     return (
       <span
-        className="flex items-center justify-center shrink-0 overflow-hidden rounded-full border border-border"
-        style={{ width: px, height: px }}
+        className="flex items-center justify-center shrink-0 overflow-hidden border border-border"
+        style={{ width: px, height: px, borderRadius: "50%" }}
       >
-        <Flag style={{ height: "100%", width: "auto", maxWidth: "none" }} />
+        <Flag style={{ height: "100%", width: "auto", maxWidth: "none", flexShrink: 0 }} />
       </span>
     );
   }

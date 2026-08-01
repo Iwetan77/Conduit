@@ -102,11 +102,21 @@ export function SettlementIntentPay({ intentId }: SettlementIntentPayProps) {
   );
 }
 
-// Direct checkout from a wallet already funded on Arc. The whole settlement
-// happens on-chain through the SDK's ConduitClient.pay (ConduitRouter /
-// AtomicSettler for same-currency, StableFXAdapter route otherwise) — the
-// same proven path the home-page Direct Send uses. No API credentials are
-// needed: the payer signs the transaction, the chain enforces the rest.
+// Direct checkout from a wallet already funded on Arc.
+//
+// Two genuinely different settlement paths, chosen by whether the payer's
+// currency matches the merchant's:
+//
+//   same-currency  -> on-chain via ConduitRouter/AtomicSettler (SDK pay()),
+//                     sub-second, no FX involved.
+//   cross-currency -> Circle StableFX through the Conduit API:
+//                     quote -> payer signs -> prepare -> payer signs ->
+//                     confirm. This is the ONLY working cross-currency route;
+//                     the old on-chain AMM path had no USDC/EURC pool on Arc
+//                     and could never settle.
+//
+// Neither path needs API credentials: the payer's wallet signatures are the
+// only authority that moves their funds.
 function ArcWalletPay({ intent }: { intent: PublicSettlementIntent }) {
   const { address, isConnected } = useAccount();
   const [mounted, setMounted] = useState(false);
@@ -116,6 +126,11 @@ function ArcWalletPay({ intent }: { intent: PublicSettlementIntent }) {
   // A failed transaction — distinct from the outer component's load error,
   // which means the intent itself could not be fetched.
   const [txError, setTxError] = useState("");
+  // Real, stage-by-stage FX progress (cross-currency only) — each string is
+  // set when that step actually starts, never on a timer.
+  const [fxStage, setFxStage] = useState("");
+  const [fxDone, setFxDone] = useState(false);
+  const [fxTx, setFxTx] = useState("");
 
   useEffect(() => { setMounted(true); }, []);
 
@@ -126,20 +141,54 @@ function ArcWalletPay({ intent }: { intent: PublicSettlementIntent }) {
   const handlePay = async () => {
     if (!address) return;
     setStep("pending");
+    setTxError("");
     try {
-      const { ConduitClient } = await import("@conduit/sdk");
-      const { ethers } = await import("ethers");
-      const browserProvider = new ethers.BrowserProvider(
-        (window as unknown as { ethereum: Eip1193Provider }).ethereum
-      );
-      const client = ConduitClient.fromBrowserProvider(browserProvider, "");
-      const result = await client.pay({
-        recipient: intent.settle_address as `0x${string}`,
-        amount: amountRaw,
-        currency: settleToken,
-        payerToken: payerCurrency,
-      });
-      setReceipt(result);
+      if (payerCurrency === settleToken) {
+        // Same currency: straight on-chain settlement, no FX.
+        setFxStage("Settling on-chain…");
+        const { ConduitClient } = await import("@conduit/sdk");
+        const { ethers } = await import("ethers");
+        const browserProvider = new ethers.BrowserProvider(
+          (window as unknown as { ethereum: Eip1193Provider }).ethereum
+        );
+        const client = ConduitClient.fromBrowserProvider(browserProvider, "");
+        const result = await client.pay({
+          recipient: intent.settle_address as `0x${string}`,
+          amount: amountRaw,
+          currency: settleToken,
+          payerToken: payerCurrency,
+        });
+        setReceipt(result);
+        setStep("success");
+        return;
+      }
+
+      // Cross-currency: Circle StableFX via the API. Real, polled progress —
+      // two wallet signatures, never a timed animation.
+      const { quoteSettlementIntent, prepareSettlementIntent, confirmSettlementIntent } =
+        await import("@/lib/conduit-api");
+      const { signTypedDataWithWallet } = await import("@/lib/sign-typed-data");
+
+      setFxStage("Getting a rate from Circle StableFX…");
+      const quote = await quoteSettlementIntent(intent.id, payerCurrency);
+      if (!quote.typed_data) {
+        throw new Error("The FX provider returned no payload to sign.");
+      }
+
+      setFxStage(`Rate ${quote.rate} — approve the quote in your wallet`);
+      const quoteSignature = await signTypedDataWithWallet(quote.typed_data);
+
+      setFxStage("Creating the trade…");
+      const prep = await prepareSettlementIntent(intent.id, quote.typed_data, quoteSignature);
+
+      setFxStage("Approve the transfer in your wallet");
+      const fundingSignature = await signTypedDataWithWallet(prep.funding_typed_data);
+
+      setFxStage("Circle is settling to the recipient…");
+      const res = await confirmSettlementIntent(intent.id, fundingSignature);
+
+      setFxTx(res.tx_hash ?? "");
+      setFxDone(true);
       setStep("success");
     } catch (err) {
       setTxError(err instanceof Error ? err.message : "Transaction failed");
@@ -160,11 +209,44 @@ function ArcWalletPay({ intent }: { intent: PublicSettlementIntent }) {
     );
   }
 
+  // Cross-currency settles at Circle, not through our router, so there is no
+  // on-chain PaymentReceipt to render — show what actually happened instead
+  // of forcing it into a receipt shape it doesn't have.
+  if (step === "success" && fxDone) {
+    return (
+      <div className="space-y-3 border border-signal/40 bg-signal/5 p-4 text-center">
+        <p className="text-signal font-mono text-sm">
+          Paid {amountHuman} {settleToken} to {intent.display_name}
+        </p>
+        <p className="text-ink-dim text-xs font-mono">
+          Converted from {payerCurrency} via Circle StableFX.
+        </p>
+        {fxTx && (
+          <a
+            href={`https://testnet.arcscan.app/tx/${fxTx}`}
+            target="_blank"
+            rel="noreferrer"
+            className="block text-signal text-xs font-mono hover:underline break-all"
+          >
+            {fxTx}
+          </a>
+        )}
+        <p className="text-ink-dim text-xs font-mono">You can close this page.</p>
+      </div>
+    );
+  }
+
   if (step === "pending") {
     return (
       <div className="text-center py-10 space-y-4">
         <div className="w-12 h-12 border-2 border-signal border-t-transparent animate-spin mx-auto" />
-        <p className="text-ink font-mono text-sm">Settling on-chain…</p>
+        <p className="text-ink font-mono text-sm">{fxStage || "Settling on-chain…"}</p>
+        {payerCurrency !== settleToken && (
+          <p className="text-ink-dim text-xs font-mono max-w-xs mx-auto">
+            Cross-currency payments take longer than a direct transfer and need
+            two wallet signatures.
+          </p>
+        )}
       </div>
     );
   }

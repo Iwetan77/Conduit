@@ -178,11 +178,46 @@ export function createSettlementIntent(body: {
   });
 }
 
+export interface IntentQuote {
+  provider: string;
+  rate: string;
+  pay_amount: string;
+  pay_currency: string;
+  expires_at: number;
+  // EIP-712 payload the payer signs (sig #1). Absent for the direct,
+  // same-currency provider, which needs no signature.
+  typed_data?: unknown;
+}
+
 export function quoteSettlementIntent(id: string, payCurrency: string, apiKey?: string) {
-  return request<{ rate: string; pay_amount: string; expires_at: string }>(
-    `/v1/settlement_intents/${id}/quote`,
-    { method: "POST", body: { pay_currency: payCurrency }, apiKey }
-  );
+  return request<IntentQuote>(`/v1/settlement_intents/${id}/quote`, {
+    method: "POST",
+    body: { pay_currency: payCurrency },
+    apiKey,
+  });
+}
+
+// Step 2 of the StableFX flow: hand back the payer's signature over the
+// quote's typed data; Circle creates the trade and returns the funding
+// payload to sign next. Unauthenticated — the payer holds no API key.
+export function prepareSettlementIntent(
+  id: string,
+  quoteMessage: unknown,
+  quoteSignature: string
+) {
+  return request<{ funding_typed_data: unknown }>(`/v1/settlement_intents/${id}/prepare`, {
+    method: "POST",
+    body: { quote_message: quoteMessage, quote_signature: quoteSignature },
+  });
+}
+
+// Step 3: the funding signature. Circle's maker executes and delivers the
+// settle currency to the recipient.
+export function confirmSettlementIntent(id: string, fundingSignature: string) {
+  return request<{ status: string; tx_hash?: string }>(`/v1/settlement_intents/${id}/confirm`, {
+    method: "POST",
+    body: { funding_signature: fundingSignature },
+  });
 }
 
 // ── Public payer surface (no API key -- a bare payment link has none) ───────

@@ -6,7 +6,7 @@
 
 import { use, useEffect, useState } from "react";
 import type { PaymentDeclaration } from "@conduit/sdk/lite";
-import { getPublicSettlementIntent } from "@/lib/conduit-api";
+import { usePublicIntent } from "@/lib/use-public-intent";
 import { DeclarationDisplay } from "@/components/PayFlow/DeclarationDisplay";
 import { PayConfirm } from "@/components/PayFlow/PayConfirm";
 import { SettlementIntentPay } from "@/components/PayFlow/SettlementIntentPay";
@@ -23,22 +23,19 @@ interface PageParams {
 // just the page body (SettlementIntentPay renders display_name/logo_url in
 // the body itself).
 function useRecipientTitle(intentId: string) {
+  // Shares the SAME react-query as SettlementIntentPay below, so setting the
+  // tab title costs no extra request (it used to fire a second, identical
+  // fetch on every page load).
+  const { data: intent } = usePublicIntent(intentId || undefined);
+
   useEffect(() => {
-    if (!intentId) return;
-    let cancelled = false;
+    if (!intent?.display_name) return;
     const previousTitle = document.title;
-    getPublicSettlementIntent(intentId)
-      .then((intent) => {
-        if (!cancelled) document.title = `Pay ${intent.display_name} · Conduit`;
-      })
-      .catch(() => {});
+    document.title = `Pay ${intent.display_name} · Conduit`;
     // Without this the browser tab kept showing the previous merchant's
     // name after navigating away from their invoice.
-    return () => {
-      cancelled = true;
-      document.title = previousTitle;
-    };
-  }, [intentId]);
+    return () => { document.title = previousTitle; };
+  }, [intent?.display_name]);
 }
 
 export default function PayPage({ params }: PageParams) {

@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { usePublicIntent } from "@/lib/use-public-intent";
 import { useAccount } from "wagmi";
 import type { Currency, PaymentReceipt } from "@conduit/sdk/lite";
 import { currencyDecimals } from "@conduit/sdk/lite";
 import type { Eip1193Provider } from "ethers";
-import { getPublicSettlementIntent, type PublicSettlementIntent } from "@/lib/conduit-api";
+import { type PublicSettlementIntent } from "@/lib/conduit-api";
 import { formatAmountRaw, shortenAddress } from "@/lib/format";
 import { isoToToken } from "@/lib/currencies";
 import { CrossChainBridge } from "./CrossChainBridge";
@@ -23,32 +24,21 @@ interface SettlementIntentPayProps {
 // source_chain is anything other than "arc", the payer is bridging in via
 // CCTP and CrossChainBridge drives the rest of this page.
 export function SettlementIntentPay({ intentId }: SettlementIntentPayProps) {
-  const [intent, setIntent] = useState<PublicSettlementIntent | null>(null);
-  const [error, setError] = useState("");
   const [showAddress, setShowAddress] = useState(false);
 
-  // Two separate leaks fixed here, both of which showed one invoice's data
-  // on another invoice's page:
-  //   1. `intent` was not cleared when intentId changed, so the previous
-  //      merchant's name and amount rendered until the new fetch resolved.
-  //   2. A slow response for the OLD intent could resolve after the new one
-  //      and overwrite it, leaving the wrong merchant on screen for good.
-  // Reset synchronously, then ignore any response that is no longer current.
-  useEffect(() => {
-    let cancelled = false;
-    setIntent(null);
-    setError("");
-    getPublicSettlementIntent(intentId)
-      .then((i) => { if (!cancelled) setIntent(i); })
-      .catch(() => { if (!cancelled) setError("This payment link was not found or has expired."); });
-    return () => { cancelled = true; };
-  }, [intentId]);
+  // Shared query with the page's title effect — one request, not two.
+  // Keyed by intentId with NO previous-data retention, which is what keeps
+  // one invoice's merchant and amount from ever rendering on another's page
+  // (the leak this replaced used raw state that survived the id change).
+  const { data: fetched, isError } = usePublicIntent(intentId);
+  const intent = fetched ?? null;
+  const loadError = isError ? "This payment link was not found or has expired." : "";
 
-  if (error) {
+  if (loadError) {
     return (
       <div className="text-center py-16 space-y-3">
         <p className="text-4xl">⚠</p>
-        <p className="text-ink font-medium">{error}</p>
+        <p className="text-ink font-medium">{loadError}</p>
         <p className="text-ink-dim text-sm">Ask the business that sent it for a new link.</p>
       </div>
     );
@@ -123,7 +113,9 @@ function ArcWalletPay({ intent }: { intent: PublicSettlementIntent }) {
   const [payerCurrency, setPayerCurrency] = useState<Currency>("USDC");
   const [step, setStep] = useState<"idle" | "pending" | "success" | "error">("idle");
   const [receipt, setReceipt] = useState<PaymentReceipt | null>(null);
-  const [error, setError] = useState("");
+  // A failed transaction — distinct from the outer component's load error,
+  // which means the intent itself could not be fetched.
+  const [txError, setTxError] = useState("");
 
   useEffect(() => { setMounted(true); }, []);
 
@@ -150,7 +142,7 @@ function ArcWalletPay({ intent }: { intent: PublicSettlementIntent }) {
       setReceipt(result);
       setStep("success");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Transaction failed");
+      setTxError(err instanceof Error ? err.message : "Transaction failed");
       setStep("error");
     }
   };
@@ -196,7 +188,7 @@ function ArcWalletPay({ intent }: { intent: PublicSettlementIntent }) {
       />
       {step === "error" && (
         <div className="bg-danger/10 border border-danger/30 p-3">
-          <p className="text-danger text-sm font-mono">{error}</p>
+          <p className="text-danger text-sm font-mono">{txError}</p>
         </div>
       )}
       <button

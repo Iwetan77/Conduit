@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useAccount, useConnect, useDisconnect } from "wagmi";
 import { usePrivy } from "@privy-io/react-auth";
-import { usePrivyGate, requestGoogleLogin } from "@/lib/privy-gate";
+import { usePrivyGate, requestGoogleLogin, GOOGLE_LOGIN_FAILED } from "@/lib/privy-gate";
 import { shortenAddress } from "@/lib/format";
 
 const PRIVY_ENABLED = Boolean(process.env.NEXT_PUBLIC_PRIVY_APP_ID);
@@ -16,10 +16,33 @@ const PRIVY_ENABLED = Boolean(process.env.NEXT_PUBLIC_PRIVY_APP_ID);
 // payer pages don't ship @privy-io/* until someone actually wants it.
 function GoogleSignIn({ fullWidth = false, short = false }: { fullWidth?: boolean; short?: boolean }) {
   const [starting, setStarting] = useState(false);
+  const [error, setError] = useState("");
+
+  // A failed OAuth start (provider disabled on the Privy app, popup blocked)
+  // must reset the button — otherwise it reads as a permanent hang. The
+  // timeout covers failures that never surface an error at all.
+  useEffect(() => {
+    if (!starting) return;
+    const onFail = (e: Event) => {
+      setStarting(false);
+      setError((e as CustomEvent<string>).detail || "Google sign-in failed.");
+    };
+    window.addEventListener(GOOGLE_LOGIN_FAILED, onFail);
+    const t = setTimeout(() => {
+      setStarting(false);
+      setError("Google sign-in didn't open. Try again, or use a wallet.");
+    }, 15000);
+    return () => {
+      window.removeEventListener(GOOGLE_LOGIN_FAILED, onFail);
+      clearTimeout(t);
+    };
+  }, [starting]);
 
   return (
+   <div className={fullWidth ? "w-full" : ""}>
     <button
       onClick={() => {
+        setError("");
         setStarting(true);
         requestGoogleLogin();
       }}
@@ -41,6 +64,10 @@ function GoogleSignIn({ fullWidth = false, short = false }: { fullWidth?: boolea
         </>
       )}
     </button>
+    {error && (
+      <p className="mt-1 text-scale-1 font-mono text-danger max-w-[220px]">{error}</p>
+    )}
+   </div>
   );
 }
 

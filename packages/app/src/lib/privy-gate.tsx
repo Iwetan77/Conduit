@@ -8,6 +8,9 @@ import { createContext, useContext } from "react";
 
 export const GOOGLE_LOGIN_EVENT = "conduit:google-login";
 export const GOOGLE_LOGIN_FLAG = "conduit:google-login-pending";
+// Dispatched when OAuth can't start (e.g. the provider isn't enabled on the
+// Privy app) so the button can stop saying "Opening…" and say what broke.
+export const GOOGLE_LOGIN_FAILED = "conduit:google-login-failed";
 
 export interface PrivyGate {
   // True once the Privy provider stack is mounted (hooks like usePrivy are

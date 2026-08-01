@@ -9,7 +9,7 @@ import {
   createConfig as createPrivyWagmiConfig,
 } from "@privy-io/wagmi";
 import { wagmiConfigParams, arcTestnet } from "@/lib/wagmi";
-import { GOOGLE_LOGIN_EVENT, GOOGLE_LOGIN_FLAG, hasOAuthCallback } from "@/lib/privy-gate";
+import { GOOGLE_LOGIN_EVENT, GOOGLE_LOGIN_FAILED, GOOGLE_LOGIN_FLAG, hasOAuthCallback } from "@/lib/privy-gate";
 
 // Privy-synced wagmi config: same chains/connectors as the plain one, but
 // Privy-managed wallets (Google-login embedded wallets included) are synced
@@ -70,7 +70,15 @@ function StartGoogleOAuth() {
       try {
         sessionStorage.removeItem(GOOGLE_LOGIN_FLAG);
       } catch {}
-      initOAuth({ provider: "google" });
+      // initOAuth rejects when the provider isn't enabled on the Privy app.
+      // Unhandled, that left the button stuck on "Opening…" forever.
+      Promise.resolve(initOAuth({ provider: "google" })).catch((err: unknown) => {
+        window.dispatchEvent(
+          new CustomEvent(GOOGLE_LOGIN_FAILED, {
+            detail: err instanceof Error ? err.message : "Google sign-in is unavailable.",
+          })
+        );
+      });
     };
     try {
       if (sessionStorage.getItem(GOOGLE_LOGIN_FLAG)) start();

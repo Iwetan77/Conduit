@@ -1,7 +1,7 @@
 "use client";
 
-import type { PaymentDeclaration } from "@conduit/sdk";
-import type { Currency } from "@conduit/sdk";
+import type { PaymentDeclaration } from "@conduit/sdk/lite";
+import type { Currency } from "@conduit/sdk/lite";
 import { formatAmount, shortenAddress } from "@/lib/format";
 import { TokenBadge } from "@/components/Shared/TokenBadge";
 

@@ -4,7 +4,7 @@ import { useRef } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { toPng } from "html-to-image";
 import jsPDF from "jspdf";
-import type { Currency } from "@conduit/sdk";
+import type { Currency } from "@conduit/sdk/lite";
 import { formatAmount } from "@/lib/format";
 
 interface QRDisplayProps {

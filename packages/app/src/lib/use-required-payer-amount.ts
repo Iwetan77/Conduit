@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import type { Currency } from "@conduit/sdk";
+import type { Currency } from "@conduit/sdk/lite";
 import { parseAmount } from "@/lib/format";
 
 // How much of `payerCurrency` this send will actually cost, in the payer

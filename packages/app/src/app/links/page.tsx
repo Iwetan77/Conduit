@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useAccount } from "wagmi";
-import type { PaymentDeclaration } from "@conduit/sdk";
+import type { PaymentDeclaration } from "@conduit/sdk/lite";
 import type { Eip1193Provider } from "ethers";
 import { Nav, MobileNav } from "@/components/Shared/Nav";
 import { WalletConnect } from "@/components/Shared/WalletConnect";
@@ -10,7 +10,7 @@ import { LinkCard } from "@/components/CreateFlow/LinkOutput/LinkCard";
 import { QRDisplay } from "@/components/CreateFlow/QROutput/QRDisplay";
 import { formatAmount, shortenAddress } from "@/lib/format";
 import { TokenBadge } from "@/components/Shared/TokenBadge";
-import { addressToCurrency } from "@conduit/sdk";
+import { addressToCurrency } from "@conduit/sdk/lite";
 
 export default function LinksPage() {
   const { address, isConnected } = useAccount();

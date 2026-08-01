@@ -16,7 +16,7 @@ import {
 } from "@/lib/conduit-api";
 import { formatAmountRaw, shortenAddress } from "@/lib/format";
 import { isoToToken } from "@/lib/currencies";
-import { currencyDecimals } from "@conduit/sdk";
+import { currencyDecimals } from "@conduit/sdk/lite";
 import { SettlementIntentPay } from "./SettlementIntentPay";
 
 interface PaymentLinkPayProps {

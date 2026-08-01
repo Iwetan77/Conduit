@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAccount, useDisconnect, useChainId, useSwitchChain } from "wagmi";
 import { useEffect, useRef, useState } from "react";
-import { CURRENCIES, type Currency } from "@conduit/sdk";
+import { CURRENCIES, type Currency } from "@conduit/sdk/lite";
 import { Logo } from "./Logo";
 import { TokenIcon } from "./TokenBadge";
 import { WalletConnect } from "./WalletConnect";

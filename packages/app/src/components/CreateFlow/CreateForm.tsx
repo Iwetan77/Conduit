@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useAccount } from "wagmi";
-import type { Currency } from "@conduit/sdk";
+import type { Currency } from "@conduit/sdk/lite";
 import type { Eip1193Provider } from "ethers";
 import { AmountInput } from "@/components/SendFlow/AmountInput";
 import { WalletConnect } from "@/components/Shared/WalletConnect";

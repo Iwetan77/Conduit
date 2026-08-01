@@ -2,8 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { useAccount } from "wagmi";
-import type { Currency, PaymentReceipt } from "@conduit/sdk";
-import { currencyDecimals } from "@conduit/sdk";
+import type { Currency, PaymentReceipt } from "@conduit/sdk/lite";
+import { currencyDecimals } from "@conduit/sdk/lite";
 import type { Eip1193Provider } from "ethers";
 import { getPublicSettlementIntent, type PublicSettlementIntent } from "@/lib/conduit-api";
 import { formatAmountRaw, shortenAddress } from "@/lib/format";

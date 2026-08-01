@@ -2,7 +2,12 @@
 // already talks to window.ethereum directly for EVM rather than pulling in a
 // full wallet-adapter framework. Solana wallets (Phantom, Solflare, Backpack)
 // all inject window.solana with this same shape.
-import { Connection, Transaction } from "@solana/web3.js";
+// TYPE-only at module scope. @solana/web3.js is ~11 MB and was being pulled
+// into the /pay checkout bundle for every payer, including the large
+// majority who never touch the cross-chain path. The two values actually
+// needed (Connection, Transaction) are imported inside the one function that
+// uses them, so the package now loads only when a Solana deposit is signed.
+import type { Connection, Transaction } from "@solana/web3.js";
 
 const SOLANA_DEVNET_RPC = "https://api.devnet.solana.com";
 
@@ -38,10 +43,11 @@ export async function signAndSubmitDeposit(unsignedTxBase64: string): Promise<st
   if (!provider) {
     throw new Error("No Solana wallet found. Install Phantom to bridge from Solana.");
   }
-  const tx = Transaction.from(Buffer.from(unsignedTxBase64, "base64"));
+  const { Connection: SolConnection, Transaction: SolTransaction } = await import("@solana/web3.js");
+  const tx = SolTransaction.from(Buffer.from(unsignedTxBase64, "base64"));
   const signedTx = await provider.signTransaction(tx);
 
-  const connection = new Connection(SOLANA_DEVNET_RPC, "confirmed");
+  const connection = new SolConnection(SOLANA_DEVNET_RPC, "confirmed");
   const signature = await connection.sendRawTransaction(signedTx.serialize());
   await connection.confirmTransaction(signature, "confirmed");
   return signature;

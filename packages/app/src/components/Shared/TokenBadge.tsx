@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { Currency } from "@conduit/sdk";
-import { CURRENCIES } from "@conduit/sdk";
+import type { Currency } from "@conduit/sdk/lite";
+import { CURRENCIES } from "@conduit/sdk/lite";
 // Real SVG flags — flag EMOJI render as bare letters ("BR") on Windows
 // browsers, which is why the earlier emoji attempt "didn't load".
 import { BR, AU, MX, CA, GB, ZA, KR, type FlagComponent } from "country-flag-icons/react/3x2";

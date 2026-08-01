@@ -11,7 +11,7 @@
 // lib/use-balances.ts).
 import { useEffect, useState } from "react";
 import { useAccount } from "wagmi";
-import type { Currency } from "@conduit/sdk";
+import type { Currency } from "@conduit/sdk/lite";
 import { TokenIcon } from "@/components/Shared/TokenBadge";
 import { useBalances, type BalanceMap } from "@/lib/use-balances";
 

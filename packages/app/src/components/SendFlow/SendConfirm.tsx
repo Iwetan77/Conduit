@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useAccount } from "wagmi";
-import type { Currency, PaymentReceipt } from "@conduit/sdk";
+import type { Currency, PaymentReceipt } from "@conduit/sdk/lite";
 import type { Eip1193Provider } from "ethers";
 import { parseAmount, formatAmount, shortenAddress } from "@/lib/format";
 import { RoutePreview } from "./RoutePreview";

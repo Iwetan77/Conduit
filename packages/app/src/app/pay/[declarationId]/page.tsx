@@ -5,7 +5,7 @@
 // Rules: no crypto jargon, mobile-first, works without wallet connected, 3 taps to pay.
 
 import { use, useEffect, useState } from "react";
-import type { PaymentDeclaration } from "@conduit/sdk";
+import type { PaymentDeclaration } from "@conduit/sdk/lite";
 import { getPublicSettlementIntent } from "@/lib/conduit-api";
 import { DeclarationDisplay } from "@/components/PayFlow/DeclarationDisplay";
 import { PayConfirm } from "@/components/PayFlow/PayConfirm";

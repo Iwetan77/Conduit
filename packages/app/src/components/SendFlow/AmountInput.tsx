@@ -1,8 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import type { Currency } from "@conduit/sdk";
-import { currencyDecimals, toHumanAmount } from "@conduit/sdk";
+import type { Currency } from "@conduit/sdk/lite";
+import { currencyDecimals, toHumanAmount } from "@conduit/sdk/lite";
 import { TokenSelector } from "@/components/Shared/TokenBadge";
 
 interface AmountInputProps {

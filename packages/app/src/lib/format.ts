@@ -1,5 +1,5 @@
-import type { Currency } from "@conduit/sdk";
-import { toHumanAmount, fromHumanAmount, currencyDecimals } from "@conduit/sdk";
+import type { Currency } from "@conduit/sdk/lite";
+import { toHumanAmount, fromHumanAmount, currencyDecimals } from "@conduit/sdk/lite";
 
 const SYMBOLS: Record<string, string> = { USDC: "$", EURC: "€", BRLA: "R$", AUDF: "A$", MXNB: "MX$", QCAD: "C$", GBPA: "£", ZARU: "R" };
 

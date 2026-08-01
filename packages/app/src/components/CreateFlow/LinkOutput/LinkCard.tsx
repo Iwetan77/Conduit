@@ -2,7 +2,7 @@
 
 import { useRef } from "react";
 import { toPng } from "html-to-image";
-import type { Currency } from "@conduit/sdk";
+import type { Currency } from "@conduit/sdk/lite";
 import { formatAmount } from "@/lib/format";
 
 interface LinkCardProps {

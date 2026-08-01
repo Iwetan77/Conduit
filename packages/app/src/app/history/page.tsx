@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useAccount } from "wagmi";
-import type { PaymentReceipt } from "@conduit/sdk";
+import type { PaymentReceipt } from "@conduit/sdk/lite";
 import { Nav, MobileNav } from "@/components/Shared/Nav";
 import { HistoryTable } from "@/components/Shared/HistoryTable";
 import { WalletConnect } from "@/components/Shared/WalletConnect";

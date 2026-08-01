@@ -1,5 +1,5 @@
 import { ethers } from "ethers";
-import { ARC_TESTNET } from "@conduit/sdk";
+import { ARC_TESTNET } from "@conduit/sdk/lite";
 
 // One read-only provider config for every browser-side direct RPC read.
 // Arc's public RPC aggressively rate-limits, and its 429s come back without

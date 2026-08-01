@@ -1,9 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import type { PaymentDeclaration, PaymentReceipt } from "@conduit/sdk";
+import type { PaymentDeclaration, PaymentReceipt } from "@conduit/sdk/lite";
 import type { Eip1193Provider } from "ethers";
-import { currencyDecimals, toHumanAmount } from "@conduit/sdk";
+import { currencyDecimals, toHumanAmount } from "@conduit/sdk/lite";
 import { formatAmount } from "@/lib/format";
 import { ReceiptCard } from "@/components/Shared/ReceiptCard";
 import { QuotePreview } from "./QuotePreview";

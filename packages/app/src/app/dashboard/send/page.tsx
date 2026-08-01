@@ -15,7 +15,7 @@ import { RoutePreview } from "@/components/SendFlow/RoutePreview";
 import { SendConfirm } from "@/components/SendFlow/SendConfirm";
 import { PayerCurrencyPicker } from "@/components/SendFlow/PayerCurrencyPicker";
 import { WalletConnect } from "@/components/Shared/WalletConnect";
-import type { Currency } from "@conduit/sdk";
+import type { Currency } from "@conduit/sdk/lite";
 
 type Step = "input" | "confirm";
 

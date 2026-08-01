@@ -8,7 +8,7 @@ import { LinkCard } from "@/components/CreateFlow/LinkOutput/LinkCard";
 import { QRDisplay } from "@/components/CreateFlow/QROutput/QRDisplay";
 import { parseAmount } from "@/lib/format";
 import { motion } from "framer-motion";
-import type { Currency } from "@conduit/sdk";
+import type { Currency } from "@conduit/sdk/lite";
 
 type OutputTab = "link" | "qr";
 

@@ -1,6 +1,6 @@
 "use client";
 
-import type { Currency } from "@conduit/sdk";
+import type { Currency } from "@conduit/sdk/lite";
 import { TokenBadge } from "@/components/Shared/TokenBadge";
 
 interface RoutePreviewProps {

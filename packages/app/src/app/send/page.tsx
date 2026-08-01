@@ -11,7 +11,7 @@ import { SendConfirm } from "@/components/SendFlow/SendConfirm";
 import { PayerCurrencyPicker } from "@/components/SendFlow/PayerCurrencyPicker";
 import { WalletConnect } from "@/components/Shared/WalletConnect";
 import { ScanToPay } from "@/components/PayFlow/ScanToPay";
-import type { Currency } from "@conduit/sdk";
+import type { Currency } from "@conduit/sdk/lite";
 import { motion, AnimatePresence } from "framer-motion";
 import { useRequiredPayerAmount } from "@/lib/use-required-payer-amount";
 import { formatAmount } from "@/lib/format";

@@ -1,7 +1,7 @@
 "use client";
 
-import type { PaymentReceipt, Address } from "@conduit/sdk";
-import { addressToCurrency } from "@conduit/sdk";
+import type { PaymentReceipt, Address } from "@conduit/sdk/lite";
+import { addressToCurrency } from "@conduit/sdk/lite";
 import { formatAmount, shortenAddress, formatDate } from "@/lib/format";
 import { TokenBadge } from "./TokenBadge";
 

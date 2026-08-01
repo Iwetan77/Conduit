@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery, keepPreviousData } from "@tanstack/react-query";
-import type { Currency } from "@conduit/sdk";
+import type { Currency } from "@conduit/sdk/lite";
 import { getBalances } from "@/lib/conduit-api";
 
 export type BalanceMap = Partial<Record<Currency, bigint>>;

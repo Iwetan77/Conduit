@@ -4,7 +4,7 @@ import { useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { createPaymentLink, type PaymentLink, type AmountMode, type ReusePolicy, ConduitApiError } from "@/lib/conduit-api";
 import { SETTLE_CURRENCIES as CURRENCIES, currencyFlag, isoToToken } from "@/lib/currencies";
-import { currencyDecimals } from "@conduit/sdk";
+import { currencyDecimals } from "@conduit/sdk/lite";
 
 // Minor units in the settle token's REAL decimals — BRLA/ZARU/KRW1 are
 // 18-decimals tokens; a hardcoded 6 mis-prices those links by 10^12.

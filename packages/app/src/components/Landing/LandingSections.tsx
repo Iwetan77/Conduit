@@ -124,13 +124,13 @@ export function Hero() {
         <p className="font-body text-[1rem] text-ink-dim max-w-[560px] leading-[1.75] mb-10">
           Accept any stablecoin, settle in yours. Direct payments settle on Arc in about a
           second; cross-currency payments route through Circle StableFX with real, live
-          progress — never a fake spinner.
+          progress, never a fake spinner.
         </p>
 
         {/* Two doors, one product: payers send/scan, merchants run a dashboard. */}
         <div className="flex flex-wrap items-center justify-center gap-3 mb-8">
           <a
-            href="#send"
+            href="/send"
             className="px-6 py-3 font-mono font-bold text-[12px] uppercase tracking-widest bg-signal text-signal-ink hover:bg-signal/90 transition-colors"
           >
             Send money →
@@ -207,7 +207,7 @@ function SendPanel() {
         <PanelLabel>For Payers</PanelLabel>
         <PanelTitle>Send &amp; Scan to Pay</PanelTitle>
         <PanelDesc>
-          Connect a wallet — or just sign in with Google and get one. Paste an address or scan a
+          Connect a wallet, or just sign in with Google and get one. Paste an address or scan a
           merchant&apos;s QR, and pay from whatever stablecoin you actually hold; Conduit routes the
           conversion so the other side receives exactly the currency they asked for.
         </PanelDesc>
@@ -245,7 +245,7 @@ function ReceivePanel() {
         <PanelTitle>Dashboard, Links &amp; QR Codes</PanelTitle>
         <PanelDesc>
           Sign in, set your settle currency once, and issue payment links and print-ready QR codes
-          with real policy — fixed or open amounts, expiry, single-use or reusable, voidable.
+          with real policy: fixed or open amounts, expiry, single-use or reusable, voidable.
           Payers need no account; you receive exactly what you asked for.
         </PanelDesc>
       </div>
@@ -287,8 +287,9 @@ function BuildPanel() {
         <PanelLabel>For Developers</PanelLabel>
         <PanelTitle>Conduit API</PanelTitle>
         <PanelDesc>
-          Create a settlement intent in whatever currency you want to receive. Your counterparty
-          pays in whatever they hold. Conduit routes the FX and settles atomically on-chain.
+          Create a settlement intent in the currency you want to receive. Your counterparty pays
+          in whatever they hold, and Conduit routes the FX. You get back a hosted checkout URL
+          and a QR payload, so send whichever suits.
         </PanelDesc>
       </div>
 
@@ -297,22 +298,23 @@ function BuildPanel() {
           <div className="w-2 h-2 bg-danger" />
           <div className="w-2 h-2 bg-ink-dim" />
           <div className="w-2 h-2 bg-signal" />
-          <span className="font-mono text-[9px] text-ink-dim ml-1">conduit-node</span>
+          <span className="font-mono text-[9px] text-ink-dim ml-1">POST /v1/settlement_intents</span>
         </div>
 
-        <div className="p-5 font-mono text-[11px] leading-[1.9] space-y-0">
-          <div className="text-ink-dim">{'// Request payment in EUR, get paid in whatever they hold'}</div>
+        {/* The real endpoint, with the real request and response fields.
+            An earlier version of this panel showed a `conduit.settlementIntents
+            .create()` SDK call that does not exist in @conduit/sdk. */}
+        <div className="p-5 font-mono text-[11px] leading-[1.9] space-y-0 overflow-x-auto">
+          <div className="text-ink-dim">{'# Request payment in EUR, accept what they hold'}</div>
           <div>
-            <span className="text-signal">const </span>
-            <span className="text-ink">intent </span>
-            <span className="text-ink-dim">= await </span>
-            <span className="text-signal">conduit</span>
-            <span className="text-ink">.settlementIntents.create({'{'}</span>
+            <span className="text-signal">curl</span>
+            <span className="text-ink"> -X POST $API/v1/settlement_intents \\</span>
           </div>
-          <div className="text-ink-dim pl-4">{'amount: 1_000_00, settle_currency: "EUR",'}</div>
-          <div className="text-ink-dim pl-4">{'accept_currencies: ["USDC", "BRLA", "GBPA"],'}</div>
-          <div className="text-ink">{'})'}</div>
-          <div className="text-signal">{'// -> hosted_url, qr_payload — send either one'}</div>
+          <div className="text-ink-dim pl-4">{'-H "Authorization: Bearer $SK_KEY" \\'}</div>
+          <div className="text-ink-dim pl-4">{'-d \'{"amount":"100000",'}</div>
+          <div className="text-ink-dim pl-8">{'"settle_currency":"EUR",'}</div>
+          <div className="text-ink-dim pl-8">{'"accept_currencies":["USDC","BRLA","GBPA"]}\''}</div>
+          <div className="text-signal pt-1">{'# -> { "id": "si_...", "hosted_url": ..., "qr_payload": ... }'}</div>
         </div>
       </div>
 
@@ -358,12 +360,12 @@ export function HowItWorks() {
 
         <div className="font-body text-[0.95rem] text-ink-dim max-w-[600px] leading-[1.8] space-y-4 mb-16">
           <p>
-            Every Conduit feature — direct send, payment links, QR codes, the settlement API — is
+            Every Conduit feature, from direct send to payment links, QR codes and the settlement API, is
             an expression of the same underlying primitive: a payment declaration.
           </p>
           <p>
             A declaration says what the recipient wants. Conduit&apos;s routing engine figures out how to
-            get there from whatever the sender holds. Conversion, route selection, settlement —
+            get there from whatever the sender holds. Conversion, route selection and settlement
             all happen inside the pipe, with real progress shown at every step.
           </p>
           <p className="text-ink-dim">

@@ -16,7 +16,7 @@ import { shortenAddress } from "@/lib/format";
 // page ("Sign in as a merchant") — deliberately NOT a persistent nav item,
 // so the payer surface reads as one product, not a door into another one.
 const NAV_LINKS = [
-  { href: "/", label: "Send" },
+  { href: "/send", label: "Send" },
   { href: "/create", label: "Create" },
   { href: "/links", label: "Links" },
   { href: "/history", label: "History" },

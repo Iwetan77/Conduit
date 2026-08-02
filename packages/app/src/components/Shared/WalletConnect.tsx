@@ -6,6 +6,7 @@ import { usePrivy } from "@privy-io/react-auth";
 import {
   usePrivyGate,
   requestGoogleLogin,
+  requestSignOut,
   GOOGLE_LOGIN_ALREADY,
   GOOGLE_LOGIN_FAILED,
   GOOGLE_LOGIN_STARTED,
@@ -115,7 +116,10 @@ function GoogleSignIn({ fullWidth = false, short = false }: { fullWidth?: boolea
                  transition-colors disabled:opacity-50 whitespace-nowrap`}
     >
       {starting ? (
-        stage === "loading" ? "Loading…" : "Opening…"
+        // One label for both stages. "Loading…" vs "Opening…" is a distinction
+        // about our chunk loading, which means nothing to the person waiting —
+        // the stage still drives the timeouts, it just isn't narrated.
+        "Signing in…"
       ) : short ? (
         "Google"
       ) : (
@@ -154,11 +158,11 @@ function PrivyConnectWallet({ fullWidth = false }: { fullWidth?: boolean }) {
 
 // Rendered only when the Privy stack is mounted (usePrivy throws otherwise).
 function PrivySignOut() {
-  const { authenticated, logout } = usePrivy();
+  const { authenticated } = usePrivy();
   if (!authenticated) return null;
   return (
     <button
-      onClick={() => logout()}
+      onClick={() => requestSignOut()}
       className="ml-1 text-scale-2 font-mono text-ink-dim hover:text-danger transition-colors leading-none"
       title="Sign out"
       aria-label="Sign out"

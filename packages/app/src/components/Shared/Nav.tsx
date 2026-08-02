@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAccount, useDisconnect, useChainId, useSwitchChain } from "wagmi";
+import { usePrivyGate, requestSignOut } from "@/lib/privy-gate";
 import { useEffect, useRef, useState } from "react";
 import { CURRENCIES, type Currency } from "@conduit/sdk/lite";
 import { Logo } from "./Logo";
@@ -37,6 +38,10 @@ function WalletMenu({ address }: { address: `0x${string}` }) {
   const [copied, setCopied] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const { disconnect } = useDisconnect();
+  const { mounted: privyMounted } = usePrivyGate();
+  // Privy owns the session when it is mounted; a wagmi-only disconnect
+  // leaves it authenticated with no connected account and no way back.
+  const signOut = () => (privyMounted ? requestSignOut() : disconnect());
 
   // Balances come from the Conduit API's cached endpoint (one server-side
   // Multicall3 read shared by every visitor), not from this browser. Split
@@ -122,7 +127,7 @@ function WalletMenu({ address }: { address: `0x${string}` }) {
             ))}
           </div>
           <button
-            onClick={() => { disconnect(); setOpen(false); }}
+            onClick={() => { signOut(); setOpen(false); }}
             className="w-full px-4 py-3 text-left text-scale-2 font-mono text-danger/80
                        hover:text-danger hover:bg-danger/5 transition-colors"
           >

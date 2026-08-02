@@ -46,6 +46,21 @@ export function requestGoogleLogin() {
   window.dispatchEvent(new Event(GOOGLE_LOGIN_EVENT));
 }
 
+// Signing out has to go through Privy whenever Privy holds the session.
+//
+// wagmi's disconnect() only tears down the wagmi side; the Privy session
+// survives, and @privy-io/wagmi re-syncs the connection ONLY when Privy's
+// wallets or user change — neither of which a wagmi disconnect touches. The
+// result was a dead end: authenticated with no connected account, every
+// surface showing "Sign in with Google", and that button correctly reporting
+// "already signed in" while doing nothing. The only escape was clearing site
+// data. Disconnect is dispatched here and handled inside the Privy stack.
+export const SIGN_OUT_EVENT = "conduit:sign-out";
+
+export function requestSignOut() {
+  window.dispatchEvent(new Event(SIGN_OUT_EVENT));
+}
+
 // True when we've just been redirected back from an OAuth provider. Privy's
 // initOAuth() sends the browser to Google and returns to the app with these
 // query params; the Privy stack MUST be mounted for that callback to be

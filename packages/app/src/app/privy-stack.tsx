@@ -9,6 +9,7 @@ import {
   WagmiProvider as PrivyWagmiProvider,
   createConfig as createPrivyWagmiConfig,
 } from "@privy-io/wagmi";
+import { useDisconnect } from "wagmi";
 import { wagmiConfigParams, arcTestnet } from "@/lib/wagmi";
 import { logAuth } from "@/lib/auth-debug";
 import {
@@ -17,6 +18,7 @@ import {
   GOOGLE_LOGIN_FAILED,
   GOOGLE_LOGIN_FLAG,
   GOOGLE_LOGIN_STARTED,
+  SIGN_OUT_EVENT,
   hasOAuthCallback,
 } from "@/lib/privy-gate";
 
@@ -77,6 +79,7 @@ export default function PrivyStack({
       <QueryClientProvider client={queryClient}>
         <PrivyWagmiProvider config={privyWagmiConfig} setActiveWalletForWagmi={pickWalletForWagmi}>
           <StartGoogleOAuth />
+          <HandleSignOut />
           <EnsureEmbeddedWallet />
           <SyncSessionToken />
           {children}
@@ -170,6 +173,29 @@ function StartGoogleOAuth() {
       );
     });
   }, [pending, ready, authenticated, initOAuth]);
+
+  return null;
+}
+
+// Signing out, done in the one order that actually leaves a clean slate:
+// Privy first (it owns the session and the embedded wallet), then wagmi.
+//
+// Doing only the wagmi half is what stranded the app in an unrecoverable
+// state -- see SIGN_OUT_EVENT in privy-gate.tsx.
+function HandleSignOut() {
+  const { logout } = usePrivy();
+  const { disconnect } = useDisconnect();
+
+  useEffect(() => {
+    const onSignOut = () => {
+      logAuth("stack: signing out of Privy");
+      Promise.resolve(logout())
+        .catch(() => {})
+        .finally(() => disconnect());
+    };
+    window.addEventListener(SIGN_OUT_EVENT, onSignOut);
+    return () => window.removeEventListener(SIGN_OUT_EVENT, onSignOut);
+  }, [logout, disconnect]);
 
   return null;
 }

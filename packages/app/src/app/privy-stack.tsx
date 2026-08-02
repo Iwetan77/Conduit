@@ -9,7 +9,6 @@ import {
   WagmiProvider as PrivyWagmiProvider,
   createConfig as createPrivyWagmiConfig,
 } from "@privy-io/wagmi";
-import { useAccount } from "wagmi";
 import { wagmiConfigParams, arcTestnet } from "@/lib/wagmi";
 import { logAuth } from "@/lib/auth-debug";
 import {
@@ -79,7 +78,6 @@ export default function PrivyStack({
         <PrivyWagmiProvider config={privyWagmiConfig} setActiveWalletForWagmi={pickWalletForWagmi}>
           <StartGoogleOAuth />
           <EnsureEmbeddedWallet />
-          <SyncActiveWallet />
           <SyncSessionToken />
           {children}
         </PrivyWagmiProvider>
@@ -107,7 +105,6 @@ function StartGoogleOAuth() {
   // case once a session exists — the click set the flag and nothing ever
   // re-ran the effect that reads it. That hung every time, not just sometimes.
   const [pending, setPending] = useState(false);
-  const fired = useRef(false);
 
   useEffect(() => {
     const request = () => {
@@ -135,7 +132,6 @@ function StartGoogleOAuth() {
   useEffect(() => {
     if (!pending || ready) return;
     const t = setTimeout(() => {
-      logAuth("stack: Privy never became ready");
       setPending(false);
       window.dispatchEvent(
         new CustomEvent(GOOGLE_LOGIN_FAILED, {
@@ -149,8 +145,6 @@ function StartGoogleOAuth() {
   useEffect(() => {
     logAuth(`stack: ready=${ready} authed=${authenticated} pending=${pending}`);
     if (!pending || !ready || hasOAuthCallback()) return;
-    if (fired.current) return;
-    fired.current = true;
     setPending(false);
     try {
       sessionStorage.removeItem(GOOGLE_LOGIN_FLAG);
@@ -159,7 +153,6 @@ function StartGoogleOAuth() {
     // Already signed in: initOAuth would reject, which used to surface as a
     // generic failure on a button the user clicked for no reason.
     if (authenticated) {
-      fired.current = false;
       logAuth("stack: already authenticated, nothing to open");
       window.dispatchEvent(new Event(GOOGLE_LOGIN_ALREADY));
       return;
@@ -170,8 +163,6 @@ function StartGoogleOAuth() {
     // initOAuth rejects when the provider isn't enabled on the Privy app.
     // Unhandled, that left the button stuck on "Opening…" forever.
     Promise.resolve(initOAuth({ provider: "google" })).catch((err: unknown) => {
-      fired.current = false;
-      logAuth(`stack: initOAuth REJECTED: ${err instanceof Error ? err.message : String(err)}`);
       window.dispatchEvent(
         new CustomEvent(GOOGLE_LOGIN_FAILED, {
           detail: err instanceof Error ? err.message : "Google sign-in is unavailable.",
@@ -205,36 +196,15 @@ function EnsureEmbeddedWallet() {
       (a) => a.type === "wallet" && (a as { walletClientType?: string }).walletClientType === "privy"
     );
     if (hasWallet) {
-      logAuth("stack: embedded wallet present");
       return;
     }
 
     attempted.current = true;
-    logAuth("stack: no embedded wallet, creating one");
     Promise.resolve(createWallet())
-      .then(() => logAuth("stack: embedded wallet created"))
       .catch((err: unknown) => {
         attempted.current = false;
-        logAuth(`stack: createWallet failed: ${err instanceof Error ? err.message : String(err)}`);
       });
   }, [ready, authenticated, user, createWallet]);
-
-  return null;
-}
-
-// wagmi's own view, reported on every change. Kept because "Privy has a
-// wallet" and "wagmi is connected" are different claims, and only the second
-// one makes the UI show a signed-in state — conflating them cost several
-// rounds of wrong diagnosis. Activation itself is the provider's job now
-// (see pickWalletForWagmi); this only observes.
-function SyncActiveWallet() {
-  const { isConnected, address, status, connector } = useAccount();
-
-  useEffect(() => {
-    logAuth(
-      `wagmi: status=${status} connected=${isConnected} address=${address ?? "none"} connector=${connector?.id ?? "none"}`
-    );
-  }, [status, isConnected, address, connector]);
 
   return null;
 }

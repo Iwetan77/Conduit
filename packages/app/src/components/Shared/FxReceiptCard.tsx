@@ -14,9 +14,13 @@ import { TokenBadge } from "./TokenBadge";
 // identical: same header, same centred amount, same detail rows, same
 // full-width explorer link.
 interface FxReceiptCardProps {
+  // Both amounts arrive ALREADY FORMATTED, currency included -- formatAmount()
+  // returns "€4.85 EURC", so appending the currency here rendered
+  // "€4.85 EURC EURC". The two props used to disagree about this: payAmount
+  // was formatted and receiveAmount was a bare number.
   payAmount: string;
-  payCurrency: Currency;
   receiveAmount: string;
+  // Kept for the token badge, not for the amount text.
   receiveCurrency: Currency;
   recipient: string;
   rate: string;
@@ -26,7 +30,6 @@ interface FxReceiptCardProps {
 
 export function FxReceiptCard({
   payAmount,
-  payCurrency,
   receiveAmount,
   receiveCurrency,
   recipient,
@@ -57,10 +60,10 @@ export function FxReceiptCard({
         <div className="text-center py-4">
           <p className="text-ink-dim text-scale-2 mb-1">Amount sent</p>
           <p className="text-scale-6 font-anton text-ink break-all">
-            {payAmount} {payCurrency}
+            {payAmount}
           </p>
           <p className="text-ink-dim text-scale-2 mt-2">
-            Recipient received {receiveAmount} {receiveCurrency} ·{" "}
+            Recipient received {receiveAmount} ·{" "}
             <span className="text-signal">Rate {rate}</span>
           </p>
         </div>

@@ -182,8 +182,7 @@ export function SendConfirm({
           >
             <FxReceiptCard
               payAmount={fxPaid}
-              payCurrency={payerCurrency}
-              receiveAmount={amount}
+              receiveAmount={formatAmount(parsedAmount, recipientCurrency)}
               receiveCurrency={recipientCurrency}
               recipient={recipient}
               rate={fxRate}

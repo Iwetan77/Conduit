@@ -130,8 +130,20 @@ export const ARC_TESTNET = {
   },
 } as const;
 
-// Default payment link base URL
-export const DEFAULT_APP_URL = "https://app.conduit.xyz";
+// Base URL for generated payment links and QR codes.
+//
+// This is baked into every QR a merchant prints, so a wrong value doesn't
+// degrade gracefully — it sends a paying customer to somebody else's website.
+// app.conduit.xyz was a placeholder we never owned, and QRs generated with it
+// did exactly that.
+//
+// In the browser the app's own origin is authoritative: a link created on the
+// site you're using should point back at the site you're using. Falls back to
+// the configured public URL, then to production.
+export const DEFAULT_APP_URL =
+  (typeof window !== "undefined" && window.location.origin) ||
+  process.env.NEXT_PUBLIC_APP_URL ||
+  "https://useconduit-app.vercel.app";
 
 // Default quote TTL (seconds) — same-currency quote() call, not StableFX RFQ
 // (StableFX quotes are ~3.5s TTL, measured live in Phase 0 — see docs/fx-capability.md).

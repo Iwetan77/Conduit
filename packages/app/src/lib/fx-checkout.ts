@@ -21,6 +21,55 @@ export interface FxCheckoutResult {
   payAmount: string;
 }
 
+// Refuse a payment the payer demonstrably cannot fund, before either
+// signature. Reads the token balance straight from Arc rather than trusting a
+// cached UI value, since this is the check that decides whether to ask someone
+// to sign.
+//
+// A read failure is NOT treated as insufficient: Arc's public RPC rate-limits,
+// and blocking a well-funded payer because one eth_call got a 429 would be a
+// worse bug than the one this fixes. Circle still rejects genuinely unfundable
+// trades; this exists to say so clearly and early.
+async function assertCanAfford(
+  payerAddress: string,
+  payCurrency: string,
+  payAmount: string
+): Promise<void> {
+  try {
+    const { ethers } = await import("ethers");
+    const { arcReadProvider } = await import("@/lib/arc-provider");
+    const { CURRENCIES } = await import("@conduit/sdk/lite");
+    const { formatAmount } = await import("@/lib/format");
+
+    const token = CURRENCIES[payCurrency as keyof typeof CURRENCIES]?.token;
+    if (!token) return;
+
+    const erc20 = new ethers.Contract(
+      token,
+      ["function balanceOf(address) view returns (uint256)"],
+      arcReadProvider()
+    );
+    const balance = (await erc20.balanceOf(payerAddress)) as bigint;
+    const needed = BigInt(payAmount);
+    if (balance >= needed) return;
+
+    const cur = payCurrency as Parameters<typeof formatAmount>[1];
+    throw new InsufficientFundsError(
+      `This payment needs ${formatAmount(needed, cur)} ${payCurrency}, but this wallet holds ${formatAmount(balance, cur)}.`
+    );
+  } catch (err) {
+    if (err instanceof InsufficientFundsError) throw err;
+    // Any other failure here is a balance-read problem, not a funding problem.
+  }
+}
+
+export class InsufficientFundsError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "InsufficientFundsError";
+  }
+}
+
 export async function runFxCheckout(
   intentId: string,
   payCurrency: string,
@@ -69,6 +118,15 @@ export async function runFxCheckout(
     }
     rate = quote.rate;
     payAmount = quote.pay_amount;
+
+    // The only point where the exact cost is known: the quote priced it, and
+    // nothing has been signed yet. Cross-currency has no pre-quote, so the
+    // balance guard on the input screen sits out this path entirely — without
+    // this check, overspending sailed through both signatures and died deep
+    // inside Circle as "never got a contractTradeId", which reached the payer
+    // as "the FX provider is temporarily unavailable". It was never the
+    // provider; the taker leg simply couldn't be funded.
+    await assertCanAfford(payerAddress, payCurrency, quote.pay_amount);
 
     onStage(`Rate ${quote.rate} — approve the quote in your wallet`);
     const quoteSignature = await signTypedDataWithWallet(quote.typed_data, wallet);

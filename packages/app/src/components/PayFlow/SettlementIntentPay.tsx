@@ -6,7 +6,7 @@ import { useAccount } from "wagmi";
 import type { Currency, PaymentReceipt } from "@conduit/sdk/lite";
 import { currencyDecimals } from "@conduit/sdk/lite";
 import { type PublicSettlementIntent } from "@/lib/conduit-api";
-import { formatAmountRaw, shortenAddress } from "@/lib/format";
+import { formatAmount, formatAmountRaw, shortenAddress } from "@/lib/format";
 import { isoToToken } from "@/lib/currencies";
 import { CrossChainBridge } from "./CrossChainBridge";
 import { PayerCurrencyPicker } from "@/components/SendFlow/PayerCurrencyPicker";
@@ -201,8 +201,7 @@ function ArcWalletPay({ intent }: { intent: PublicSettlementIntent }) {
       <div className="space-y-3">
         <FxReceiptCard
           payAmount={fxPaid}
-          payCurrency={payerCurrency}
-          receiveAmount={amountHuman}
+          receiveAmount={formatAmount(BigInt(intent.amount), settleToken)}
           receiveCurrency={settleToken}
           recipient={intent.display_name}
           rate={fxRate}

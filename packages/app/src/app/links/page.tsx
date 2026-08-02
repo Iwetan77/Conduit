@@ -8,7 +8,6 @@ import type { PaymentDeclaration } from "@conduit/sdk/lite";
 import { Nav, MobileNav } from "@/components/Shared/Nav";
 import { WalletConnect } from "@/components/Shared/WalletConnect";
 import { LinkCard } from "@/components/CreateFlow/LinkOutput/LinkCard";
-import { QRDisplay } from "@/components/CreateFlow/QROutput/QRDisplay";
 import { formatAmount, shortenAddress } from "@/lib/format";
 import { TokenBadge } from "@/components/Shared/TokenBadge";
 import { addressToCurrency } from "@conduit/sdk/lite";
@@ -214,7 +213,9 @@ export default function LinksPage() {
               </button>
             </div>
 
-            <div className="grid md:grid-cols-2 gap-6 md:items-stretch">
+            {/* Links only on the payer surface — QR is a merchant
+                point-of-sale feature and lives on the dashboard. */}
+            <div className="max-w-xl">
               <div className="flex flex-col">
                 <p className="text-xs font-mono text-ink-dim uppercase tracking-wider mb-3">
                   Payment Link — Digital sharing
@@ -227,19 +228,6 @@ export default function LinksPage() {
                   amount={selectedDecl.amount}
                   currency={selectedDecl.currency}
                   recipientAddress={selectedDecl.recipient}
-                />
-              </div>
-              <div className="flex flex-col">
-                <p className="text-xs font-mono text-ink-dim uppercase tracking-wider mb-3">
-                  QR Code — Physical commerce
-                </p>
-                <QRDisplay
-                  declarationId={selectedDecl.declarationId}
-                  paymentUrl={typeof window !== "undefined"
-                    ? `${window.location.origin}/pay/${selectedDecl.declarationId}`
-                    : selectedDecl.paymentUrl}
-                  amount={selectedDecl.amount}
-                  currency={selectedDecl.currency}
                 />
               </div>
             </div>

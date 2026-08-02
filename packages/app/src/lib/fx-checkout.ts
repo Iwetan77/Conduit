@@ -13,6 +13,8 @@
 // This is the ONLY working cross-currency route. The old on-chain AMM path
 // had no USDC/EURC pool on Arc testnet and could never settle.
 
+import type { Connector } from "wagmi";
+
 export interface FxCheckoutResult {
   txHash: string;
   rate: string;
@@ -22,12 +24,18 @@ export interface FxCheckoutResult {
 export async function runFxCheckout(
   intentId: string,
   payCurrency: string,
-  onStage: (stage: string) => void
+  onStage: (stage: string) => void,
+  connector?: Connector
 ): Promise<FxCheckoutResult> {
   const { quoteSettlementIntent, prepareSettlementIntent, confirmSettlementIntent } = await import(
     "@/lib/conduit-api"
   );
   const { signTypedDataWithWallet } = await import("@/lib/sign-typed-data");
+  const { getWalletProvider } = await import("@/lib/wallet-provider");
+
+  // Resolve the connected wallet once, up front: both signatures must come
+  // from the same account the payment is funded from.
+  const wallet = await getWalletProvider(connector);
 
   onStage("Getting a rate from Circle StableFX…");
   const quote = await quoteSettlementIntent(intentId, payCurrency);
@@ -36,13 +44,13 @@ export async function runFxCheckout(
   }
 
   onStage(`Rate ${quote.rate} — approve the quote in your wallet`);
-  const quoteSignature = await signTypedDataWithWallet(quote.typed_data);
+  const quoteSignature = await signTypedDataWithWallet(quote.typed_data, wallet);
 
   onStage("Creating the trade…");
   const prep = await prepareSettlementIntent(intentId, quote.typed_data, quoteSignature);
 
   onStage("Approve the transfer in your wallet");
-  const fundingSignature = await signTypedDataWithWallet(prep.funding_typed_data);
+  const fundingSignature = await signTypedDataWithWallet(prep.funding_typed_data, wallet);
 
   onStage("Circle is settling to the recipient…");
   const res = await confirmSettlementIntent(intentId, fundingSignature);

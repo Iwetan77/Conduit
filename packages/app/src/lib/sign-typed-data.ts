@@ -12,10 +12,16 @@ export interface TypedDataPayload {
   primaryType?: string;
 }
 
-export async function signTypedDataWithWallet(payload: unknown): Promise<string> {
+// `wallet` is the connected wallet's EIP-1193 provider (see lib/wallet-provider).
+// It must be passed in rather than read off window.ethereum: Privy embedded
+// wallets never inject there, and with several extensions installed the
+// injected one may not be the account the payer is actually paying from.
+export async function signTypedDataWithWallet(
+  payload: unknown,
+  wallet: Eip1193Provider
+): Promise<string> {
   const { ethers } = await import("ethers");
-  const eth = (window as unknown as { ethereum?: Eip1193Provider }).ethereum;
-  if (!eth) throw new Error("No wallet found in this browser.");
+  if (!wallet) throw new Error("No wallet found in this browser.");
 
   const td = (typeof payload === "string" ? JSON.parse(payload) : payload) as TypedDataPayload;
   if (!td?.domain || !td?.types) {
@@ -28,7 +34,7 @@ export async function signTypedDataWithWallet(payload: unknown): Promise<string>
   const message = td.message ?? td.value;
   if (!message) throw new Error("The FX provider returned a payload with no message.");
 
-  const provider = new ethers.BrowserProvider(eth);
+  const provider = new ethers.BrowserProvider(wallet);
   const signer = await provider.getSigner();
   return signer.signTypedData(
     td.domain,

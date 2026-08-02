@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import { useAccount } from "wagmi";
 import { WalletConnect } from "@/components/Shared/WalletConnect";
-import type { Eip1193Provider } from "ethers";
 import { CURRENCIES } from "@conduit/sdk/lite";
 import { getMyAccount, updateAccount, type Account, ConduitApiError } from "@/lib/conduit-api";
 import { SETTLE_CURRENCIES, currencyFlag } from "@/lib/currencies";
@@ -133,7 +132,7 @@ const PREF_REGISTRY_ABI = [
 ] as const;
 
 export default function SettingsPage() {
-  const { address, isConnected } = useAccount();
+  const { address, isConnected, connector } = useAccount();
   const [tokenSymbol, setTokenSymbol] = useState<keyof typeof CURRENCIES>("EURC");
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("");
@@ -151,7 +150,8 @@ export default function SettingsPage() {
       // Loaded on click, not on page load: this page is 500+ kB otherwise
       // and ethers is only needed once the merchant actually signs.
       const { ethers } = await import("ethers");
-      const provider = new ethers.BrowserProvider((window as unknown as { ethereum: unknown }).ethereum as Eip1193Provider);
+      const { getWalletProvider } = await import("@/lib/wallet-provider");
+      const provider = new ethers.BrowserProvider(await getWalletProvider(connector));
       const signer = await provider.getSigner();
       const contract = new ethers.Contract(SETTLEMENT_PREFERENCE_REGISTRY, PREF_REGISTRY_ABI, signer);
       const tokenAddress = CURRENCIES[tokenSymbol].token;
@@ -173,7 +173,8 @@ export default function SettingsPage() {
     setBusy(true);
     try {
       const { ethers } = await import("ethers");
-      const provider = new ethers.BrowserProvider((window as unknown as { ethereum: unknown }).ethereum as Eip1193Provider);
+      const { getWalletProvider } = await import("@/lib/wallet-provider");
+      const provider = new ethers.BrowserProvider(await getWalletProvider(connector));
       const signer = await provider.getSigner();
       const contract = new ethers.Contract(SETTLEMENT_PREFERENCE_REGISTRY, PREF_REGISTRY_ABI, signer);
       const tx = await contract["clearPreference"]();

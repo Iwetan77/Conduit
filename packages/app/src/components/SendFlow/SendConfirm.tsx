@@ -4,7 +4,6 @@ import { useState } from "react";
 import { useAccount } from "wagmi";
 import { requestGoogleLogin } from "@/lib/privy-gate";
 import type { Currency, PaymentReceipt } from "@conduit/sdk/lite";
-import type { Eip1193Provider } from "ethers";
 import { parseAmount, formatAmount, shortenAddress } from "@/lib/format";
 import { RoutePreview } from "./RoutePreview";
 import { ReceiptCard } from "@/components/Shared/ReceiptCard";
@@ -28,7 +27,7 @@ export function SendConfirm({
   onBack,
   onReset,
 }: SendConfirmProps) {
-  const { address } = useAccount();
+  const { address, connector } = useAccount();
   const [step, setStep] = useState<"confirm" | "pending" | "success" | "error">("confirm");
   const [receipt, setReceipt] = useState<PaymentReceipt | null>(null);
   const [error, setError] = useState<string>("");
@@ -87,7 +86,7 @@ export function SendConfirm({
         });
 
         const { runFxCheckout } = await import("@/lib/fx-checkout");
-        const res = await runFxCheckout(intent.id, payerCurrency, setFxStage);
+        const res = await runFxCheckout(intent.id, payerCurrency, setFxStage, connector);
         setFxTx(res.txHash);
         setFxDone(true);
         setStep("success");
@@ -97,11 +96,12 @@ export function SendConfirm({
       // Dynamic import to avoid SSR issues
       const { ConduitClient } = await import("@conduit/sdk");
       const { ethers } = await import("ethers");
+      const { getWalletProvider } = await import("@/lib/wallet-provider");
 
-      // Use browser provider
-      const browserProvider = new ethers.BrowserProvider(
-        (window as unknown as { ethereum: Eip1193Provider }).ethereum
-      );
+      // The connected wallet, via wagmi's connector — NOT window.ethereum,
+      // which is absent for Privy embedded wallets and ambiguous when more
+      // than one extension is installed.
+      const browserProvider = new ethers.BrowserProvider(await getWalletProvider(connector));
       const client = ConduitClient.fromBrowserProvider(browserProvider, "");
 
       const result = await client.pay({

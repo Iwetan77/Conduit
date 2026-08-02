@@ -5,7 +5,6 @@ import { usePublicIntent } from "@/lib/use-public-intent";
 import { useAccount } from "wagmi";
 import type { Currency, PaymentReceipt } from "@conduit/sdk/lite";
 import { currencyDecimals } from "@conduit/sdk/lite";
-import type { Eip1193Provider } from "ethers";
 import { type PublicSettlementIntent } from "@/lib/conduit-api";
 import { formatAmountRaw, shortenAddress } from "@/lib/format";
 import { isoToToken } from "@/lib/currencies";
@@ -118,7 +117,7 @@ export function SettlementIntentPay({ intentId }: SettlementIntentPayProps) {
 // Neither path needs API credentials: the payer's wallet signatures are the
 // only authority that moves their funds.
 function ArcWalletPay({ intent }: { intent: PublicSettlementIntent }) {
-  const { address, isConnected } = useAccount();
+  const { address, isConnected, connector } = useAccount();
   const [mounted, setMounted] = useState(false);
   const [payerCurrency, setPayerCurrency] = useState<Currency>("USDC");
   const [step, setStep] = useState<"idle" | "pending" | "success" | "error">("idle");
@@ -148,9 +147,8 @@ function ArcWalletPay({ intent }: { intent: PublicSettlementIntent }) {
         setFxStage("Settling on-chain…");
         const { ConduitClient } = await import("@conduit/sdk");
         const { ethers } = await import("ethers");
-        const browserProvider = new ethers.BrowserProvider(
-          (window as unknown as { ethereum: Eip1193Provider }).ethereum
-        );
+      const { getWalletProvider } = await import("@/lib/wallet-provider");
+        const browserProvider = new ethers.BrowserProvider(await getWalletProvider(connector));
         const client = ConduitClient.fromBrowserProvider(browserProvider, "");
         const result = await client.pay({
           recipient: intent.settle_address as `0x${string}`,
@@ -166,7 +164,7 @@ function ArcWalletPay({ intent }: { intent: PublicSettlementIntent }) {
       // Cross-currency: Circle StableFX via the API. Real, stage-by-stage
       // progress — two wallet signatures, never a timed animation.
       const { runFxCheckout } = await import("@/lib/fx-checkout");
-      const res = await runFxCheckout(intent.id, payerCurrency, setFxStage);
+      const res = await runFxCheckout(intent.id, payerCurrency, setFxStage, connector);
       setFxTx(res.txHash);
       setFxDone(true);
       setStep("success");

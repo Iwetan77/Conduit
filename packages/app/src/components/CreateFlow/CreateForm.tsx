@@ -3,7 +3,6 @@
 import { useState, useEffect } from "react";
 import { useAccount } from "wagmi";
 import type { Currency } from "@conduit/sdk/lite";
-import type { Eip1193Provider } from "ethers";
 import { AmountInput } from "@/components/SendFlow/AmountInput";
 import { WalletConnect } from "@/components/Shared/WalletConnect";
 
@@ -12,7 +11,7 @@ interface CreateFormProps {
 }
 
 export function CreateForm({ onSuccess }: CreateFormProps) {
-  const { address, isConnected } = useAccount();
+  const { address, isConnected, connector } = useAccount();
   const [createFlow, setCreateFlowState] = useState<{ amount: string; currency: Currency; label: string }>({
     amount: "",
     currency: "USDC",
@@ -33,11 +32,10 @@ export function CreateForm({ onSuccess }: CreateFormProps) {
     try {
       const { ConduitClient } = await import("@conduit/sdk");
       const { ethers } = await import("ethers");
+      const { getWalletProvider } = await import("@/lib/wallet-provider");
       const { parseAmount } = await import("@/lib/format");
 
-      const browserProvider = new ethers.BrowserProvider(
-        (window as unknown as { ethereum: Eip1193Provider }).ethereum
-      );
+      const browserProvider = new ethers.BrowserProvider(await getWalletProvider(connector));
       const client = ConduitClient.fromBrowserProvider(browserProvider, "");
 
       const amount = createFlow.amount ? parseAmount(createFlow.amount, createFlow.currency) : 0n;

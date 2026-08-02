@@ -1,0 +1,11 @@
+-- Persist why an FX trade failed, on the trade itself.
+--
+-- Failure reasons only ever reached stdout, which means diagnosing a failed
+-- settlement required someone with access to the running host's log stream to
+-- go and copy a line out by hand. That is a bad place for the single most
+-- useful fact about a failed payment: it is ephemeral, it isn't queryable, and
+-- it isn't available to the support path at all.
+--
+-- Circle's own errorDetails (e.g. TRANSFER_FROM_FAILED on the taker leg) now
+-- lands here alongside the trade it describes.
+ALTER TABLE fx_trades ADD COLUMN IF NOT EXISTS last_error text;

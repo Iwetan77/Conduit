@@ -595,6 +595,9 @@ func (h *SettlementIntents) Prepare(w http.ResponseWriter, r *http.Request) {
 		// not vanish: "trade creation failed (400): ..." and "never got a
 		// contractTradeId" both used to surface as the same opaque string,
 		// leaving no way to tell them apart without a wallet signature.
+		_, _ = h.Pool.Exec(r.Context(),
+			`UPDATE fx_trades SET last_error = $2, updated_at = now() WHERE id = $1`,
+			trade.id, err.Error())
 		log.Printf("fx: intent=%s stage=%s err=%v", id, "provider", err)
 		writeErr(w, apierrors.E(apierrors.CodeFxProviderUnavailable, ""))
 		return
@@ -683,10 +686,13 @@ func (h *SettlementIntents) Confirm(w http.ResponseWriter, r *http.Request) {
 
 	makerTxHash, err := h.StableFX.Submit(r.Context(), prep, req.FundingSignature)
 	if err != nil {
-		_, _ = h.Pool.Exec(r.Context(), `UPDATE fx_trades SET state = 'failed', updated_at = now() WHERE id = $1`, tradeID)
-		// Submit failures matter most of all -- the payer has signed twice by
-		// now, so a silent generic error here is the worst place to lose the
-		// reason.
+		// Persist the reason, not just log it. The payer has signed twice by
+		// now, so this is the worst possible place to lose why it failed --
+		// and a log line on the running host is unreachable to anyone
+		// debugging from the database side.
+		_, _ = h.Pool.Exec(r.Context(),
+			`UPDATE fx_trades SET state = 'failed', last_error = $2, updated_at = now() WHERE id = $1`,
+			tradeID, err.Error())
 		log.Printf("fx: intent=%s stage=submit trade=%s err=%v", id, tradeID, err)
 		writeErr(w, apierrors.E(apierrors.CodeFxProviderUnavailable, ""))
 		return

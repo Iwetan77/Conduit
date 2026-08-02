@@ -6,6 +6,7 @@ import (
 	"log"
 	"math/big"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -407,6 +408,11 @@ func (h *SettlementIntents) Quote(w http.ResponseWriter, r *http.Request) {
 
 	var quoteBody struct {
 		PayCurrency string `json:"pay_currency"`
+		// PayAddress is the wallet that will SIGN the two EIP-712 payloads.
+		// Circle recovers the signer from the quote signature and checks it
+		// against the address we register on the trade, so this must be the
+		// payer -- not the recipient.
+		PayAddress string `json:"pay_address"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&quoteBody); err != nil {
 		writeErr(w, apierrors.E(apierrors.CodeInvalidRequest, "body"))
@@ -451,6 +457,18 @@ func (h *SettlementIntents) Quote(w http.ResponseWriter, r *http.Request) {
 
 	amount, _ := new(big.Int).SetString(amountStr, 10)
 
+	// The payer signs; the recipient receives. Storing settle_address here --
+	// as this did -- made Circle verify the payer's signature against the
+	// RECIPIENT's address and reject every cross-wallet trade with "the
+	// provided signature could not be verified against the expected address".
+	// It went unnoticed because docs/quickstart.md pays itself, where the two
+	// addresses are the same key. Falling back to settleAddress preserves
+	// exactly that case for callers that don't send pay_address.
+	payAddress := strings.TrimSpace(quoteBody.PayAddress)
+	if payAddress == "" {
+		payAddress = settleAddress
+	}
+
 	var q fx.Quote
 	if payInfo.Symbol == settleInfo.Symbol {
 		q, err = fx.DirectProvider{}.Quote(r.Context(), payInfo.Symbol, settleInfo.Symbol, amount, settleAddress)
@@ -483,7 +501,7 @@ func (h *SettlementIntents) Quote(w http.ResponseWriter, r *http.Request) {
 		_, err = h.Pool.Exec(r.Context(),
 			`INSERT INTO fx_trades (id, intent_id, provider, state, pay_currency, pay_amount, pay_address, rate, quote_id, quote_expires_at, quote_typed_data)
 			 VALUES ($1,$2,'stablefx','quoted',$3,$4,$5,$6,$7,$8,$9)`,
-			tradeID, id, payInfo.Symbol, q.FromAmount.String(), settleAddress, q.Rate, q.QuoteID, expiresAt, q.RawTypedData,
+			tradeID, id, payInfo.Symbol, q.FromAmount.String(), payAddress, q.Rate, q.QuoteID, expiresAt, q.RawTypedData,
 		)
 		if err != nil {
 			writeErr(w, apierrors.E(apierrors.CodeInternal, ""))

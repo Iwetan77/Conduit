@@ -208,10 +208,18 @@ export interface IntentQuote {
   typed_data?: unknown;
 }
 
-export function quoteSettlementIntent(id: string, payCurrency: string, apiKey?: string) {
+// payAddress is the wallet that will SIGN, which Circle recovers from the
+// quote signature and checks against the trade. Omitting it made the API fall
+// back to the recipient's address and every cross-wallet trade was rejected.
+export function quoteSettlementIntent(
+  id: string,
+  payCurrency: string,
+  payAddress?: string,
+  apiKey?: string
+) {
   return request<IntentQuote>(`/v1/settlement_intents/${id}/quote`, {
     method: "POST",
-    body: { pay_currency: payCurrency },
+    body: { pay_currency: payCurrency, ...(payAddress ? { pay_address: payAddress } : {}) },
     apiKey,
   });
 }

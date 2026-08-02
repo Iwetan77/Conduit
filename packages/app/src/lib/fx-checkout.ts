@@ -37,8 +37,21 @@ export async function runFxCheckout(
   // from the same account the payment is funded from.
   const wallet = await getWalletProvider(connector);
 
+  // Read the payer address off the very provider that is about to sign, rather
+  // than accepting it from the caller. Circle recovers the signer from the
+  // quote signature and rejects the trade if it doesn't match the address
+  // registered on it, so these two must be the same account by construction —
+  // passing it in separately is exactly the kind of drift that produced
+  // "the provided signature could not be verified against the expected
+  // address".
+  const accounts = (await wallet.request({ method: "eth_accounts" })) as string[];
+  const payerAddress = accounts?.[0];
+  if (!payerAddress) {
+    throw new Error("No wallet account is connected to sign this payment.");
+  }
+
   onStage("Getting a rate from Circle StableFX…");
-  const quote = await quoteSettlementIntent(intentId, payCurrency);
+  const quote = await quoteSettlementIntent(intentId, payCurrency, payerAddress);
   if (!quote.typed_data) {
     throw new Error("The FX provider returned no payload to sign.");
   }

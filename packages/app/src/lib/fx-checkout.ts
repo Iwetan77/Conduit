@@ -47,7 +47,15 @@ export async function runFxCheckout(
   const quoteSignature = await signTypedDataWithWallet(quote.typed_data, wallet);
 
   onStage("Creating the trade…");
-  const prep = await prepareSettlementIntent(intentId, quote.typed_data, quoteSignature);
+  // Circle wants the INNER message, not the whole EIP-712 envelope, even
+  // though the signature is over the full envelope (domain + types + message).
+  // Sending the envelope here made Circle reject the trade, which the API then
+  // reported as the catch-all "FX provider is temporarily unavailable" — the
+  // quote succeeded, so the failure only ever showed up after the first
+  // signature. docs/quickstart.md's working flow does exactly this split.
+  const quoteMessage = (quote.typed_data as { message?: unknown; value?: unknown }).message
+    ?? (quote.typed_data as { value?: unknown }).value;
+  const prep = await prepareSettlementIntent(intentId, quoteMessage, quoteSignature);
 
   onStage("Approve the transfer in your wallet");
   const fundingSignature = await signTypedDataWithWallet(prep.funding_typed_data, wallet);

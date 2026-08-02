@@ -219,8 +219,17 @@ function SyncActiveWallet() {
   const { ready, authenticated } = usePrivy();
   const { wallets } = useWallets();
   const { setActiveWallet } = useSetActiveWallet();
-  const { isConnected } = useAccount();
+  const { isConnected, address, status, connector } = useAccount();
   const activating = useRef<string | undefined>(undefined);
+
+  // wagmi's own view, reported on every change. "setActiveWallet resolved" and
+  // "wagmi is connected" are different claims, and only the second one makes
+  // the UI show a signed-in state.
+  useEffect(() => {
+    logAuth(
+      `wagmi: status=${status} connected=${isConnected} address=${address ?? "none"} connector=${connector?.id ?? "none"}`
+    );
+  }, [status, isConnected, address, connector]);
 
   useEffect(() => {
     if (!ready || !authenticated || isConnected) return;
@@ -228,20 +237,38 @@ function SyncActiveWallet() {
       logAuth("stack: authenticated but Privy reports no wallets yet");
       return;
     }
+    logAuth(
+      `stack: wallets=${wallets.map((w) => `${w.walletClientType}:${w.address.slice(0, 8)}@${w.chainId}`).join(",")}`
+    );
 
     const wallet = wallets.find((w) => w.walletClientType === "privy") ?? wallets[0];
     if (!wallet || activating.current === wallet.address) return;
 
     activating.current = wallet.address;
-    logAuth(`stack: activating ${wallet.walletClientType} wallet ${wallet.address}`);
-    Promise.resolve(setActiveWallet(wallet))
-      .then(() => logAuth("stack: wallet is now active in wagmi"))
-      .catch((err: unknown) => {
+
+    (async () => {
+      // An embedded wallet sitting on a chain the wagmi config doesn't declare
+      // can't become an active connection — wagmi has no transport for it.
+      try {
+        if (wallet.chainId !== `eip155:${arcTestnet.id}`) {
+          logAuth(`stack: switching wallet from ${wallet.chainId} to Arc`);
+          await wallet.switchChain(arcTestnet.id);
+        }
+      } catch (err) {
+        logAuth(`stack: switchChain failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+
+      logAuth(`stack: activating ${wallet.walletClientType} wallet ${wallet.address}`);
+      try {
+        await setActiveWallet(wallet);
+        logAuth("stack: setActiveWallet resolved");
+      } catch (err) {
         activating.current = undefined;
         logAuth(
           `stack: setActiveWallet failed: ${err instanceof Error ? err.message : String(err)}`
         );
-      });
+      }
+    })();
   }, [ready, authenticated, isConnected, wallets, setActiveWallet]);
 
   return null;

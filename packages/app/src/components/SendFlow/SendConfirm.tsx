@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useAccount } from "wagmi";
-import { usePrivyGate, requestGoogleLogin } from "@/lib/privy-gate";
+import { requestGoogleLogin } from "@/lib/privy-gate";
 import type { Currency, PaymentReceipt } from "@conduit/sdk/lite";
 import type { Eip1193Provider } from "ethers";
 import { parseAmount, formatAmount, shortenAddress } from "@/lib/format";
@@ -35,7 +35,6 @@ export function SendConfirm({
   const [fxStage, setFxStage] = useState("");
   const [fxDone, setFxDone] = useState(false);
   const [fxTx, setFxTx] = useState("");
-  const { mounted: privyMounted } = usePrivyGate();
 
   const parsedAmount = parseAmount(amount, recipientCurrency);
   const isCrossCurrency = payerCurrency !== recipientCurrency;
@@ -260,8 +259,9 @@ export function SendConfirm({
               <div className="border border-border bg-surface p-5 space-y-3 text-center">
                 <p className="text-ink font-mono text-sm">Sign in to send across currencies</p>
                 <p className="text-ink-dim text-xs font-mono">
-                  Paying {recipientCurrency} with {payerCurrency} routes through Circle
-                  StableFX, which needs an account. Same-currency sends don&apos;t.
+                  Circle StableFX has to attach the trade to an identity. This is a
+                  personal sign-in, not a merchant account — no business details, no
+                  dashboard. Same-currency sends skip it entirely.
                 </p>
                 <button
                   onClick={() => {
@@ -271,7 +271,7 @@ export function SendConfirm({
                   className="w-full py-2.5 bg-signal text-signal-ink font-mono text-sm
                              hover:bg-signal/90 transition-colors"
                 >
-                  {privyMounted ? "Sign in with Google" : "Sign in with Google"}
+                  Sign in with Google
                 </button>
               </div>
             ) : (

@@ -45,17 +45,16 @@ export default function SendPage() {
   const insufficient =
     required.data !== undefined && payerBalance !== undefined && payerBalance < required.data;
 
-  // Direct send is on-chain and same-currency only. Cross-currency FX runs
-  // through Circle StableFX, which the Conduit API drives via settlement
-  // intents — a public payer here has no API key to reach it. Blocked in the
-  // UI rather than failing at signing time.
+  // Cross-currency is a first-class send, not a merchant-only feature: it
+  // settles through Circle StableFX against a settlement intent that /send
+  // creates against its own personal account. No payment link, no merchant
+  // dashboard. SendConfirm drives it end to end.
   const crossCurrency = payerCurrency !== recipientCurrency;
   const canProceed =
     isAddress(recipient) &&
     parseFloat(amount) > 0 &&
     isConnected &&
-    !insufficient &&
-    !crossCurrency;
+    !insufficient;
 
   return (
     <div className="min-h-screen">
@@ -106,16 +105,11 @@ export default function SendPage() {
                 {crossCurrency && (
                   <div className="border border-border bg-surface p-3 space-y-1">
                     <p className="text-ink text-sm font-mono">
-                      Direct send is same-currency only.
+                      Converting {payerCurrency} → {recipientCurrency}
                     </p>
                     <p className="text-ink-dim text-sm">
-                      You hold {payerCurrency} but chose to send {recipientCurrency}.
-                      Cross-currency payments settle through Circle StableFX, which runs
-                      on payment links — create one from the{" "}
-                      <a href="/dashboard/request-payment" className="text-signal hover:underline">
-                        merchant dashboard
-                      </a>
-                      , or set both currencies to {payerCurrency}.
+                      Circle StableFX prices this at payment time. You&apos;ll see the exact
+                      rate and what it costs you before you sign anything.
                     </p>
                   </div>
                 )}

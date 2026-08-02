@@ -30,7 +30,9 @@ export async function runFxCheckout(
   const { quoteSettlementIntent, prepareSettlementIntent, confirmSettlementIntent } = await import(
     "@/lib/conduit-api"
   );
-  const { signTypedDataWithWallet } = await import("@/lib/sign-typed-data");
+  const { signTypedDataWithWallet, recoverTypedDataSigner } = await import(
+    "@/lib/sign-typed-data"
+  );
   const { getWalletProvider } = await import("@/lib/wallet-provider");
 
   // Resolve the connected wallet once, up front: both signatures must come
@@ -45,7 +47,7 @@ export async function runFxCheckout(
   // "the provided signature could not be verified against the expected
   // address".
   const accounts = (await wallet.request({ method: "eth_accounts" })) as string[];
-  const payerAddress = accounts?.[0];
+  let payerAddress = accounts?.[0];
   if (!payerAddress) {
     throw new Error("No wallet account is connected to sign this payment.");
   }
@@ -70,6 +72,17 @@ export async function runFxCheckout(
 
     onStage(`Rate ${quote.rate} — approve the quote in your wallet`);
     const quoteSignature = await signTypedDataWithWallet(quote.typed_data, wallet);
+
+    // What a wallet reports as its account and what it signs with can differ.
+    // Circle recovers the signer and rejects the trade if it doesn't match the
+    // address we registered (3015) -- which is why external wallets settled
+    // and the Privy embedded wallet never did. Recover locally; if it isn't
+    // who we registered, re-quote against the real signer and go again.
+    const signedBy = await recoverTypedDataSigner(quote.typed_data, quoteSignature);
+    if (signedBy && signedBy.toLowerCase() !== payerAddress.toLowerCase() && attempt < 2) {
+      payerAddress = signedBy;
+      continue;
+    }
 
     onStage("Creating the trade…");
     // Circle wants the INNER message, not the whole EIP-712 envelope, even

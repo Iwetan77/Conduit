@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { useAccount } from "wagmi";
-import { requestGoogleLogin } from "@/lib/privy-gate";
 import type { Currency, PaymentReceipt } from "@conduit/sdk/lite";
 import { parseAmount, formatAmount, shortenAddress } from "@/lib/format";
 import { RoutePreview } from "./RoutePreview";
@@ -44,41 +43,15 @@ export function SendConfirm({
 
     try {
       if (isCrossCurrency) {
-        // Cross-currency needs a settlement intent to hang the StableFX trade
-        // on, and creating one is an authenticated call — so a direct send in
-        // a different currency requires being signed in. The payer still
-        // signs both FX payloads with their own wallet.
-        const { createSettlementIntent, getSessionToken, createAccountFromPrivy } =
-          await import("@/lib/conduit-api");
-
-        if (!getSessionToken()) {
-          throw new Error("SIGN_IN_REQUIRED");
-        }
+        // Cross-currency needs a settlement intent for StableFX to price and
+        // deliver against. A connected wallet is the only requirement — the
+        // server provisions a wallet-keyed personal account to own the intent.
+        // No sign-in, no merchant onboarding, no dashboard.
+        const { createDirectSettlementIntent } = await import("@/lib/conduit-api");
 
         setFxStage("Preparing the payment…");
-        // Direct send provisions its OWN personal account, silently. It never
-        // routes through merchant onboarding: no business name prompt, no
-        // dashboard. The account is just the owner record a settlement intent
-        // needs (account_id is a required FK).
-        //
-        // `name` is mandatory server-side — omitting it was returning
-        // "name, settle_currency, login_wallet are required", which read to
-        // the user as being told to go create a merchant account.
-        try {
-          const token = getSessionToken();
-          if (token && address) {
-            await createAccountFromPrivy(token, {
-              name: `Personal ${address.slice(0, 6)}…${address.slice(-4)}`,
-              login_wallet: address,
-              settle_currency: recipientCurrency,
-              settle_address: address,
-            });
-          }
-        } catch {
-          // Already onboarded — the handler returns the existing account.
-        }
-
-        const intent = await createSettlementIntent({
+        const intent = await createDirectSettlementIntent({
+          payer_wallet: address,
           amount: parsedAmount.toString(),
           settle_currency: recipientCurrency,
           settle_address: recipient,
@@ -255,31 +228,10 @@ export function SendConfirm({
             animate={{ opacity: 1 }}
             className="space-y-4"
           >
-            {error === "SIGN_IN_REQUIRED" ? (
-              <div className="border border-border bg-surface p-5 space-y-3 text-center">
-                <p className="text-ink font-mono text-sm">Sign in to send across currencies</p>
-                <p className="text-ink-dim text-xs font-mono">
-                  Circle StableFX has to attach the trade to an identity. This is a
-                  personal sign-in, not a merchant account — no business details, no
-                  dashboard. Same-currency sends skip it entirely.
-                </p>
-                <button
-                  onClick={() => {
-                    requestGoogleLogin();
-                    setStep("confirm");
-                  }}
-                  className="w-full py-2.5 bg-signal text-signal-ink font-mono text-sm
-                             hover:bg-signal/90 transition-colors"
-                >
-                  Sign in with Google
-                </button>
-              </div>
-            ) : (
-              <div className="bg-danger/10 border border-danger/30 p-5">
-                <p className="text-danger font-mono mb-2">Transaction Failed</p>
-                <p className="text-danger/70 text-sm font-mono">{error}</p>
-              </div>
-            )}
+            <div className="bg-danger/10 border border-danger/30 p-5">
+              <p className="text-danger font-mono mb-2">Transaction Failed</p>
+              <p className="text-danger/70 text-sm font-mono">{error}</p>
+            </div>
             <div className="flex gap-3">
               <button
                 onClick={() => setStep("confirm")}

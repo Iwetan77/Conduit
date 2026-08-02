@@ -112,6 +112,133 @@ func (h *SettlementIntents) Create(w http.ResponseWriter, r *http.Request) {
 		req.SettleAddress, req.AcceptCurrencies, req.Reference, req.Metadata, expiresAt, time.Now(), req.SourceChain))
 }
 
+type createDirectIntentRequest struct {
+	createIntentRequest
+	// PayerWallet is the connected wallet the payer is sending from. It is
+	// the account key for a direct send -- not a credential.
+	PayerWallet string `json:"payer_wallet"`
+}
+
+// CreateDirect is POST /v1/settlement_intents/direct -- the unauthenticated
+// direct-send path, for a payer who has connected a wallet and nothing else.
+//
+// Why this exists: cross-currency settles through Circle StableFX, which
+// prices and delivers against a settlement intent. settlement_intents.account_id
+// is NOT NULL, so an intent needs an owner row. Routing that through Privy
+// sign-in meant "send EURC while holding USDC" demanded an account, which is
+// not what a direct send is. This provisions a wallet-keyed personal account
+// instead (idempotent -- see migration 0008) and creates the intent under it.
+//
+// On the security boundary: this is deliberately open, exactly like
+// payment_links/{id}/pay and the bridge routes. Creating an intent moves no
+// money and grants no read access to anyone else's data -- the caller supplies
+// their own settle_address, and every subsequent step (quote, prepare,
+// confirm) requires the payer's own wallet signature over Circle's EIP-712
+// payloads. The worst an abuser gets is orphan rows in their own account.
+// Intents are always testmode here: livemode is false, so this can never
+// mint a live-mode owner row.
+func (h *SettlementIntents) CreateDirect(w http.ResponseWriter, r *http.Request) {
+	var req createDirectIntentRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, apierrors.E(apierrors.CodeInvalidRequest, "body"))
+		return
+	}
+	if req.PayerWallet == "" {
+		writeErr(w, apierrors.E(apierrors.CodeInvalidRequest, "payer_wallet"))
+		return
+	}
+	if req.Amount == nil || req.Amount.Sign() <= 0 {
+		writeErr(w, apierrors.E(apierrors.CodeInvalidRequest, "amount"))
+		return
+	}
+	if _, ok := currency.ByISO(req.SettleCurrency); !ok {
+		writeErr(w, apierrors.E(apierrors.CodeCurrencyNotSupported, "settle_currency"))
+		return
+	}
+	if req.SettleAddress == "" {
+		writeErr(w, apierrors.E(apierrors.CodeInvalidRequest, "settle_address"))
+		return
+	}
+
+	ctx := r.Context()
+	accountID, err := h.personalAccountForWallet(ctx, req.PayerWallet, req.SettleCurrency)
+	if err != nil {
+		writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
+		return
+	}
+
+	expiresIn := req.ExpiresIn
+	if expiresIn <= 0 {
+		expiresIn = 3600
+	}
+	if req.AcceptCurrencies == nil {
+		req.AcceptCurrencies = []string{}
+	}
+	if req.SourceChain == "" {
+		req.SourceChain = "arc"
+	}
+
+	id := models.NewID("si")
+	expiresAt := time.Now().Add(time.Duration(expiresIn) * time.Second)
+	metadataJSON, _ := json.Marshal(req.Metadata)
+	if req.Metadata == nil {
+		metadataJSON = []byte("{}")
+	}
+
+	_, err = h.Pool.Exec(ctx,
+		`INSERT INTO settlement_intents
+		 (id, account_id, amount, settle_currency, settle_address, accept_currencies, status, reference, metadata, expires_at, livemode, source_chain)
+		 VALUES ($1,$2,$3,$4,$5,$6,'created',$7,$8,$9,false,$10)`,
+		id, accountID, req.Amount.String(), req.SettleCurrency, req.SettleAddress,
+		req.AcceptCurrencies, nullIfEmpty(req.Reference), metadataJSON, expiresAt, req.SourceChain,
+	)
+	if err != nil {
+		writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, h.toResponse(id, req.Amount.String(), "created", req.SettleCurrency,
+		req.SettleAddress, req.AcceptCurrencies, req.Reference, req.Metadata, expiresAt, time.Now(), req.SourceChain))
+}
+
+// personalAccountForWallet returns the wallet-keyed personal account for
+// `wallet`, creating it on first use. Idempotent: the partial unique index
+// from migration 0008 turns a concurrent double-insert into a conflict we
+// resolve by re-reading, so a payer never accumulates one account per send.
+func (h *SettlementIntents) personalAccountForWallet(ctx context.Context, wallet, settleCurrency string) (string, error) {
+	lookup := `SELECT id FROM accounts WHERE privy_user_id IS NULL AND lower(login_wallet) = lower($1)`
+
+	var accountID string
+	err := h.Pool.QueryRow(ctx, lookup, wallet).Scan(&accountID)
+	if err == nil {
+		return accountID, nil
+	}
+	if err != pgx.ErrNoRows {
+		return "", err
+	}
+
+	accountID = models.NewID("acct")
+	// The name is never shown to the payer -- direct send has no business
+	// profile. It exists because accounts.name is NOT NULL.
+	name := "Personal " + wallet
+	_, err = h.Pool.Exec(ctx,
+		`INSERT INTO accounts (id, name, settle_currency, settle_address, login_wallet, livemode)
+		 VALUES ($1,$2,$3,$4,$5,false)
+		 ON CONFLICT DO NOTHING`,
+		accountID, name, settleCurrency, wallet, wallet,
+	)
+	if err != nil {
+		return "", err
+	}
+
+	// ON CONFLICT DO NOTHING means a racing request may have won; re-read
+	// rather than assuming our id landed.
+	if scanErr := h.Pool.QueryRow(ctx, lookup, wallet).Scan(&accountID); scanErr != nil {
+		return "", scanErr
+	}
+	return accountID, nil
+}
+
 type publicIntentResponse struct {
 	ID             string    `json:"id"`
 	Status         string    `json:"status"`

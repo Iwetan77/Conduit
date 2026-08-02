@@ -157,6 +157,12 @@ func New(cfg Config) http.Handler {
 		// Authenticated callers are still restricted to their own account --
 		// see resolveIntentAccount. No funds move without the payer's own
 		// wallet signature on the quote and funding payloads.
+		// Direct send: a payer with a connected wallet and no account at all.
+		// Creating an intent moves no money -- the payer still signs both
+		// StableFX payloads themselves -- so this is open for the same reason
+		// the routes above are. See SettlementIntents.CreateDirect.
+		r.Post("/settlement_intents/direct", intentsH.CreateDirect)
+
 		r.Post("/settlement_intents/{id}/quote", intentsH.Quote)
 		r.Post("/settlement_intents/{id}/prepare", intentsH.Prepare)
 		r.Post("/settlement_intents/{id}/confirm", intentsH.Confirm)

@@ -178,6 +178,25 @@ export function createSettlementIntent(body: {
   });
 }
 
+// Direct send: cross-currency from a connected wallet with no account and no
+// sign-in. The server provisions a wallet-keyed personal account to own the
+// intent (StableFX trades need one) -- see SettlementIntents.CreateDirect.
+// Unauthenticated on purpose: creating an intent moves no money, and the payer
+// still signs both StableFX payloads with their own wallet.
+export function createDirectSettlementIntent(body: {
+  payer_wallet: string;
+  amount: string;
+  settle_currency: string;
+  settle_address: string;
+  accept_currencies?: string[];
+}) {
+  return request<SettlementIntent>("/v1/settlement_intents/direct", {
+    method: "POST",
+    body,
+    idempotencyKey: crypto.randomUUID(),
+  });
+}
+
 export interface IntentQuote {
   provider: string;
   rate: string;

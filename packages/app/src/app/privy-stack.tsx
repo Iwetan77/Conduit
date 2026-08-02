@@ -3,11 +3,13 @@
 import { useEffect, useRef, useState } from "react";
 import type { QueryClient } from "@tanstack/react-query";
 import { QueryClientProvider } from "@tanstack/react-query";
-import { PrivyProvider, useLoginWithOAuth, usePrivy } from "@privy-io/react-auth";
+import { PrivyProvider, useLoginWithOAuth, usePrivy, useWallets } from "@privy-io/react-auth";
 import {
   WagmiProvider as PrivyWagmiProvider,
   createConfig as createPrivyWagmiConfig,
+  useSetActiveWallet,
 } from "@privy-io/wagmi";
+import { useAccount } from "wagmi";
 import { wagmiConfigParams, arcTestnet } from "@/lib/wagmi";
 import { logAuth } from "@/lib/auth-debug";
 import {
@@ -58,6 +60,7 @@ export default function PrivyStack({
         <PrivyWagmiProvider config={privyWagmiConfig}>
           <StartGoogleOAuth />
           <EnsureEmbeddedWallet />
+          <SyncActiveWallet />
           <SyncSessionToken />
           {children}
         </PrivyWagmiProvider>
@@ -196,6 +199,50 @@ function EnsureEmbeddedWallet() {
         logAuth(`stack: createWallet failed: ${err instanceof Error ? err.message : String(err)}`);
       });
   }, [ready, authenticated, user, createWallet]);
+
+  return null;
+}
+
+// Make Privy's wallet the active wagmi connection.
+//
+// This is the step that was missing entirely. @privy-io/wagmi does NOT adopt a
+// wallet on its own — its WagmiProvider picks an active wallet from the ones
+// Privy reports, and with only an embedded wallet present it left wagmi
+// disconnected. The ?debug=auth trace showed the end state precisely:
+// `authed=true`, `embedded wallet present`, and yet useAccount() had no
+// address, so every surface kept rendering the signed-out "Sign in with
+// Google" button to a fully signed-in user. Clicking it then correctly did
+// nothing, which is what made this look like an OAuth failure for days.
+//
+// Prefer the embedded wallet, fall back to whatever Privy has connected.
+function SyncActiveWallet() {
+  const { ready, authenticated } = usePrivy();
+  const { wallets } = useWallets();
+  const { setActiveWallet } = useSetActiveWallet();
+  const { isConnected } = useAccount();
+  const activating = useRef<string | undefined>(undefined);
+
+  useEffect(() => {
+    if (!ready || !authenticated || isConnected) return;
+    if (wallets.length === 0) {
+      logAuth("stack: authenticated but Privy reports no wallets yet");
+      return;
+    }
+
+    const wallet = wallets.find((w) => w.walletClientType === "privy") ?? wallets[0];
+    if (!wallet || activating.current === wallet.address) return;
+
+    activating.current = wallet.address;
+    logAuth(`stack: activating ${wallet.walletClientType} wallet ${wallet.address}`);
+    Promise.resolve(setActiveWallet(wallet))
+      .then(() => logAuth("stack: wallet is now active in wagmi"))
+      .catch((err: unknown) => {
+        activating.current = undefined;
+        logAuth(
+          `stack: setActiveWallet failed: ${err instanceof Error ? err.message : String(err)}`
+        );
+      });
+  }, [ready, authenticated, isConnected, wallets, setActiveWallet]);
 
   return null;
 }

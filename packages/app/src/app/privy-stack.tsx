@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import type { QueryClient } from "@tanstack/react-query";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { PrivyProvider, useLoginWithOAuth, usePrivy } from "@privy-io/react-auth";
@@ -9,7 +9,14 @@ import {
   createConfig as createPrivyWagmiConfig,
 } from "@privy-io/wagmi";
 import { wagmiConfigParams, arcTestnet } from "@/lib/wagmi";
-import { GOOGLE_LOGIN_EVENT, GOOGLE_LOGIN_FAILED, GOOGLE_LOGIN_FLAG, hasOAuthCallback } from "@/lib/privy-gate";
+import {
+  GOOGLE_LOGIN_ALREADY,
+  GOOGLE_LOGIN_EVENT,
+  GOOGLE_LOGIN_FAILED,
+  GOOGLE_LOGIN_FLAG,
+  GOOGLE_LOGIN_STARTED,
+  hasOAuthCallback,
+} from "@/lib/privy-gate";
 
 // Privy-synced wagmi config: same chains/connectors as the plain one, but
 // Privy-managed wallets (Google-login embedded wallets included) are synced
@@ -62,31 +69,55 @@ export default function PrivyStack({
 // Consume the flag on mount, and answer the event when already mounted.
 function StartGoogleOAuth() {
   const { initOAuth } = useLoginWithOAuth();
+  const { ready, authenticated } = usePrivy();
+
+  // A click can land before Privy has finished bootstrapping — this whole
+  // stack is a lazy chunk, so on a phone the download plus init easily
+  // outlives the click. Calling initOAuth against a not-yet-ready Privy is
+  // what made sign-in intermittent: sometimes init won the race, sometimes it
+  // didn't and the call went nowhere while the button sat on "Opening…".
+  // Hold the request until `ready`, then fire it.
+  const pending = useRef(false);
 
   useEffect(() => {
-    const start = () => {
+    const request = () => {
       // Never restart OAuth while consuming a callback — that would bounce
       // the user back to Google in a loop.
       if (hasOAuthCallback()) return;
-      try {
-        sessionStorage.removeItem(GOOGLE_LOGIN_FLAG);
-      } catch {}
-      // initOAuth rejects when the provider isn't enabled on the Privy app.
-      // Unhandled, that left the button stuck on "Opening…" forever.
-      Promise.resolve(initOAuth({ provider: "google" })).catch((err: unknown) => {
-        window.dispatchEvent(
-          new CustomEvent(GOOGLE_LOGIN_FAILED, {
-            detail: err instanceof Error ? err.message : "Google sign-in is unavailable.",
-          })
-        );
-      });
+      pending.current = true;
     };
     try {
-      if (sessionStorage.getItem(GOOGLE_LOGIN_FLAG)) start();
+      if (sessionStorage.getItem(GOOGLE_LOGIN_FLAG)) request();
     } catch {}
-    window.addEventListener(GOOGLE_LOGIN_EVENT, start);
-    return () => window.removeEventListener(GOOGLE_LOGIN_EVENT, start);
-  }, [initOAuth]);
+    window.addEventListener(GOOGLE_LOGIN_EVENT, request);
+    return () => window.removeEventListener(GOOGLE_LOGIN_EVENT, request);
+  }, []);
+
+  useEffect(() => {
+    if (!ready || !pending.current || hasOAuthCallback()) return;
+    pending.current = false;
+    try {
+      sessionStorage.removeItem(GOOGLE_LOGIN_FLAG);
+    } catch {}
+
+    // Already signed in: initOAuth would reject, which used to surface as a
+    // generic failure on a button the user clicked for no reason.
+    if (authenticated) {
+      window.dispatchEvent(new Event(GOOGLE_LOGIN_ALREADY));
+      return;
+    }
+
+    window.dispatchEvent(new Event(GOOGLE_LOGIN_STARTED));
+    // initOAuth rejects when the provider isn't enabled on the Privy app.
+    // Unhandled, that left the button stuck on "Opening…" forever.
+    Promise.resolve(initOAuth({ provider: "google" })).catch((err: unknown) => {
+      window.dispatchEvent(
+        new CustomEvent(GOOGLE_LOGIN_FAILED, {
+          detail: err instanceof Error ? err.message : "Google sign-in is unavailable.",
+        })
+      );
+    });
+  }, [ready, authenticated, initOAuth]);
 
   return null;
 }

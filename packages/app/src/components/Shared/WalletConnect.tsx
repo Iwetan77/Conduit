@@ -3,7 +3,13 @@
 import { useState, useEffect } from "react";
 import { useAccount, useConnect, useDisconnect } from "wagmi";
 import { usePrivy } from "@privy-io/react-auth";
-import { usePrivyGate, requestGoogleLogin, GOOGLE_LOGIN_FAILED } from "@/lib/privy-gate";
+import {
+  usePrivyGate,
+  requestGoogleLogin,
+  GOOGLE_LOGIN_ALREADY,
+  GOOGLE_LOGIN_FAILED,
+  GOOGLE_LOGIN_STARTED,
+} from "@/lib/privy-gate";
 import { shortenAddress } from "@/lib/format";
 
 const PRIVY_ENABLED = Boolean(process.env.NEXT_PUBLIC_PRIVY_APP_ID);
@@ -21,20 +27,47 @@ function GoogleSignIn({ fullWidth = false, short = false }: { fullWidth?: boolea
   // A failed OAuth start (provider disabled on the Privy app, popup blocked)
   // must reset the button — otherwise it reads as a permanent hang. The
   // timeout covers failures that never surface an error at all.
+  //
+  // The timeout is two-stage on purpose. A single flat 15s was itself a cause
+  // of "sometimes it works, sometimes it errors out": clicking Google
+  // downloads a ~700 kB lazy chunk and boots Privy, which on mobile data
+  // routinely takes longer than that. The button then declared failure while
+  // the sign-in was still coming, and often redirected a moment later. So:
+  // a generous budget for boot, and a tight one once we know initOAuth has
+  // actually been called (from there a redirect should be near-immediate).
   useEffect(() => {
     if (!starting) return;
-    const onFail = (e: Event) => {
+    let timer: ReturnType<typeof setTimeout>;
+
+    const fail = (msg: string) => {
       setStarting(false);
-      setError((e as CustomEvent<string>).detail || "Google sign-in failed.");
+      setError(msg);
     };
+    const onFail = (e: Event) =>
+      fail((e as CustomEvent<string>).detail || "Google sign-in failed.");
+    // Already signed in — nothing to open, and nothing broke.
+    const onAlready = () => setStarting(false);
+    const onStarted = () => {
+      clearTimeout(timer);
+      timer = setTimeout(
+        () => fail("Google didn't open. Check that pop-ups aren't blocked, then try again."),
+        20000
+      );
+    };
+
+    timer = setTimeout(
+      () => fail("Sign-in is taking longer than expected. Check your connection and try again."),
+      45000
+    );
+
     window.addEventListener(GOOGLE_LOGIN_FAILED, onFail);
-    const t = setTimeout(() => {
-      setStarting(false);
-      setError("Google sign-in didn't open. Try again, or use a wallet.");
-    }, 15000);
+    window.addEventListener(GOOGLE_LOGIN_STARTED, onStarted);
+    window.addEventListener(GOOGLE_LOGIN_ALREADY, onAlready);
     return () => {
       window.removeEventListener(GOOGLE_LOGIN_FAILED, onFail);
-      clearTimeout(t);
+      window.removeEventListener(GOOGLE_LOGIN_STARTED, onStarted);
+      window.removeEventListener(GOOGLE_LOGIN_ALREADY, onAlready);
+      clearTimeout(timer);
     };
   }, [starting]);
 

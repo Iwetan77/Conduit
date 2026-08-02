@@ -11,6 +11,13 @@ export const GOOGLE_LOGIN_FLAG = "conduit:google-login-pending";
 // Dispatched when OAuth can't start (e.g. the provider isn't enabled on the
 // Privy app) so the button can stop saying "Opening…" and say what broke.
 export const GOOGLE_LOGIN_FAILED = "conduit:google-login-failed";
+// Dispatched the moment initOAuth is actually called — i.e. the ~700 kB Privy
+// chunk has downloaded AND Privy has finished bootstrapping. The button uses
+// this to tell "still booting" apart from "redirect isn't happening", which
+// need very different timeouts on a phone.
+export const GOOGLE_LOGIN_STARTED = "conduit:google-login-started";
+// Dispatched when the click is a no-op because Privy already has a session.
+export const GOOGLE_LOGIN_ALREADY = "conduit:google-login-already";
 
 export interface PrivyGate {
   // True once the Privy provider stack is mounted (hooks like usePrivy are

@@ -86,10 +86,22 @@ func (e *APIError) Error() string { return e.Message }
 // {root}/guides/errors#{code} — the route that actually exists. The old
 // hardcoded https://docs.conduit.xyz/errors/{code} was a dead link on every
 // error response: that domain does not exist and docs were folded into the
-// app. Set CONDUIT_DOCS_BASE_URL per deployment; the default is local dev.
+// app.
+//
+// Resolution order:
+//  1. CONDUIT_DOCS_BASE_URL — an explicit docs root, for a deployment that
+//     serves docs somewhere other than {app}/docs.
+//  2. CONDUIT_APP_BASE_URL + "/docs" — docs live inside the app, so the one
+//     var every deployment already sets is enough. Deriving it here is what
+//     stops production from shipping localhost links in error responses
+//     because a second, easily-forgotten var was never set.
+//  3. local dev.
 var docsBaseURL = func() string {
 	if v := strings.TrimRight(strings.TrimSpace(os.Getenv("CONDUIT_DOCS_BASE_URL")), "/"); v != "" {
 		return v
+	}
+	if v := strings.TrimRight(strings.TrimSpace(os.Getenv("CONDUIT_APP_BASE_URL")), "/"); v != "" {
+		return v + "/docs"
 	}
 	return "http://localhost:3000/docs"
 }()

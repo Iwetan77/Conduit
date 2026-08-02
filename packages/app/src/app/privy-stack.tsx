@@ -57,6 +57,7 @@ export default function PrivyStack({
       <QueryClientProvider client={queryClient}>
         <PrivyWagmiProvider config={privyWagmiConfig}>
           <StartGoogleOAuth />
+          <EnsureEmbeddedWallet />
           <SyncSessionToken />
           {children}
         </PrivyWagmiProvider>
@@ -156,6 +157,45 @@ function StartGoogleOAuth() {
       );
     });
   }, [pending, ready, authenticated, initOAuth]);
+
+  return null;
+}
+
+// Google sign-in only counts once the user has a wallet — an authenticated
+// Privy session with no wallet syncs nothing into wagmi, so `useAccount` stays
+// empty and every surface keeps showing "Sign in with Google" to someone who
+// is already signed in. Clicking it then does nothing, correctly but
+// uselessly, which is exactly the hang that looked like broken OAuth.
+//
+// The PrivyProvider config below asks for createOnLogin, but the Privy
+// dashboard's embedded_wallet_config is authoritative and was set to "off",
+// so no wallet was ever provisioned. Creating it here makes sign-in work
+// regardless of that setting rather than depending on remote config we don't
+// control from the repo.
+function EnsureEmbeddedWallet() {
+  const { ready, authenticated, user, createWallet } = usePrivy();
+  const attempted = useRef(false);
+
+  useEffect(() => {
+    if (!ready || !authenticated || attempted.current) return;
+
+    const hasWallet = (user?.linkedAccounts ?? []).some(
+      (a) => a.type === "wallet" && (a as { walletClientType?: string }).walletClientType === "privy"
+    );
+    if (hasWallet) {
+      logAuth("stack: embedded wallet present");
+      return;
+    }
+
+    attempted.current = true;
+    logAuth("stack: no embedded wallet, creating one");
+    Promise.resolve(createWallet())
+      .then(() => logAuth("stack: embedded wallet created"))
+      .catch((err: unknown) => {
+        attempted.current = false;
+        logAuth(`stack: createWallet failed: ${err instanceof Error ? err.message : String(err)}`);
+      });
+  }, [ready, authenticated, user, createWallet]);
 
   return null;
 }

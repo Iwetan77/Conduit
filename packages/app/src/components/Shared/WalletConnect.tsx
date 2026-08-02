@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useAccount, useConnect, useDisconnect } from "wagmi";
 import { usePrivy } from "@privy-io/react-auth";
 import {
@@ -40,32 +40,45 @@ function GoogleSignIn({ fullWidth = false, short = false }: { fullWidth?: boolea
   // the sign-in was still coming, and often redirected a moment later. So:
   // a generous budget for boot, and a tight one once we know initOAuth has
   // actually been called (from there a redirect should be near-immediate).
-  useEffect(() => {
-    if (!starting) return;
-    let timer: ReturnType<typeof setTimeout>;
+  // Listeners are registered ONCE on mount, never gated on `starting`.
+  //
+  // Gating them on `starting` lost the answer outright. Clicking batches
+  // setStarting(true) here with setPending(true) in the Privy stack; React
+  // then runs effects for that commit in tree order, and StartGoogleOAuth
+  // sits above this button, so the stack dispatched its outcome BEFORE this
+  // effect had subscribed. When the outcome was "already authenticated" the
+  // event vanished and the button sat on "Loading…" until the 45s budget
+  // expired — the exact hang in the ?debug=auth trace.
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
+  useEffect(() => {
+    const stop = () => {
+      clearTimeout(timer.current);
+      setStarting(false);
+    };
     const fail = (msg: string) => {
       logAuth(`button: giving up -- ${msg}`);
-      setStarting(false);
+      stop();
       setError(msg);
     };
+
     const onFail = (e: Event) =>
       fail((e as CustomEvent<string>).detail || "Google sign-in failed.");
     // Already signed in — nothing to open, and nothing broke.
-    const onAlready = () => setStarting(false);
+    const onAlready = () => {
+      logAuth("button: already signed in");
+      stop();
+    };
+    // initOAuth has actually been called; from here a redirect should be
+    // near-immediate, so the budget tightens.
     const onStarted = () => {
       setStage("opening");
-      clearTimeout(timer);
-      timer = setTimeout(
+      clearTimeout(timer.current);
+      timer.current = setTimeout(
         () => fail("Google didn't open. Check that pop-ups aren't blocked, then try again."),
         20000
       );
     };
-
-    timer = setTimeout(
-      () => fail("Sign-in is taking longer than expected. Check your connection and try again."),
-      45000
-    );
 
     window.addEventListener(GOOGLE_LOGIN_FAILED, onFail);
     window.addEventListener(GOOGLE_LOGIN_STARTED, onStarted);
@@ -74,9 +87,9 @@ function GoogleSignIn({ fullWidth = false, short = false }: { fullWidth?: boolea
       window.removeEventListener(GOOGLE_LOGIN_FAILED, onFail);
       window.removeEventListener(GOOGLE_LOGIN_STARTED, onStarted);
       window.removeEventListener(GOOGLE_LOGIN_ALREADY, onAlready);
-      clearTimeout(timer);
+      clearTimeout(timer.current);
     };
-  }, [starting]);
+  }, []);
 
   return (
    <div className={fullWidth ? "w-full" : ""}>
@@ -86,6 +99,14 @@ function GoogleSignIn({ fullWidth = false, short = false }: { fullWidth?: boolea
         setError("");
         setStage("loading");
         setStarting(true);
+        // Budget for downloading and booting the lazy Privy chunk. Started
+        // here rather than in an effect so it can't race the outcome.
+        clearTimeout(timer.current);
+        timer.current = setTimeout(() => {
+          logAuth("button: giving up -- boot timeout");
+          setStarting(false);
+          setError("Sign-in is taking longer than expected. Check your connection and try again.");
+        }, 45000);
         requestGoogleLogin();
       }}
       disabled={starting}

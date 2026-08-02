@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { QueryClient } from "@tanstack/react-query";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { PrivyProvider, useLoginWithOAuth, usePrivy } from "@privy-io/react-auth";
@@ -77,14 +77,20 @@ function StartGoogleOAuth() {
   // what made sign-in intermittent: sometimes init won the race, sometimes it
   // didn't and the call went nowhere while the button sat on "Opening…".
   // Hold the request until `ready`, then fire it.
-  const pending = useRef(false);
+  //
+  // `pending` MUST be state, not a ref. A ref assignment doesn't re-render, so
+  // when the stack was already mounted and Privy already ready — the common
+  // case once a session exists — the click set the flag and nothing ever
+  // re-ran the effect that reads it. That hung every time, not just sometimes.
+  const [pending, setPending] = useState(false);
+  const fired = useRef(false);
 
   useEffect(() => {
     const request = () => {
       // Never restart OAuth while consuming a callback — that would bounce
       // the user back to Google in a loop.
       if (hasOAuthCallback()) return;
-      pending.current = true;
+      setPending(true);
     };
     try {
       if (sessionStorage.getItem(GOOGLE_LOGIN_FLAG)) request();
@@ -94,8 +100,10 @@ function StartGoogleOAuth() {
   }, []);
 
   useEffect(() => {
-    if (!ready || !pending.current || hasOAuthCallback()) return;
-    pending.current = false;
+    if (!pending || !ready || hasOAuthCallback()) return;
+    if (fired.current) return;
+    fired.current = true;
+    setPending(false);
     try {
       sessionStorage.removeItem(GOOGLE_LOGIN_FLAG);
     } catch {}
@@ -103,6 +111,7 @@ function StartGoogleOAuth() {
     // Already signed in: initOAuth would reject, which used to surface as a
     // generic failure on a button the user clicked for no reason.
     if (authenticated) {
+      fired.current = false;
       window.dispatchEvent(new Event(GOOGLE_LOGIN_ALREADY));
       return;
     }
@@ -111,13 +120,14 @@ function StartGoogleOAuth() {
     // initOAuth rejects when the provider isn't enabled on the Privy app.
     // Unhandled, that left the button stuck on "Opening…" forever.
     Promise.resolve(initOAuth({ provider: "google" })).catch((err: unknown) => {
+      fired.current = false;
       window.dispatchEvent(
         new CustomEvent(GOOGLE_LOGIN_FAILED, {
           detail: err instanceof Error ? err.message : "Google sign-in is unavailable.",
         })
       );
     });
-  }, [ready, authenticated, initOAuth]);
+  }, [pending, ready, authenticated, initOAuth]);
 
   return null;
 }

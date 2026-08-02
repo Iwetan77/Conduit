@@ -22,6 +22,10 @@ const PRIVY_ENABLED = Boolean(process.env.NEXT_PUBLIC_PRIVY_APP_ID);
 // payer pages don't ship @privy-io/* until someone actually wants it.
 function GoogleSignIn({ fullWidth = false, short = false }: { fullWidth?: boolean; short?: boolean }) {
   const [starting, setStarting] = useState(false);
+  // "loading" = fetching/booting the Privy chunk; "opening" = initOAuth has
+  // been called and we're waiting on the redirect. Shown on the button so a
+  // hang says WHICH half is stuck instead of an undifferentiated "Opening…".
+  const [stage, setStage] = useState<"loading" | "opening">("loading");
   const [error, setError] = useState("");
 
   // A failed OAuth start (provider disabled on the Privy app, popup blocked)
@@ -48,6 +52,7 @@ function GoogleSignIn({ fullWidth = false, short = false }: { fullWidth?: boolea
     // Already signed in — nothing to open, and nothing broke.
     const onAlready = () => setStarting(false);
     const onStarted = () => {
+      setStage("opening");
       clearTimeout(timer);
       timer = setTimeout(
         () => fail("Google didn't open. Check that pop-ups aren't blocked, then try again."),
@@ -76,6 +81,7 @@ function GoogleSignIn({ fullWidth = false, short = false }: { fullWidth?: boolea
     <button
       onClick={() => {
         setError("");
+        setStage("loading");
         setStarting(true);
         requestGoogleLogin();
       }}
@@ -85,7 +91,7 @@ function GoogleSignIn({ fullWidth = false, short = false }: { fullWidth?: boolea
                  transition-colors disabled:opacity-50 whitespace-nowrap`}
     >
       {starting ? (
-        "Opening…"
+        stage === "loading" ? "Loading…" : "Opening…"
       ) : short ? (
         "Google"
       ) : (

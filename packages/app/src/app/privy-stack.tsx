@@ -9,6 +9,7 @@ import {
   createConfig as createPrivyWagmiConfig,
 } from "@privy-io/wagmi";
 import { wagmiConfigParams, arcTestnet } from "@/lib/wagmi";
+import { logAuth } from "@/lib/auth-debug";
 import {
   GOOGLE_LOGIN_ALREADY,
   GOOGLE_LOGIN_EVENT,
@@ -89,17 +90,41 @@ function StartGoogleOAuth() {
     const request = () => {
       // Never restart OAuth while consuming a callback — that would bounce
       // the user back to Google in a loop.
-      if (hasOAuthCallback()) return;
+      if (hasOAuthCallback()) {
+        logAuth("stack: request ignored, consuming OAuth callback");
+        return;
+      }
+      logAuth("stack: OAuth request queued");
       setPending(true);
     };
     try {
       if (sessionStorage.getItem(GOOGLE_LOGIN_FLAG)) request();
     } catch {}
+    logAuth("stack: mounted, listening");
     window.addEventListener(GOOGLE_LOGIN_EVENT, request);
     return () => window.removeEventListener(GOOGLE_LOGIN_EVENT, request);
   }, []);
 
+  // A queued request that never reaches `ready` means Privy itself failed to
+  // bootstrap — a different failure from "the redirect didn't happen", and the
+  // one that leaves the button on "Loading…" indefinitely. Name it instead of
+  // waiting out the button's generic budget.
   useEffect(() => {
+    if (!pending || ready) return;
+    const t = setTimeout(() => {
+      logAuth("stack: Privy never became ready");
+      setPending(false);
+      window.dispatchEvent(
+        new CustomEvent(GOOGLE_LOGIN_FAILED, {
+          detail: "Sign-in service didn't load. Reload the page and try again.",
+        })
+      );
+    }, 20000);
+    return () => clearTimeout(t);
+  }, [pending, ready]);
+
+  useEffect(() => {
+    logAuth(`stack: ready=${ready} authed=${authenticated} pending=${pending}`);
     if (!pending || !ready || hasOAuthCallback()) return;
     if (fired.current) return;
     fired.current = true;
@@ -112,15 +137,18 @@ function StartGoogleOAuth() {
     // generic failure on a button the user clicked for no reason.
     if (authenticated) {
       fired.current = false;
+      logAuth("stack: already authenticated, nothing to open");
       window.dispatchEvent(new Event(GOOGLE_LOGIN_ALREADY));
       return;
     }
 
+    logAuth("stack: calling initOAuth(google)");
     window.dispatchEvent(new Event(GOOGLE_LOGIN_STARTED));
     // initOAuth rejects when the provider isn't enabled on the Privy app.
     // Unhandled, that left the button stuck on "Opening…" forever.
     Promise.resolve(initOAuth({ provider: "google" })).catch((err: unknown) => {
       fired.current = false;
+      logAuth(`stack: initOAuth REJECTED: ${err instanceof Error ? err.message : String(err)}`);
       window.dispatchEvent(
         new CustomEvent(GOOGLE_LOGIN_FAILED, {
           detail: err instanceof Error ? err.message : "Google sign-in is unavailable.",

@@ -6,6 +6,8 @@ import dynamic from "next/dynamic";
 import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { wagmiConfig } from "@/lib/wagmi";
+import { logAuth } from "@/lib/auth-debug";
+import { AuthDebug } from "@/components/Shared/AuthDebug";
 import {
   GOOGLE_LOGIN_EVENT,
   PrivyGateContext,
@@ -40,8 +42,14 @@ export function Providers({ children }: { children: React.ReactNode }) {
     // hasOAuthCallback: we're returning from Google. Without this the stack
     // stays unmounted, the callback is never consumed, and Google sign-in
     // appears to do nothing on a first login.
+    logAuth(
+      `providers mount: session=${hasPrivySession()} callback=${hasOAuthCallback()} path=${window.location.pathname}`
+    );
     if (hasPrivySession() || hasOAuthCallback()) setWantPrivy(true);
-    const onLoginRequest = () => setWantPrivy(true);
+    const onLoginRequest = () => {
+      logAuth("providers: login requested -> mounting Privy stack");
+      setWantPrivy(true);
+    };
     window.addEventListener(GOOGLE_LOGIN_EVENT, onLoginRequest);
     return () => window.removeEventListener(GOOGLE_LOGIN_EVENT, onLoginRequest);
   }, []);
@@ -55,7 +63,10 @@ export function Providers({ children }: { children: React.ReactNode }) {
     return (
       <PrivyGateContext.Provider value={{ mounted: false, requestMount }}>
         <WagmiProvider config={wagmiConfig}>
-          <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+          <QueryClientProvider client={queryClient}>
+            {children}
+            <AuthDebug />
+          </QueryClientProvider>
         </WagmiProvider>
       </PrivyGateContext.Provider>
     );
@@ -65,6 +76,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
     <PrivyGateContext.Provider value={{ mounted: true, requestMount }}>
       <PrivyStack appId={PRIVY_APP_ID} queryClient={queryClient}>
         {children}
+        <AuthDebug />
       </PrivyStack>
     </PrivyGateContext.Provider>
   );

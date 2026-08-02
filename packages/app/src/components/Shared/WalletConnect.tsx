@@ -11,6 +11,7 @@ import {
   GOOGLE_LOGIN_STARTED,
 } from "@/lib/privy-gate";
 import { shortenAddress } from "@/lib/format";
+import { logAuth } from "@/lib/auth-debug";
 
 const PRIVY_ENABLED = Boolean(process.env.NEXT_PUBLIC_PRIVY_APP_ID);
 
@@ -44,6 +45,7 @@ function GoogleSignIn({ fullWidth = false, short = false }: { fullWidth?: boolea
     let timer: ReturnType<typeof setTimeout>;
 
     const fail = (msg: string) => {
+      logAuth(`button: giving up -- ${msg}`);
       setStarting(false);
       setError(msg);
     };
@@ -80,6 +82,7 @@ function GoogleSignIn({ fullWidth = false, short = false }: { fullWidth?: boolea
    <div className={fullWidth ? "w-full" : ""}>
     <button
       onClick={() => {
+        logAuth("button: clicked");
         setError("");
         setStage("loading");
         setStarting(true);

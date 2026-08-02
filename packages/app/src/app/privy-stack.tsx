@@ -3,11 +3,11 @@
 import { useEffect, useRef, useState } from "react";
 import type { QueryClient } from "@tanstack/react-query";
 import { QueryClientProvider } from "@tanstack/react-query";
-import { PrivyProvider, useLoginWithOAuth, usePrivy, useWallets } from "@privy-io/react-auth";
+import { PrivyProvider, useLoginWithOAuth, usePrivy } from "@privy-io/react-auth";
+import type { ConnectedWallet, User } from "@privy-io/react-auth";
 import {
   WagmiProvider as PrivyWagmiProvider,
   createConfig as createPrivyWagmiConfig,
-  useSetActiveWallet,
 } from "@privy-io/wagmi";
 import { useAccount } from "wagmi";
 import { wagmiConfigParams, arcTestnet } from "@/lib/wagmi";
@@ -26,6 +26,25 @@ import {
 // in as wagmi connectors, so `useAccount` etc. see them like any injected
 // wallet. Built here so @privy-io/wagmi stays in this lazy chunk.
 const privyWagmiConfig = createPrivyWagmiConfig(wagmiConfigParams);
+
+// Which of Privy's wallets wagmi should treat as the connected account.
+//
+// This prop is what finally made Google sign-in usable. Without it,
+// @privy-io/wagmi drives the connection through wagmi's connect(), which
+// performs an eth_requestAccounts handshake against the wallet's provider.
+// For the Privy embedded wallet that handshake failed — the ?debug=auth
+// trace showed wagmi going `connecting` -> `disconnected` in one millisecond,
+// leaving useAccount() empty and every surface rendering the signed-out
+// "Sign in with Google" button to a user who was fully signed in.
+//
+// With this prop set, @privy-io/wagmi takes its other code path and writes
+// the connected state directly (connector, accounts, chainId), skipping the
+// handshake entirely.
+//
+// An external wallet wins when present: someone who deliberately connected
+// MetaMask should pay from it, not from an embedded wallet they never chose.
+const pickWalletForWagmi = ({ wallets }: { wallets: ConnectedWallet[]; user: User | null }) =>
+  wallets.find((w) => w.walletClientType !== "privy") ?? wallets[0];
 
 // The heavy half of the provider stack (~700 kB of @privy-io/*), loaded
 // lazily by providers.tsx only when something actually needs Privy: a
@@ -57,7 +76,7 @@ export default function PrivyStack({
       }}
     >
       <QueryClientProvider client={queryClient}>
-        <PrivyWagmiProvider config={privyWagmiConfig}>
+        <PrivyWagmiProvider config={privyWagmiConfig} setActiveWalletForWagmi={pickWalletForWagmi}>
           <StartGoogleOAuth />
           <EnsureEmbeddedWallet />
           <SyncActiveWallet />
@@ -203,73 +222,19 @@ function EnsureEmbeddedWallet() {
   return null;
 }
 
-// Make Privy's wallet the active wagmi connection.
-//
-// This is the step that was missing entirely. @privy-io/wagmi does NOT adopt a
-// wallet on its own — its WagmiProvider picks an active wallet from the ones
-// Privy reports, and with only an embedded wallet present it left wagmi
-// disconnected. The ?debug=auth trace showed the end state precisely:
-// `authed=true`, `embedded wallet present`, and yet useAccount() had no
-// address, so every surface kept rendering the signed-out "Sign in with
-// Google" button to a fully signed-in user. Clicking it then correctly did
-// nothing, which is what made this look like an OAuth failure for days.
-//
-// Prefer the embedded wallet, fall back to whatever Privy has connected.
+// wagmi's own view, reported on every change. Kept because "Privy has a
+// wallet" and "wagmi is connected" are different claims, and only the second
+// one makes the UI show a signed-in state — conflating them cost several
+// rounds of wrong diagnosis. Activation itself is the provider's job now
+// (see pickWalletForWagmi); this only observes.
 function SyncActiveWallet() {
-  const { ready, authenticated } = usePrivy();
-  const { wallets } = useWallets();
-  const { setActiveWallet } = useSetActiveWallet();
   const { isConnected, address, status, connector } = useAccount();
-  const activating = useRef<string | undefined>(undefined);
 
-  // wagmi's own view, reported on every change. "setActiveWallet resolved" and
-  // "wagmi is connected" are different claims, and only the second one makes
-  // the UI show a signed-in state.
   useEffect(() => {
     logAuth(
       `wagmi: status=${status} connected=${isConnected} address=${address ?? "none"} connector=${connector?.id ?? "none"}`
     );
   }, [status, isConnected, address, connector]);
-
-  useEffect(() => {
-    if (!ready || !authenticated || isConnected) return;
-    if (wallets.length === 0) {
-      logAuth("stack: authenticated but Privy reports no wallets yet");
-      return;
-    }
-    logAuth(
-      `stack: wallets=${wallets.map((w) => `${w.walletClientType}:${w.address.slice(0, 8)}@${w.chainId}`).join(",")}`
-    );
-
-    const wallet = wallets.find((w) => w.walletClientType === "privy") ?? wallets[0];
-    if (!wallet || activating.current === wallet.address) return;
-
-    activating.current = wallet.address;
-
-    (async () => {
-      // An embedded wallet sitting on a chain the wagmi config doesn't declare
-      // can't become an active connection — wagmi has no transport for it.
-      try {
-        if (wallet.chainId !== `eip155:${arcTestnet.id}`) {
-          logAuth(`stack: switching wallet from ${wallet.chainId} to Arc`);
-          await wallet.switchChain(arcTestnet.id);
-        }
-      } catch (err) {
-        logAuth(`stack: switchChain failed: ${err instanceof Error ? err.message : String(err)}`);
-      }
-
-      logAuth(`stack: activating ${wallet.walletClientType} wallet ${wallet.address}`);
-      try {
-        await setActiveWallet(wallet);
-        logAuth("stack: setActiveWallet resolved");
-      } catch (err) {
-        activating.current = undefined;
-        logAuth(
-          `stack: setActiveWallet failed: ${err instanceof Error ? err.message : String(err)}`
-        );
-      }
-    })();
-  }, [ready, authenticated, isConnected, wallets, setActiveWallet]);
 
   return null;
 }

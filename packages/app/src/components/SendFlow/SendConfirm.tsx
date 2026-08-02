@@ -58,20 +58,26 @@ export function SendConfirm({
         }
 
         setFxStage("Preparing the payment…");
-        // Idempotent: an existing account is simply returned. A payer who
-        // signed in with Google has no Conduit account until now, and
-        // creating an intent needs one.
+        // Direct send provisions its OWN personal account, silently. It never
+        // routes through merchant onboarding: no business name prompt, no
+        // dashboard. The account is just the owner record a settlement intent
+        // needs (account_id is a required FK).
+        //
+        // `name` is mandatory server-side — omitting it was returning
+        // "name, settle_currency, login_wallet are required", which read to
+        // the user as being told to go create a merchant account.
         try {
           const token = getSessionToken();
           if (token && address) {
             await createAccountFromPrivy(token, {
+              name: `Personal ${address.slice(0, 6)}…${address.slice(-4)}`,
               login_wallet: address,
               settle_currency: recipientCurrency,
               settle_address: address,
             });
           }
         } catch {
-          // Already onboarded — carry on.
+          // Already onboarded — the handler returns the existing account.
         }
 
         const intent = await createSettlementIntent({

@@ -134,8 +134,11 @@ export default function SendPage() {
                     recipientCurrency={recipientCurrency}
                     recipientAmount={amount}
                     payerAmount={
-                      required.data !== undefined
-                        ? `${payerCurrency === recipientCurrency ? "" : "~"}${formatAmount(required.data, payerCurrency)}`
+                      // Cross-currency has no pre-quote (Circle prices it at
+                      // pay time), so show nothing rather than a fabricated
+                      // 0.00 — the real rate appears before you sign.
+                      payerCurrency === recipientCurrency && required.data !== undefined
+                        ? formatAmount(required.data, payerCurrency)
                         : undefined
                     }
                     isLoading={required.isLoading}

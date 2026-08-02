@@ -43,10 +43,16 @@ export class ConduitClient {
 
   constructor(config: ConduitClientConfig) {
     const rpc = ARC_TESTNET.rpc;
-    this.provider = new ethers.JsonRpcProvider(rpc, {
-      chainId: ARC_TESTNET.chainId,
-      name: "arc-testnet",
-    });
+    // staticNetwork skips an eth_chainId probe on every call, and
+    // batchMaxCount:1 disables request batching. Arc's public RPC rate-limits
+    // hard and its 429s come back without CORS headers, which a browser
+    // surfaces as an opaque "Load failed" — this is what made same-currency
+    // sends fail even though the transaction itself was fine.
+    this.provider = new ethers.JsonRpcProvider(
+      rpc,
+      { chainId: ARC_TESTNET.chainId, name: "arc-testnet" },
+      { staticNetwork: true, batchMaxCount: 1 }
+    );
 
     this.signerProvider = this.provider;
     this.appUrl = config.appUrl ?? DEFAULT_APP_URL;

@@ -34,8 +34,12 @@ export function RoutePreview({
             <span className="font-mono text-ink">
               {isLoading ? (
                 <span className="inline-block w-16 h-4 bg-border animate-pulse" />
+              ) : payerAmount ? (
+                payerAmount
+              ) : isSameCurrency ? (
+                recipientAmount
               ) : (
-                payerAmount ?? recipientAmount
+                <span className="text-ink-dim text-xs">quoted at payment</span>
               )}
             </span>
           </div>

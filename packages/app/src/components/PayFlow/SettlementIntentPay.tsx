@@ -12,6 +12,7 @@ import { CrossChainBridge } from "./CrossChainBridge";
 import { PayerCurrencyPicker } from "@/components/SendFlow/PayerCurrencyPicker";
 import { RoutePreview } from "@/components/SendFlow/RoutePreview";
 import { ReceiptCard } from "@/components/Shared/ReceiptCard";
+import { FxReceiptCard } from "@/components/Shared/FxReceiptCard";
 import { WalletConnectCompact } from "@/components/Shared/WalletConnect";
 
 interface SettlementIntentPayProps {
@@ -130,6 +131,8 @@ function ArcWalletPay({ intent }: { intent: PublicSettlementIntent }) {
   const [fxStage, setFxStage] = useState("");
   const [fxDone, setFxDone] = useState(false);
   const [fxTx, setFxTx] = useState("");
+  const [fxRate, setFxRate] = useState("");
+  const [fxPaid, setFxPaid] = useState("");
 
   useEffect(() => { setMounted(true); }, []);
 
@@ -166,6 +169,8 @@ function ArcWalletPay({ intent }: { intent: PublicSettlementIntent }) {
       const { runFxCheckout } = await import("@/lib/fx-checkout");
       const res = await runFxCheckout(intent.id, payerCurrency, setFxStage, connector);
       setFxTx(res.txHash);
+      setFxRate(res.rate);
+      setFxPaid(formatAmountRaw(BigInt(res.payAmount), currencyDecimals(payerCurrency)));
       setFxDone(true);
       setStep("success");
     } catch (err) {
@@ -188,28 +193,24 @@ function ArcWalletPay({ intent }: { intent: PublicSettlementIntent }) {
   }
 
   // Cross-currency settles at Circle, not through our router, so there is no
-  // on-chain PaymentReceipt to render — show what actually happened instead
-  // of forcing it into a receipt shape it doesn't have.
+  // on-chain PaymentReceipt — but the payer shouldn't be able to tell which
+  // rail carried their money from how the confirmation looks. FxReceiptCard
+  // mirrors ReceiptCard's anatomy exactly.
   if (step === "success" && fxDone) {
     return (
-      <div className="space-y-3 border border-signal/40 bg-signal/5 p-4 text-center">
-        <p className="text-signal font-mono text-sm">
-          Paid {amountHuman} {settleToken} to {intent.display_name}
+      <div className="space-y-3">
+        <FxReceiptCard
+          payAmount={fxPaid}
+          payCurrency={payerCurrency}
+          receiveAmount={amountHuman}
+          receiveCurrency={settleToken}
+          recipient={intent.display_name}
+          rate={fxRate}
+          txHash={fxTx}
+        />
+        <p className="text-ink-dim text-xs font-mono text-center">
+          Paid to {intent.display_name}. You can close this page.
         </p>
-        <p className="text-ink-dim text-xs font-mono">
-          Converted from {payerCurrency} via Circle StableFX.
-        </p>
-        {fxTx && (
-          <a
-            href={`https://testnet.arcscan.app/tx/${fxTx}`}
-            target="_blank"
-            rel="noreferrer"
-            className="block text-signal text-xs font-mono hover:underline break-all"
-          >
-            {fxTx}
-          </a>
-        )}
-        <p className="text-ink-dim text-xs font-mono">You can close this page.</p>
       </div>
     );
   }

@@ -562,9 +562,23 @@ func (h *SettlementIntents) Prepare(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
 		return
 	}
+	// Circle's quotes carry a ~3.5-5s TTL (docs/fx-capability.md), and the
+	// payer has to open a wallet and approve an EIP-712 payload in between the
+	// quote and this call. No human does that in five seconds, so rejecting a
+	// stale quote HERE made cross-currency structurally impossible: every real
+	// payment failed with fx_quote_expired before Circle was ever asked.
+	//
+	// docs/fx-timing.md assumed /prepare could re-quote and then hand back
+	// typed data to sign. It can't: Circle requires a signature over the
+	// QUOTE's own typed data before a trade exists (see PrepareWithSignature),
+	// which puts the human strictly between quote and prepare.
+	//
+	// So Circle is the authority on its own quote's validity. Attempt the
+	// trade and let it decide; a rejection maps to fx_quote_expired below and
+	// the payer is shown a fresh rate to approve.
 	if time.Now().After(trade.quoteExpiresAt) {
-		writeErr(w, apierrors.E(apierrors.CodeFxQuoteExpired, ""))
-		return
+		log.Printf("fx: intent=%s quote %s past local TTL by %s, attempting anyway",
+			id, trade.quoteID, time.Since(trade.quoteExpiresAt).Round(time.Millisecond))
 	}
 
 	settleInfo, _ := currency.ByISO(trade.settleCurrencyISO)

@@ -6,6 +6,7 @@ import type { Currency, PaymentReceipt } from "@conduit/sdk/lite";
 import { parseAmount, formatAmount, shortenAddress } from "@/lib/format";
 import { RoutePreview } from "./RoutePreview";
 import { ReceiptCard } from "@/components/Shared/ReceiptCard";
+import { FxReceiptCard } from "@/components/Shared/FxReceiptCard";
 import { StepProgress } from "@/components/Shared/StepProgress";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -33,6 +34,8 @@ export function SendConfirm({
   const [fxStage, setFxStage] = useState("");
   const [fxDone, setFxDone] = useState(false);
   const [fxTx, setFxTx] = useState("");
+  const [fxRate, setFxRate] = useState("");
+  const [fxPaid, setFxPaid] = useState("");
 
   const parsedAmount = parseAmount(amount, recipientCurrency);
   const isCrossCurrency = payerCurrency !== recipientCurrency;
@@ -61,6 +64,8 @@ export function SendConfirm({
         const { runFxCheckout } = await import("@/lib/fx-checkout");
         const res = await runFxCheckout(intent.id, payerCurrency, setFxStage, connector);
         setFxTx(res.txHash);
+        setFxRate(res.rate);
+        setFxPaid(formatAmount(BigInt(res.payAmount), payerCurrency));
         setFxDone(true);
         setStep("success");
         return;
@@ -175,24 +180,15 @@ export function SendConfirm({
             animate={{ opacity: 1, y: 0 }}
             className="space-y-4"
           >
-            <div className="border border-signal/40 bg-signal/5 p-5 text-center space-y-2">
-              <p className="text-signal font-mono text-sm">
-                Sent {amount} {recipientCurrency} to {shortenAddress(recipient)}
-              </p>
-              <p className="text-ink-dim text-xs font-mono">
-                Converted from {payerCurrency} via Circle StableFX.
-              </p>
-              {fxTx && (
-                <a
-                  href={`https://testnet.arcscan.app/tx/${fxTx}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="block text-signal text-xs font-mono hover:underline break-all"
-                >
-                  {fxTx}
-                </a>
-              )}
-            </div>
+            <FxReceiptCard
+              payAmount={fxPaid}
+              payCurrency={payerCurrency}
+              receiveAmount={amount}
+              receiveCurrency={recipientCurrency}
+              recipient={recipient}
+              rate={fxRate}
+              txHash={fxTx}
+            />
             <button
               onClick={onReset}
               className="w-full py-3 border border-border

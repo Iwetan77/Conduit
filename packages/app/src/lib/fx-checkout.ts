@@ -50,25 +50,51 @@ export async function runFxCheckout(
     throw new Error("No wallet account is connected to sign this payment.");
   }
 
-  onStage("Getting a rate from Circle StableFX…");
-  const quote = await quoteSettlementIntent(intentId, payCurrency, payerAddress);
-  if (!quote.typed_data) {
-    throw new Error("The FX provider returned no payload to sign.");
+  // Circle's quotes live ~3.5-5s (docs/fx-capability.md) and a human takes
+  // longer than that to read and approve a wallet prompt. So an expired quote
+  // is a NORMAL outcome here, not an error: get a fresh rate and ask again,
+  // showing the new number. Never silently reuse a stale one — the payer signs
+  // the rate they were shown. docs/fx-timing.md calls for exactly this.
+  let prep: { funding_typed_data: unknown } | undefined;
+  let rate = "";
+  let payAmount = "";
+
+  for (let attempt = 0; attempt < 3 && !prep; attempt++) {
+    onStage(attempt === 0 ? "Getting a rate from Circle StableFX…" : "Rate moved — getting a fresh one…");
+    const quote = await quoteSettlementIntent(intentId, payCurrency, payerAddress);
+    if (!quote.typed_data) {
+      throw new Error("The FX provider returned no payload to sign.");
+    }
+    rate = quote.rate;
+    payAmount = quote.pay_amount;
+
+    onStage(`Rate ${quote.rate} — approve the quote in your wallet`);
+    const quoteSignature = await signTypedDataWithWallet(quote.typed_data, wallet);
+
+    onStage("Creating the trade…");
+    // Circle wants the INNER message, not the whole EIP-712 envelope, even
+    // though the signature is over the full envelope (domain + types +
+    // message). Sending the envelope made Circle reject the trade, which the
+    // API reported as the catch-all "FX provider is temporarily unavailable".
+    // docs/quickstart.md's working flow does exactly this split.
+    const quoteMessage =
+      (quote.typed_data as { message?: unknown; value?: unknown }).message ??
+      (quote.typed_data as { value?: unknown }).value;
+
+    try {
+      prep = await prepareSettlementIntent(intentId, quoteMessage, quoteSignature);
+    } catch (err) {
+      const code = (err as { code?: string })?.code;
+      if (code === "fx_quote_expired" && attempt < 2) continue;
+      throw err;
+    }
   }
 
-  onStage(`Rate ${quote.rate} — approve the quote in your wallet`);
-  const quoteSignature = await signTypedDataWithWallet(quote.typed_data, wallet);
-
-  onStage("Creating the trade…");
-  // Circle wants the INNER message, not the whole EIP-712 envelope, even
-  // though the signature is over the full envelope (domain + types + message).
-  // Sending the envelope here made Circle reject the trade, which the API then
-  // reported as the catch-all "FX provider is temporarily unavailable" — the
-  // quote succeeded, so the failure only ever showed up after the first
-  // signature. docs/quickstart.md's working flow does exactly this split.
-  const quoteMessage = (quote.typed_data as { message?: unknown; value?: unknown }).message
-    ?? (quote.typed_data as { value?: unknown }).value;
-  const prep = await prepareSettlementIntent(intentId, quoteMessage, quoteSignature);
+  if (!prep) {
+    throw new Error(
+      "The rate kept moving before the signature landed. Try again — approving a little faster usually does it."
+    );
+  }
 
   onStage("Approve the transfer in your wallet");
   const fundingSignature = await signTypedDataWithWallet(prep.funding_typed_data, wallet);
@@ -76,5 +102,5 @@ export async function runFxCheckout(
   onStage("Circle is settling to the recipient…");
   const res = await confirmSettlementIntent(intentId, fundingSignature);
 
-  return { txHash: res.tx_hash ?? "", rate: quote.rate, payAmount: quote.pay_amount };
+  return { txHash: res.tx_hash ?? "", rate, payAmount };
 }

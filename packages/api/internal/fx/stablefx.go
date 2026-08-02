@@ -8,6 +8,7 @@ import (
 	"io"
 	"math/big"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/kzn-labs/conduit/api/internal/currency"
@@ -195,6 +196,13 @@ func (p *StableFXProvider) PrepareWithSignature(ctx context.Context, q Quote, pa
 		return Preparation{}, apierrors.E(apierrors.CodeFxProviderUnavailable, "")
 	}
 	if status != http.StatusOK && status != http.StatusCreated {
+		// An expired or already-consumed quote is the one failure the payer can
+		// actually act on: show a fresh rate and ask again. Everything else is
+		// opaque to them by design (spec §2.6), so it stays generic.
+		msg := strings.ToLower(tradeEnv.Message)
+		if strings.Contains(msg, "expired") || strings.Contains(msg, "no longer valid") {
+			return Preparation{}, apierrors.E(apierrors.CodeFxQuoteExpired, "")
+		}
 		return Preparation{}, fmt.Errorf("stablefx trade creation failed (%d): %s", tradeEnv.Code, tradeEnv.Message)
 	}
 

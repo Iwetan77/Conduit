@@ -151,10 +151,20 @@ func (h *SettlementIntents) CreateDirect(w http.ResponseWriter, r *http.Request)
 		writeErr(w, apierrors.E(apierrors.CodeInvalidRequest, "amount"))
 		return
 	}
-	if _, ok := currency.ByISO(req.SettleCurrency); !ok {
-		writeErr(w, apierrors.E(apierrors.CodeCurrencyNotSupported, "settle_currency"))
-		return
+	// settlement_intents.settle_currency stores an ISO code ("USD"), but the
+	// payer surface speaks token symbols ("USDC") -- that's what the wallet
+	// and the currency picker deal in. Accept either and normalize, the same
+	// way Quote already resolves pay_currency by symbol then ISO.
+	settleInfo, ok := currency.BySymbol(req.SettleCurrency)
+	if !ok {
+		settleInfo, ok = currency.ByISO(req.SettleCurrency)
+		if !ok {
+			writeErr(w, apierrors.E(apierrors.CodeCurrencyNotSupported, "settle_currency"))
+			return
+		}
 	}
+	req.SettleCurrency = settleInfo.ISO
+
 	if req.SettleAddress == "" {
 		writeErr(w, apierrors.E(apierrors.CodeInvalidRequest, "settle_address"))
 		return

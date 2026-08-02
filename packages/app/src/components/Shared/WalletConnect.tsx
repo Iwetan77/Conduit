@@ -12,7 +12,6 @@ import {
   GOOGLE_LOGIN_STARTED,
 } from "@/lib/privy-gate";
 import { shortenAddress } from "@/lib/format";
-import { logAuth } from "@/lib/auth-debug";
 
 const PRIVY_ENABLED = Boolean(process.env.NEXT_PUBLIC_PRIVY_APP_ID);
 
@@ -25,8 +24,8 @@ const PRIVY_ENABLED = Boolean(process.env.NEXT_PUBLIC_PRIVY_APP_ID);
 function GoogleSignIn({ fullWidth = false, short = false }: { fullWidth?: boolean; short?: boolean }) {
   const [starting, setStarting] = useState(false);
   // "loading" = fetching/booting the Privy chunk; "opening" = initOAuth has
-  // been called and we're waiting on the redirect. Shown on the button so a
-  // hang says WHICH half is stuck instead of an undifferentiated "Opening…".
+  // been called and we're waiting on the redirect. Not shown to the user —
+  // it only selects which timeout budget applies (see below).
   const [stage, setStage] = useState<"loading" | "opening">("loading");
   const [error, setError] = useState("");
 
@@ -48,8 +47,8 @@ function GoogleSignIn({ fullWidth = false, short = false }: { fullWidth?: boolea
   // then runs effects for that commit in tree order, and StartGoogleOAuth
   // sits above this button, so the stack dispatched its outcome BEFORE this
   // effect had subscribed. When the outcome was "already authenticated" the
-  // event vanished and the button sat on "Loading…" until the 45s budget
-  // expired — the exact hang in the ?debug=auth trace.
+  // event vanished and the button sat on its pending label until the 45s
+  // budget expired.
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   useEffect(() => {
@@ -58,7 +57,6 @@ function GoogleSignIn({ fullWidth = false, short = false }: { fullWidth?: boolea
       setStarting(false);
     };
     const fail = (msg: string) => {
-      logAuth(`button: giving up -- ${msg}`);
       stop();
       setError(msg);
     };
@@ -67,7 +65,6 @@ function GoogleSignIn({ fullWidth = false, short = false }: { fullWidth?: boolea
       fail((e as CustomEvent<string>).detail || "Google sign-in failed.");
     // Already signed in — nothing to open, and nothing broke.
     const onAlready = () => {
-      logAuth("button: already signed in");
       stop();
     };
     // initOAuth has actually been called; from here a redirect should be
@@ -96,7 +93,6 @@ function GoogleSignIn({ fullWidth = false, short = false }: { fullWidth?: boolea
    <div className={fullWidth ? "w-full" : ""}>
     <button
       onClick={() => {
-        logAuth("button: clicked");
         setError("");
         setStage("loading");
         setStarting(true);
@@ -104,7 +100,6 @@ function GoogleSignIn({ fullWidth = false, short = false }: { fullWidth?: boolea
         // here rather than in an effect so it can't race the outcome.
         clearTimeout(timer.current);
         timer.current = setTimeout(() => {
-          logAuth("button: giving up -- boot timeout");
           setStarting(false);
           setError("Sign-in is taking longer than expected. Check your connection and try again.");
         }, 45000);

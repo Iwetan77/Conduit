@@ -11,7 +11,6 @@ import {
 } from "@privy-io/wagmi";
 import { useDisconnect } from "wagmi";
 import { wagmiConfigParams, arcTestnet } from "@/lib/wagmi";
-import { logAuth } from "@/lib/auth-debug";
 import {
   GOOGLE_LOGIN_ALREADY,
   GOOGLE_LOGIN_EVENT,
@@ -33,10 +32,10 @@ const privyWagmiConfig = createPrivyWagmiConfig(wagmiConfigParams);
 // This prop is what finally made Google sign-in usable. Without it,
 // @privy-io/wagmi drives the connection through wagmi's connect(), which
 // performs an eth_requestAccounts handshake against the wallet's provider.
-// For the Privy embedded wallet that handshake failed — the ?debug=auth
-// trace showed wagmi going `connecting` -> `disconnected` in one millisecond,
-// leaving useAccount() empty and every surface rendering the signed-out
-// "Sign in with Google" button to a user who was fully signed in.
+// For the Privy embedded wallet that handshake failed: wagmi went
+// `connecting` -> `disconnected` within a millisecond, leaving useAccount()
+// empty and every surface rendering the signed-out "Sign in with Google"
+// button to a user who was fully signed in.
 //
 // With this prop set, @privy-io/wagmi takes its other code path and writes
 // the connected state directly (connector, accounts, chainId), skipping the
@@ -114,16 +113,13 @@ function StartGoogleOAuth() {
       // Never restart OAuth while consuming a callback — that would bounce
       // the user back to Google in a loop.
       if (hasOAuthCallback()) {
-        logAuth("stack: request ignored, consuming OAuth callback");
         return;
       }
-      logAuth("stack: OAuth request queued");
       setPending(true);
     };
     try {
       if (sessionStorage.getItem(GOOGLE_LOGIN_FLAG)) request();
     } catch {}
-    logAuth("stack: mounted, listening");
     window.addEventListener(GOOGLE_LOGIN_EVENT, request);
     return () => window.removeEventListener(GOOGLE_LOGIN_EVENT, request);
   }, []);
@@ -146,7 +142,6 @@ function StartGoogleOAuth() {
   }, [pending, ready]);
 
   useEffect(() => {
-    logAuth(`stack: ready=${ready} authed=${authenticated} pending=${pending}`);
     if (!pending || !ready || hasOAuthCallback()) return;
     setPending(false);
     try {
@@ -156,12 +151,10 @@ function StartGoogleOAuth() {
     // Already signed in: initOAuth would reject, which used to surface as a
     // generic failure on a button the user clicked for no reason.
     if (authenticated) {
-      logAuth("stack: already authenticated, nothing to open");
       window.dispatchEvent(new Event(GOOGLE_LOGIN_ALREADY));
       return;
     }
 
-    logAuth("stack: calling initOAuth(google)");
     window.dispatchEvent(new Event(GOOGLE_LOGIN_STARTED));
     // initOAuth rejects when the provider isn't enabled on the Privy app.
     // Unhandled, that left the button stuck on "Opening…" forever.
@@ -188,7 +181,6 @@ function HandleSignOut() {
 
   useEffect(() => {
     const onSignOut = () => {
-      logAuth("stack: signing out of Privy");
       Promise.resolve(logout())
         .catch(() => {})
         .finally(() => disconnect());

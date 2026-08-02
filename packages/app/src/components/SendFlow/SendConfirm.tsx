@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useAccount } from "wagmi";
+import { usePrivyGate, requestGoogleLogin } from "@/lib/privy-gate";
 import type { Currency, PaymentReceipt } from "@conduit/sdk/lite";
 import type { Eip1193Provider } from "ethers";
 import { parseAmount, formatAmount, shortenAddress } from "@/lib/format";
@@ -31,14 +32,63 @@ export function SendConfirm({
   const [step, setStep] = useState<"confirm" | "pending" | "success" | "error">("confirm");
   const [receipt, setReceipt] = useState<PaymentReceipt | null>(null);
   const [error, setError] = useState<string>("");
+  const [fxStage, setFxStage] = useState("");
+  const [fxDone, setFxDone] = useState(false);
+  const [fxTx, setFxTx] = useState("");
+  const { mounted: privyMounted } = usePrivyGate();
 
   const parsedAmount = parseAmount(amount, recipientCurrency);
+  const isCrossCurrency = payerCurrency !== recipientCurrency;
 
   const handleSend = async () => {
     if (!address) return;
     setStep("pending");
 
     try {
+      if (isCrossCurrency) {
+        // Cross-currency needs a settlement intent to hang the StableFX trade
+        // on, and creating one is an authenticated call — so a direct send in
+        // a different currency requires being signed in. The payer still
+        // signs both FX payloads with their own wallet.
+        const { createSettlementIntent, getSessionToken, createAccountFromPrivy } =
+          await import("@/lib/conduit-api");
+
+        if (!getSessionToken()) {
+          throw new Error("SIGN_IN_REQUIRED");
+        }
+
+        setFxStage("Preparing the payment…");
+        // Idempotent: an existing account is simply returned. A payer who
+        // signed in with Google has no Conduit account until now, and
+        // creating an intent needs one.
+        try {
+          const token = getSessionToken();
+          if (token && address) {
+            await createAccountFromPrivy(token, {
+              login_wallet: address,
+              settle_currency: recipientCurrency,
+              settle_address: address,
+            });
+          }
+        } catch {
+          // Already onboarded — carry on.
+        }
+
+        const intent = await createSettlementIntent({
+          amount: parsedAmount.toString(),
+          settle_currency: recipientCurrency,
+          settle_address: recipient,
+          accept_currencies: [payerCurrency],
+        });
+
+        const { runFxCheckout } = await import("@/lib/fx-checkout");
+        const res = await runFxCheckout(intent.id, payerCurrency, setFxStage);
+        setFxTx(res.txHash);
+        setFxDone(true);
+        setStep("success");
+        return;
+      }
+
       // Dynamic import to avoid SSR issues
       const { ConduitClient } = await import("@conduit/sdk");
       const { ethers } = await import("ethers");
@@ -129,10 +179,49 @@ export function SendConfirm({
           >
             <div className="w-16 h-16 border-2 border-signal border-t-transparent
                             animate-spin mx-auto" />
-            <p className="text-ink font-mono">Settling on-chain...</p>
-            <p className="text-ink-dim text-sm font-mono">
-              Arc finalizes in under a second
+            <p className="text-ink font-mono">
+              {isCrossCurrency ? fxStage || "Preparing the payment…" : "Settling on-chain..."}
             </p>
+            <p className="text-ink-dim text-sm font-mono max-w-xs mx-auto">
+              {isCrossCurrency
+                ? "Cross-currency routes through Circle StableFX and needs two wallet signatures."
+                : "Arc finalizes in under a second"}
+            </p>
+          </motion.div>
+        )}
+
+        {step === "success" && fxDone && (
+          <motion.div
+            key="fx-success"
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="space-y-4"
+          >
+            <div className="border border-signal/40 bg-signal/5 p-5 text-center space-y-2">
+              <p className="text-signal font-mono text-sm">
+                Sent {amount} {recipientCurrency} to {shortenAddress(recipient)}
+              </p>
+              <p className="text-ink-dim text-xs font-mono">
+                Converted from {payerCurrency} via Circle StableFX.
+              </p>
+              {fxTx && (
+                <a
+                  href={`https://testnet.arcscan.app/tx/${fxTx}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="block text-signal text-xs font-mono hover:underline break-all"
+                >
+                  {fxTx}
+                </a>
+              )}
+            </div>
+            <button
+              onClick={onReset}
+              className="w-full py-3 border border-border
+                         text-ink hover:border-signal/30 transition-colors font-mono"
+            >
+              Send Another
+            </button>
           </motion.div>
         )}
 
@@ -161,10 +250,30 @@ export function SendConfirm({
             animate={{ opacity: 1 }}
             className="space-y-4"
           >
-            <div className="bg-danger/10 border border-danger/30 p-5">
-              <p className="text-danger font-mono mb-2">Transaction Failed</p>
-              <p className="text-danger/70 text-sm font-mono">{error}</p>
-            </div>
+            {error === "SIGN_IN_REQUIRED" ? (
+              <div className="border border-border bg-surface p-5 space-y-3 text-center">
+                <p className="text-ink font-mono text-sm">Sign in to send across currencies</p>
+                <p className="text-ink-dim text-xs font-mono">
+                  Paying {recipientCurrency} with {payerCurrency} routes through Circle
+                  StableFX, which needs an account. Same-currency sends don&apos;t.
+                </p>
+                <button
+                  onClick={() => {
+                    requestGoogleLogin();
+                    setStep("confirm");
+                  }}
+                  className="w-full py-2.5 bg-signal text-signal-ink font-mono text-sm
+                             hover:bg-signal/90 transition-colors"
+                >
+                  {privyMounted ? "Sign in with Google" : "Sign in with Google"}
+                </button>
+              </div>
+            ) : (
+              <div className="bg-danger/10 border border-danger/30 p-5">
+                <p className="text-danger font-mono mb-2">Transaction Failed</p>
+                <p className="text-danger/70 text-sm font-mono">{error}</p>
+              </div>
+            )}
             <div className="flex gap-3">
               <button
                 onClick={() => setStep("confirm")}

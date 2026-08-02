@@ -163,31 +163,11 @@ function ArcWalletPay({ intent }: { intent: PublicSettlementIntent }) {
         return;
       }
 
-      // Cross-currency: Circle StableFX via the API. Real, polled progress —
-      // two wallet signatures, never a timed animation.
-      const { quoteSettlementIntent, prepareSettlementIntent, confirmSettlementIntent } =
-        await import("@/lib/conduit-api");
-      const { signTypedDataWithWallet } = await import("@/lib/sign-typed-data");
-
-      setFxStage("Getting a rate from Circle StableFX…");
-      const quote = await quoteSettlementIntent(intent.id, payerCurrency);
-      if (!quote.typed_data) {
-        throw new Error("The FX provider returned no payload to sign.");
-      }
-
-      setFxStage(`Rate ${quote.rate} — approve the quote in your wallet`);
-      const quoteSignature = await signTypedDataWithWallet(quote.typed_data);
-
-      setFxStage("Creating the trade…");
-      const prep = await prepareSettlementIntent(intent.id, quote.typed_data, quoteSignature);
-
-      setFxStage("Approve the transfer in your wallet");
-      const fundingSignature = await signTypedDataWithWallet(prep.funding_typed_data);
-
-      setFxStage("Circle is settling to the recipient…");
-      const res = await confirmSettlementIntent(intent.id, fundingSignature);
-
-      setFxTx(res.tx_hash ?? "");
+      // Cross-currency: Circle StableFX via the API. Real, stage-by-stage
+      // progress — two wallet signatures, never a timed animation.
+      const { runFxCheckout } = await import("@/lib/fx-checkout");
+      const res = await runFxCheckout(intent.id, payerCurrency, setFxStage);
+      setFxTx(res.txHash);
       setFxDone(true);
       setStep("success");
     } catch (err) {

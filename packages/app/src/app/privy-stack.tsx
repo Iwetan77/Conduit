@@ -3,7 +3,7 @@
 import { useEffect } from "react";
 import type { QueryClient } from "@tanstack/react-query";
 import { QueryClientProvider } from "@tanstack/react-query";
-import { PrivyProvider, useLoginWithOAuth } from "@privy-io/react-auth";
+import { PrivyProvider, useLoginWithOAuth, usePrivy } from "@privy-io/react-auth";
 import {
   WagmiProvider as PrivyWagmiProvider,
   createConfig as createPrivyWagmiConfig,
@@ -49,6 +49,7 @@ export default function PrivyStack({
       <QueryClientProvider client={queryClient}>
         <PrivyWagmiProvider config={privyWagmiConfig}>
           <StartGoogleOAuth />
+          <SyncSessionToken />
           {children}
         </PrivyWagmiProvider>
       </QueryClientProvider>
@@ -86,6 +87,33 @@ function StartGoogleOAuth() {
     window.addEventListener(GOOGLE_LOGIN_EVENT, start);
     return () => window.removeEventListener(GOOGLE_LOGIN_EVENT, start);
   }, [initOAuth]);
+
+  return null;
+}
+
+// Keep the API bearer token in sync with Privy's (short-lived, rotating)
+// access token for ANY signed-in page, not just the dashboard. /send needs it
+// to create a settlement intent for a cross-currency payment, and previously
+// only dashboard/layout.tsx did this — so a user who signed in on the landing
+// page had no usable token anywhere else.
+function SyncSessionToken() {
+  const { authenticated, getAccessToken } = usePrivy();
+
+  useEffect(() => {
+    if (!authenticated) return;
+    let cancelled = false;
+    const refresh = async () => {
+      const { setSessionToken } = await import("@/lib/conduit-api");
+      const token = await getAccessToken();
+      if (token && !cancelled) setSessionToken(token);
+    };
+    refresh();
+    const id = setInterval(refresh, 5 * 60 * 1000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [authenticated, getAccessToken]);
 
   return null;
 }

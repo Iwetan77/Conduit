@@ -80,8 +80,16 @@ export function ScanToPay({ onAddress }: ScanToPayProps = {}) {
         canvas.height = video.videoHeight;
         ctx.drawImage(video, 0, 0);
         const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        // Every QR Conduit prints (Request payment, Storefronts, the landing
+        // page) is drawn signal-green-on-near-black -- LIGHT modules on a
+        // DARK background, the opposite polarity of a standard dark-on-light
+        // QR. "dontInvert" only ever looks for standard polarity, so the
+        // scanner could decode a stranger's QR but never one of Conduit's
+        // own -- which is exactly the QR this feature exists to read.
+        // "attemptBoth" costs one extra binarization pass per frame but
+        // detects either polarity.
         const code = jsQR(img.data, img.width, img.height, {
-          inversionAttempts: "dontInvert",
+          inversionAttempts: "attemptBoth",
         });
         if (code?.data) {
           const result = resolveScan(code.data);

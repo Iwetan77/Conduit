@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { listPaymentLinks, voidPaymentLink, type PaymentLink, ConduitApiError } from "@/lib/conduit-api";
 import { formatDate } from "@/lib/format";
+import { useCopy } from "@/lib/use-copy";
 
 // Mirrors request-payment's own simplification: assumes 6 fractional digits
 // for display. The API stores real integer minor units regardless.
@@ -26,6 +27,7 @@ export default function LinksPage() {
   const [links, setLinks] = useState<PaymentLink[] | null>(null);
   const [error, setError] = useState("");
   const [voidingID, setVoidingID] = useState<string | null>(null);
+  const { copied, copy } = useCopy();
 
   const load = () => {
     listPaymentLinks()
@@ -90,10 +92,10 @@ export default function LinksPage() {
                   <td className="px-4 py-3 text-right">
                     <div className="flex gap-2 justify-end">
                       <button
-                        className="text-xs font-mono text-ink-dim hover:text-ink"
-                        onClick={() => navigator.clipboard.writeText(l.hosted_url)}
+                        className={`text-xs font-mono ${copied === l.id ? "text-signal" : "text-ink-dim hover:text-ink"}`}
+                        onClick={() => copy(l.hosted_url, l.id)}
                       >
-                        Copy link
+                        {copied === l.id ? "Copied!" : "Copy link"}
                       </button>
                       {(l.status === "draft" || l.status === "active" || l.status === "viewed") && (
                         <button

@@ -6,6 +6,7 @@ import { createPaymentLink, getMyAccount, type PaymentLink, type AmountMode, typ
 import { SETTLE_CURRENCIES as CURRENCIES, currencyFlag, isoToToken } from "@/lib/currencies";
 import { currencyDecimals } from "@conduit/sdk/lite";
 import { shortenAddress } from "@/lib/format";
+import { useCopy } from "@/lib/use-copy";
 
 // Minor units in the settle token's REAL decimals — BRLA/ZARU/KRW1 are
 // 18-decimals tokens; a hardcoded 6 mis-prices those links by 10^12.
@@ -35,6 +36,7 @@ export default function RequestPaymentPage() {
   const [accountAddress, setAccountAddress] = useState("");
   const [editingAddress, setEditingAddress] = useState(false);
   const [busy, setBusy] = useState(false);
+  const { copied, copy } = useCopy();
   const [error, setError] = useState("");
   const [result, setResult] = useState<PaymentLink | null>(null);
 
@@ -112,10 +114,10 @@ export default function RequestPaymentPage() {
               onFocus={(e) => e.target.select()}
             />
             <button
-              className="border border-border px-3 py-2 text-xs"
-              onClick={() => navigator.clipboard.writeText(result.hosted_url)}
+              className={`border px-3 py-2 text-xs ${copied ? "border-signal text-signal" : "border-border"}`}
+              onClick={() => copy(result.hosted_url)}
             >
-              Copy
+              {copied ? "Copied!" : "Copy"}
             </button>
           </div>
           <button

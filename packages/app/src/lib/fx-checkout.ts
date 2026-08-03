@@ -14,6 +14,7 @@
 // had no USDC/EURC pool on Arc testnet and could never settle.
 
 import type { Connector } from "wagmi";
+import type { Eip1193Provider } from "ethers";
 
 export interface FxCheckoutResult {
   txHash: string;
@@ -70,6 +71,91 @@ export class InsufficientFundsError extends Error {
   }
 }
 
+// The one-time on-chain approval cross-currency has always silently needed.
+//
+// StableFX funds the taker leg with Permit2.permitWitnessTransferFrom, and
+// Permit2's SignatureTransfer calls `token.transferFrom(payer, ...)` with
+// Permit2 itself as msg.sender -- so the payer must have approved the pay
+// token to the canonical Permit2 contract, and each trade DECREMENTS that
+// ERC-20 allowance by the amount pulled. A wallet that has never approved
+// Permit2 (every fresh Google/embedded wallet) has zero allowance, so Circle's
+// funding SIMULATION reverts with TRANSFER_FROM_FAILED before any trade is
+// created -- which the API surfaces as the catch-all "FX provider is
+// temporarily unavailable". It was never the provider: the payer simply
+// couldn't be pulled from. (An externally-connected wallet that "worked
+// yesterday" had a leftover approval from earlier, since consumed to zero.)
+//
+// Approving MAX once makes this effectively permanent: per-trade decrements
+// from 2^256-1 never bring it near a realistic payment. Idempotent -- an
+// already-approved wallet skips straight past this with no prompt.
+async function ensurePermit2Allowance(
+  wallet: Eip1193Provider,
+  payerAddress: string,
+  payCurrency: string,
+  onStage: (stage: string) => void
+): Promise<void> {
+  const { ethers } = await import("ethers");
+  const { CURRENCIES, ARC_TESTNET } = await import("@conduit/sdk/lite");
+  const { arcReadProvider } = await import("@/lib/arc-provider");
+
+  const token = CURRENCIES[payCurrency as keyof typeof CURRENCIES]?.token;
+  if (!token) return;
+  const permit2 = ARC_TESTNET.contracts.permit2;
+
+  // Read the current allowance off Arc directly. A read failure must NOT block
+  // -- but here, unlike the balance check, the safe fallback is to attempt the
+  // approval anyway: approve is idempotent and a redundant one costs only a
+  // signature, whereas skipping a genuinely-needed one puts us right back at
+  // TRANSFER_FROM_FAILED.
+  const reader = new ethers.Contract(
+    token,
+    ["function allowance(address owner, address spender) view returns (uint256)"],
+    arcReadProvider()
+  );
+  let current = 0n;
+  try {
+    current = (await reader.allowance(payerAddress, permit2)) as bigint;
+  } catch {
+    current = 0n;
+  }
+
+  // High watermark: any allowance above this comfortably covers every single
+  // payment this testnet will ever route, so we only re-approve a wallet whose
+  // allowance has actually been drawn down near empty.
+  const THRESHOLD = 10n ** 24n;
+  if (current >= THRESHOLD) return;
+
+  onStage("One-time token approval — confirm in your wallet");
+  const browserProvider = new ethers.BrowserProvider(wallet);
+  const signer = await browserProvider.getSigner();
+  const erc20 = new ethers.Contract(
+    token,
+    ["function approve(address spender, uint256 amount) returns (bool)"],
+    signer
+  );
+  const MAX_UINT256 = (1n << 256n) - 1n;
+  const tx = await erc20.approve(permit2, MAX_UINT256);
+
+  // Poll the read provider for the receipt rather than the wallet's own
+  // transport: the Privy embedded wallet broadcasts and polls through Arc's
+  // rate-limited public RPC, and arcReadProvider() is the batching-disabled,
+  // static-network client tuned to survive it. Circle's funding will revert if
+  // this isn't mined, so we must actually wait -- up to ~40s, then let the
+  // trade proceed and surface any real revert reason rather than hang forever.
+  onStage("Confirming the approval on Arc…");
+  const provider = arcReadProvider();
+  const deadline = Date.now() + 40_000;
+  while (Date.now() < deadline) {
+    try {
+      const receipt = await provider.getTransactionReceipt(tx.hash);
+      if (receipt) return;
+    } catch {
+      // transient RPC hiccup — keep polling
+    }
+    await new Promise((r) => setTimeout(r, 2500));
+  }
+}
+
 export async function runFxCheckout(
   intentId: string,
   payCurrency: string,
@@ -100,6 +186,12 @@ export async function runFxCheckout(
   if (!payerAddress) {
     throw new Error("No wallet account is connected to sign this payment.");
   }
+
+  // Establish the Permit2 allowance BEFORE quoting. This can require an
+  // on-chain approve that takes seconds to mine, which would blow Circle's
+  // ~5s quote TTL if done mid-flow -- so it happens here, once, before any
+  // quote exists. An already-approved wallet returns instantly with no prompt.
+  await ensurePermit2Allowance(wallet, payerAddress, payCurrency, onStage);
 
   // Circle's quotes live ~3.5-5s (docs/fx-capability.md) and a human takes
   // longer than that to read and approve a wallet prompt. So an expired quote

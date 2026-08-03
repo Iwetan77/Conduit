@@ -11,6 +11,7 @@ import { LinkCard } from "@/components/CreateFlow/LinkOutput/LinkCard";
 import { formatAmount, shortenAddress } from "@/lib/format";
 import { TokenBadge } from "@/components/Shared/TokenBadge";
 import { addressToCurrency } from "@conduit/sdk/lite";
+import { useCopy } from "@/lib/use-copy";
 
 export default function LinksPage() {
   const { address, isConnected, connector } = useAccount();
@@ -19,6 +20,7 @@ export default function LinksPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [deactivating, setDeactivating] = useState<string | null>(null);
   const [selectedDecl, setSelectedDecl] = useState<PaymentDeclaration | null>(null);
+  const { copied, copy } = useCopy();
   const [mounted, setMounted] = useState(false);
   useEffect(() => { setMounted(true); }, []);
 
@@ -161,12 +163,15 @@ export default function LinksPage() {
                           const url = typeof window !== "undefined"
                             ? `${window.location.origin}/pay/${decl.declarationId}`
                             : decl.paymentUrl;
-                          navigator.clipboard.writeText(url);
+                          copy(url, decl.declarationId);
                         }}
-                        className="px-3 py-1.5 text-xs border border-border
-                                   text-ink-dim hover:text-ink hover:border-ink-dim/20 transition-colors"
+                        className={`px-3 py-1.5 text-xs border transition-colors ${
+                          copied === decl.declarationId
+                            ? "border-signal/40 text-signal"
+                            : "border-border text-ink-dim hover:text-ink hover:border-ink-dim/20"
+                        }`}
                       >
-                        Copy
+                        {copied === decl.declarationId ? "Copied!" : "Copy"}
                       </button>
                       <button
                         onClick={() => setSelectedDecl(decl)}

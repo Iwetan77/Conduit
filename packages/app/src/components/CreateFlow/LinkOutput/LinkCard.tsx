@@ -4,6 +4,7 @@ import { useRef } from "react";
 import { toPng } from "html-to-image";
 import type { Currency } from "@conduit/sdk/lite";
 import { formatAmount } from "@/lib/format";
+import { useCopy } from "@/lib/use-copy";
 
 interface LinkCardProps {
   declarationId: string;
@@ -23,6 +24,7 @@ export function LinkCard({
   label,
 }: LinkCardProps) {
   const cardRef = useRef<HTMLDivElement>(null);
+  const { copied, copy } = useCopy();
 
   const shortRecipient = `${recipientAddress.slice(0, 6)}...${recipientAddress.slice(-4)}`;
   const displayAmount = amount > 0n
@@ -54,9 +56,7 @@ export function LinkCard({
     );
   };
 
-  const copyUrl = () => {
-    navigator.clipboard.writeText(paymentUrl);
-  };
+  const copyUrl = () => copy(paymentUrl);
 
   return (
     <div className="flex flex-col flex-1">
@@ -147,11 +147,13 @@ export function LinkCard({
       <div className="flex flex-col gap-2 mt-3">
         <button
           onClick={copyUrl}
-          className="w-full py-3 border border-border
-                     text-sm font-mono text-ink-dim hover:text-ink
-                     hover:border-ink-dim/20 transition-colors"
+          className={`w-full py-3 border text-sm font-mono transition-colors ${
+            copied
+              ? "border-signal/40 text-signal"
+              : "border-border text-ink-dim hover:text-ink hover:border-ink-dim/20"
+          }`}
         >
-          Copy URL
+          {copied ? "Copied!" : "Copy URL"}
         </button>
         <button
           onClick={shareToX}

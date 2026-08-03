@@ -545,3 +545,43 @@ export async function getBalances(address: string): Promise<BalanceRow[]> {
   const body = (await res.json()) as { data: BalanceRow[] };
   return body.data;
 }
+
+// ── Wallet history (cross-currency) ────────────────────────────────────────
+
+export interface WalletSettlementRow {
+  id: string;
+  tx_hash: string;
+  pay_currency: string;
+  pay_amount: string;
+  settle_currency: string;
+  settle_amount: string;
+  settle_address: string;
+  rate_applied: string | null;
+  settled_at: string; // unix seconds, as a string
+}
+
+// A payer's own cross-currency settlements — the ones ConduitRouter never
+// sees because Circle's maker delivers via Permit2, so /history's on-chain
+// read (see lib/use-history or ReceiptClient.getHistory) can never surface
+// them. Gated by a wallet signature, not an API key: a payer paying from
+// /send or a pay link has no key, and this is read-only, so the endpoint
+// requires proof of wallet control rather than acting on the wallet's behalf.
+// See packages/api/internal/handlers/wallet_history.go for the verification.
+export async function getWalletSettlements(
+  wallet: string,
+  timestamp: number,
+  signature: string
+): Promise<WalletSettlementRow[]> {
+  const res = await fetch(`${API_BASE}/v1/wallet_settlements`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ wallet, timestamp, signature }),
+  });
+  const text = await res.text();
+  const json = text ? JSON.parse(text) : {};
+  if (!res.ok) {
+    const err = json.error ?? {};
+    throw new ConduitApiError(err.message ?? `HTTP ${res.status}`, err.code, err.doc_url);
+  }
+  return (json as { data: WalletSettlementRow[] }).data;
+}

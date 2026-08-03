@@ -4,19 +4,40 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import jsQR from "jsqr";
 
-// Scan-to-pay: opens the camera, decodes a QR, and routes to the payment it
-// encodes. Today that means merchant /pay/[id] links (payment links and
-// settlement intents). The decode step is deliberately isolated in
-// resolveScan() so future code formats (P2P handles, bank-account payout
-// codes) plug in without touching the camera plumbing.
-function resolveScan(text: string): string | null {
+// Scan-to-pay: opens the camera and decodes a QR into one of two things a
+// merchant might have printed:
+//
+//   - a /pay/[id] link (a payment link or settlement intent, with its own
+//     amount policy — fixed/open/min/max) -> we navigate there, since /send's
+//     blunt "any amount, any address" form can't express that policy;
+//   - a bare 0x wallet address (a Storefront QR from the dashboard's
+//     Storefronts page, which prints the settle_address directly, no
+//     payment-link wrapper) -> there's no intent to navigate to, so this
+//     hands the address back to the caller instead. On /send, that's exactly
+//     "fill in the recipient field" -- storefront QRs exist FOR /send.
+//
+// Every consumer decides for itself: only /send uses this component today,
+// via onAddress.
+type ScanResult = { kind: "pay-link"; path: string } | { kind: "address"; address: string };
+
+function resolveScan(text: string): ScanResult | null {
   // A conduit payment URL, on any host (QR from prod, staging, localhost).
   const payMatch = text.match(/\/pay\/([A-Za-z0-9_-]+)/);
-  if (payMatch) return `/pay/${payMatch[1]}`;
+  if (payMatch) return { kind: "pay-link", path: `/pay/${payMatch[1]}` };
+
+  const trimmed = text.trim();
+  if (/^0x[a-fA-F0-9]{40}$/.test(trimmed)) return { kind: "address", address: trimmed };
+
   return null;
 }
 
-export function ScanToPay() {
+interface ScanToPayProps {
+  // When set, a scanned bare address is handed here instead of falling
+  // through to "not recognized" -- see the component doc comment above.
+  onAddress?: (address: string) => void;
+}
+
+export function ScanToPay({ onAddress }: ScanToPayProps = {}) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [error, setError] = useState("");
@@ -63,10 +84,15 @@ export function ScanToPay() {
           inversionAttempts: "dontInvert",
         });
         if (code?.data) {
-          const dest = resolveScan(code.data);
-          if (dest) {
+          const result = resolveScan(code.data);
+          if (result?.kind === "pay-link") {
             stop();
-            router.push(dest);
+            router.push(result.path);
+            return;
+          }
+          if (result?.kind === "address" && onAddress) {
+            stop();
+            onAddress(result.address);
             return;
           }
           setUnrecognized(code.data);

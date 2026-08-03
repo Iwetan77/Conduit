@@ -77,6 +77,7 @@ func New(cfg Config) http.Handler {
 	webhookEndpointsH := &handlers.WebhookEndpoints{Pool: cfg.Pool, Dispatcher: dispatcher}
 	balanceTxH := &handlers.BalanceTransactions{Pool: cfg.Pool}
 	settlementsH := &handlers.Settlements{Pool: cfg.Pool}
+	walletHistoryH := &handlers.WalletHistory{Pool: cfg.Pool}
 	paymentLinksH := &handlers.PaymentLinks{Pool: cfg.Pool, AppBaseURL: cfg.AppBaseURL}
 	bridgeH, err := newBridgeHandler(cfg, stableFX, dispatcher)
 	if err != nil {
@@ -166,6 +167,14 @@ func New(cfg Config) http.Handler {
 		r.Post("/settlement_intents/{id}/quote", intentsH.Quote)
 		r.Post("/settlement_intents/{id}/prepare", intentsH.Prepare)
 		r.Post("/settlement_intents/{id}/confirm", intentsH.Confirm)
+
+		// A payer's own cross-currency history. Unauthenticated by API key for
+		// the same reason as the routes above -- a payer has none -- but gated
+		// by a wallet signature instead, since this reads that wallet's own
+		// settlement history rather than acting on their behalf. See
+		// handlers.WalletHistory's doc comment for why this can't come from
+		// an on-chain read the way same-currency history does.
+		r.Post("/wallet_settlements", walletHistoryH.List)
 
 		// Cross-chain bridge endpoints are deliberately unauthenticated: this
 		// is the payer surface (see spec), and a Solana-side payer has no

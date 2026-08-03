@@ -1,17 +1,73 @@
 "use client";
 
-import type { PaymentReceipt } from "@conduit/sdk/lite";
+import type { Currency, PaymentReceipt } from "@conduit/sdk/lite";
 import { addressToCurrency } from "@conduit/sdk/lite";
+import type { WalletSettlementRow } from "@/lib/conduit-api";
+import { isoToToken } from "@/lib/currencies";
 import { formatAmount, shortenAddress, formatDate } from "@/lib/format";
 import { TokenBadge } from "./TokenBadge";
 
+// A single row this table can render, regardless of where it came from.
+// Two genuinely different sources feed this table:
+//   - same-currency payments, read straight off ConduitRouter's on-chain
+//     PaymentSettled event log (no server involved at all);
+//   - cross-currency payments, which Circle's maker delivers via Permit2 and
+//     never touch ConduitRouter, so they can only come from Conduit's own
+//     database (see lib/conduit-api's getWalletSettlements).
+// Both get normalized to this shape before reaching the table, so the table
+// itself never needs to know which rail a payment took.
+export interface HistoryRow {
+  key: string;
+  direction: "sent" | "received";
+  counterpartyAddress: string;
+  currency: Currency;
+  amount: bigint;
+  settledAt: number; // unix seconds
+  txHash: string;
+  explorerUrl: string;
+}
+
+export function onChainReceiptsToRows(receipts: PaymentReceipt[], walletAddress?: string): HistoryRow[] {
+  return receipts.map((receipt) => {
+    const isSender =
+      !!walletAddress && receipt.payer.toLowerCase() === walletAddress.toLowerCase();
+    return {
+      key: receipt.receiptId,
+      direction: isSender ? "sent" : "received",
+      counterpartyAddress: isSender ? receipt.recipient : receipt.payer,
+      currency: addressToCurrency(isSender ? receipt.payerToken : receipt.recipientToken),
+      amount: isSender ? receipt.payerAmount : receipt.recipientAmount,
+      settledAt: receipt.settledAt,
+      txHash: receipt.txHash,
+      explorerUrl: receipt.explorerUrl,
+    };
+  });
+}
+
+// Cross-currency settlements are always the connected wallet PAYING (Circle's
+// maker delivers to the recipient; a payer's own wallet never receives a
+// StableFX settlement from this endpoint), so direction is always "sent" and
+// the amount is what THEY paid, in their own currency — not what the
+// recipient received.
+export function walletSettlementsToRows(rows: WalletSettlementRow[]): HistoryRow[] {
+  return rows.map((r) => ({
+    key: r.id,
+    direction: "sent" as const,
+    counterpartyAddress: r.settle_address,
+    currency: isoToToken(r.pay_currency) as Currency,
+    amount: BigInt(r.pay_amount),
+    settledAt: Number(r.settled_at),
+    txHash: r.tx_hash,
+    explorerUrl: r.tx_hash ? `https://testnet.arcscan.app/tx/${r.tx_hash}` : "",
+  }));
+}
+
 interface HistoryTableProps {
-  receipts: PaymentReceipt[];
-  walletAddress?: string;
+  rows: HistoryRow[];
   isLoading?: boolean;
 }
 
-export function HistoryTable({ receipts, walletAddress, isLoading }: HistoryTableProps) {
+export function HistoryTable({ rows, isLoading }: HistoryTableProps) {
   if (isLoading) {
     return (
       <div className="space-y-2">
@@ -25,7 +81,7 @@ export function HistoryTable({ receipts, walletAddress, isLoading }: HistoryTabl
     );
   }
 
-  if (receipts.length === 0) {
+  if (rows.length === 0) {
     return (
       <div className="text-center py-16 text-ink-dim">
         <p className="font-mono text-scale-2">No transactions yet.</p>
@@ -33,6 +89,9 @@ export function HistoryTable({ receipts, walletAddress, isLoading }: HistoryTabl
       </div>
     );
   }
+
+  // Newest first regardless of which rail each row came from.
+  const sorted = [...rows].sort((a, b) => b.settledAt - a.settledAt);
 
   return (
     <div className="border border-border">
@@ -43,25 +102,14 @@ export function HistoryTable({ receipts, walletAddress, isLoading }: HistoryTabl
         <span className="text-scale-1 font-mono text-ink-dim uppercase tracking-wider text-right">Tx</span>
       </div>
       <div className="divide-y divide-border overflow-x-auto">
-        {receipts.map((receipt) => {
-          const isSender =
-            walletAddress &&
-            receipt.payer.toLowerCase() === walletAddress.toLowerCase();
-          const currency = addressToCurrency(
-            isSender ? receipt.payerToken : receipt.recipientToken
-          );
-          const amount = isSender ? receipt.payerAmount : receipt.recipientAmount;
-          const txShort = `${receipt.txHash.slice(0, 6)}…${receipt.txHash.slice(-4)}`;
+        {sorted.map((row) => {
+          const isSender = row.direction === "sent";
+          const txShort = row.txHash
+            ? `${row.txHash.slice(0, 6)}…${row.txHash.slice(-4)}`
+            : "—";
 
-          return (
-            <a
-              key={receipt.receiptId}
-              href={receipt.explorerUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="grid grid-cols-[1fr_auto_auto_auto] gap-4 items-center px-4 py-3
-                         hover:bg-surface transition-colors group min-w-[560px] sm:min-w-0"
-            >
+          const content = (
+            <>
               <div className="flex items-center gap-3">
                 <span className={`font-mono text-scale-2 ${isSender ? "text-ink-dim" : "text-signal"}`}>
                   {isSender ? "↑" : "↓"}
@@ -69,15 +117,15 @@ export function HistoryTable({ receipts, walletAddress, isLoading }: HistoryTabl
                 <div className="flex flex-col">
                   <span className="text-scale-2 font-mono text-ink">
                     {isSender
-                      ? `To ${shortenAddress(receipt.recipient)}`
-                      : `From ${shortenAddress(receipt.payer)}`}
+                      ? `To ${shortenAddress(row.counterpartyAddress)}`
+                      : `From ${shortenAddress(row.counterpartyAddress)}`}
                   </span>
-                  <TokenBadge currency={currency} size="sm" />
+                  <TokenBadge currency={row.currency} size="sm" />
                 </div>
               </div>
 
               <span className="text-scale-1 font-mono text-ink-dim whitespace-nowrap">
-                {formatDate(receipt.settledAt)}
+                {formatDate(row.settledAt)}
               </span>
 
               <span
@@ -86,13 +134,27 @@ export function HistoryTable({ receipts, walletAddress, isLoading }: HistoryTabl
                 }`}
               >
                 {isSender ? "-" : "+"}
-                {formatAmount(amount, currency)}
+                {formatAmount(row.amount, row.currency)}
               </span>
 
               <span className="text-scale-1 font-mono text-ink-dim group-hover:text-ink transition-colors whitespace-nowrap">
                 {txShort}
               </span>
+            </>
+          );
+
+          const rowClass =
+            "grid grid-cols-[1fr_auto_auto_auto] gap-4 items-center px-4 py-3 " +
+            "hover:bg-surface transition-colors group min-w-[560px] sm:min-w-0";
+
+          return row.explorerUrl ? (
+            <a key={row.key} href={row.explorerUrl} target="_blank" rel="noopener noreferrer" className={rowClass}>
+              {content}
             </a>
+          ) : (
+            <div key={row.key} className={rowClass}>
+              {content}
+            </div>
           );
         })}
       </div>

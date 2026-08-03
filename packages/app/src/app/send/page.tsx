@@ -67,7 +67,11 @@ export default function SendPage() {
             Pay anyone in the currency they want, from whatever you hold.
           </p>
           <div className="flex justify-center mt-5">
-            <ScanToPay />
+            {/* A storefront QR encodes a bare wallet address (see the
+                Storefronts dashboard page), not a /pay/ link -- there's no
+                settlement intent to navigate to, so scanning one fills the
+                recipient field right here instead. */}
+            <ScanToPay onAddress={setRecipient} />
           </div>
         </div>
 

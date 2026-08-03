@@ -34,6 +34,18 @@ export function ScanToPay() {
     setUnrecognized("");
   }, []);
 
+  // While the scanner owns the screen, the page behind it must not scroll —
+  // on mobile the overlay is fixed but the body underneath still moved under
+  // the finger, dragging content past the viewfinder.
+  useEffect(() => {
+    if (!open) return;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previous;
+    };
+  }, [open]);
+
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
@@ -113,7 +125,13 @@ export function ScanToPay() {
       </button>
 
       {open && (
-        <div className="fixed inset-0 z-50 bg-bg/95 flex flex-col items-center justify-center p-6">
+        // backdrop-blur, not just an opaque wash: at 95% opacity the page
+        // behind still read through as ghosted text competing with the
+        // viewfinder. The blur also survives themes where --bg is translucent.
+        <div
+          className="fixed inset-0 z-50 flex flex-col items-center justify-center p-6
+                     bg-bg/80 backdrop-blur-xl backdrop-saturate-150"
+        >
           <div className="w-full max-w-sm space-y-4">
             <div className="flex items-center justify-between">
               <span className="text-xs font-mono text-ink-dim uppercase tracking-widest">

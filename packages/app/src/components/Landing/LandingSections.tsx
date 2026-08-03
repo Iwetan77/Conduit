@@ -5,10 +5,30 @@ import Link from 'next/link'
 // Landing-page sections, moved from the former packages/marketing app when
 // the three Next apps were folded into one. Only the links changed: docs and
 // dashboard are in-app routes now, not cross-origin URLs.
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
+import { QRCodeSVG } from 'qrcode.react'
+import { DEFAULT_APP_URL } from '@conduit/sdk/lite'
 
 const FORMSPREE_ID = 'mzdwlelo'
+
+// The panels used to print "app.conduit.xyz" and "conduit.xyz" as though they
+// were ours. They aren't — that placeholder is the same one that sent scanned
+// QRs to a stranger's site.
+//
+// DEFAULT_APP_URL prefers window.location.origin, which is correct but differs
+// between the server render and the client one when NEXT_PUBLIC_APP_URL isn't
+// set to the deployed host. Baking that straight into a QR would hydrate a
+// different image than it rendered, so the origin is adopted after mount and
+// the configured URL is what SSR emits.
+const CONFIGURED_APP_URL =
+  process.env.NEXT_PUBLIC_APP_URL || 'https://useconduit-app.vercel.app'
+
+function useAppUrl() {
+  const [url, setUrl] = useState(CONFIGURED_APP_URL)
+  useEffect(() => setUrl(DEFAULT_APP_URL), [])
+  return url
+}
 
 function WaitlistForm() {
   const [email, setEmail] = useState('')
@@ -68,11 +88,22 @@ function WaitlistForm() {
 // HERO — the one signature moment on this page
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Laid out by the grid below, not by its own margins. The previous version
+// used `border-r ... last:border-0 first:pl-0` inside a flex-wrap row, which
+// only lines up while everything sits on ONE line. On a phone the four pills
+// wrapped to two rows and the rules went with them: a dangling right border
+// mid-row, no border under the wrap, and `first:pl-0` indenting row two
+// differently from row one. Labels are also four different lengths, so
+// content-width columns came out ragged.
 function StatPill({ value, label }: { value: string; label: string }) {
   return (
-    <div className="flex flex-col items-center gap-1.5 px-6 py-3 border-r border-border last:border-0 first:pl-0">
+    <div className="flex flex-col items-center justify-start gap-1.5 px-4 py-4 text-center">
       <span className="font-display font-black text-2xl text-signal leading-none">{value}</span>
-      <span className="font-mono text-[9px] uppercase tracking-[0.14em] text-ink-dim">{label}</span>
+      {/* Fixed two-line box: "Surfaces, One Engine" wraps and "Currencies"
+          doesn't, which pushed the pills to different heights side by side. */}
+      <span className="font-mono text-[9px] uppercase tracking-[0.14em] text-ink-dim leading-[1.5] min-h-[2.1em] flex items-start justify-center">
+        {label}
+      </span>
     </div>
   )
 }
@@ -157,8 +188,15 @@ export function Hero() {
           </Link>
         </div>
 
-        {/* Stats */}
-        <div className="flex items-stretch flex-wrap justify-center">
+        {/* Stats — an actual grid, so the columns are equal width and the
+            dividers land on the gaps rather than being carried around by
+            flex-wrap. 2×2 on phones, 1×4 from sm up. */}
+        {/* Dividers only from sm up. `divide-x` on a 2-column grid puts a
+            left rule on child 3 -- which is the START of row two, i.e. the
+            outer edge -- so on mobile the pills stand apart on whitespace
+            instead. */}
+        <div className="w-full max-w-lg grid grid-cols-2 sm:grid-cols-4
+                        sm:divide-x divide-border">
           {[
             { value: '<1s', label: 'Direct Settlement' },
             { value: '2', label: 'Surfaces, One Engine' },
@@ -204,6 +242,7 @@ function PanelDesc({ children }: { children: React.ReactNode }) {
 }
 
 function SendPanel() {
+  const appHost = useAppUrl().replace(/^https?:\/\//, '')
   return (
     <PanelShell>
       <div className="space-y-2">
@@ -221,7 +260,7 @@ function SendPanel() {
           <div className="w-2 h-2 bg-danger" />
           <div className="w-2 h-2 bg-ink-dim" />
           <div className="w-2 h-2 bg-signal" />
-          <span className="text-ink-dim text-[9px] ml-1">conduit.xyz</span>
+          <span className="text-ink-dim text-[9px] ml-1 truncate max-w-[140px]">{appHost}</span>
         </div>
         {[
           { text: '0xABC...def  ', check: '✓' },
@@ -239,7 +278,8 @@ function SendPanel() {
 }
 
 function ReceivePanel() {
-  const qr = [1,1,1,1,1,1,1,1,0,0,0,0,0,1,1,0,1,0,1,0,1,1,0,0,1,0,0,1,1,0,1,0,1,0,1,1,0,0,0,0,0,1,1,1,1,1,1,1,1]
+  const appUrl = useAppUrl()
+  const appHost = appUrl.replace(/^https?:\/\//, '')
 
   return (
     <PanelShell>
@@ -253,24 +293,32 @@ function ReceivePanel() {
         </PanelDesc>
       </div>
 
-      <div className="flex gap-4 items-start">
-        <div className="flex-1 border border-border bg-bg p-4 overflow-hidden">
+      <div className="flex gap-4 items-stretch">
+        <div className="flex-1 min-w-0 border border-border bg-bg p-4 flex flex-col">
           <div className="h-[2px] w-8 bg-signal mb-3" />
           <p className="font-display font-black text-base text-ink">10.00 USDC</p>
           <p className="font-mono text-[9px] text-ink-dim mt-1.5 truncate">
-            app.conduit.xyz/pay/0x9f4a…
+            {appHost}/pay/pl_9f4a…
           </p>
-          <p className="font-mono text-[8px] text-ink-dim mt-3 uppercase tracking-widest">Digital</p>
+          <p className="font-mono text-[8px] text-ink-dim mt-auto pt-3 uppercase tracking-widest">
+            Digital
+          </p>
         </div>
 
+        {/* A real, scannable QR that points back to our own landing page. The
+            panel used to draw a hand-written 7x7 bitmap that wasn't a QR code
+            at all -- no finder patterns, no quiet zone, nothing to decode --
+            so on the page advertising "print-ready QR codes" it read as
+            noise. */}
         <div className="flex-shrink-0 flex flex-col items-center gap-2">
-          <div
-            className="bg-signal p-2"
-            style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 8px)', gap: '1px' }}
-          >
-            {qr.map((cell, i) => (
-              <div key={i} style={{ width: 8, height: 8, background: cell ? 'var(--bg)' : 'var(--signal)' }} />
-            ))}
+          <div className="bg-white p-2 border border-border">
+            <QRCodeSVG
+              value={appUrl}
+              size={72}
+              level="M"
+              bgColor="#ffffff"
+              fgColor="#000000"
+            />
           </div>
           <p className="font-mono text-[8px] text-ink-dim uppercase tracking-widest">Physical</p>
         </div>

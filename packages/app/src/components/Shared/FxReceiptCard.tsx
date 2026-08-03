@@ -59,7 +59,16 @@ export function FxReceiptCard({
 
         <div className="text-center py-4">
           <p className="text-ink-dim text-scale-2 mb-1">Amount sent</p>
-          <p className="text-scale-6 font-anton text-ink break-all">
+          {/* scale-6 is a flat 56px, which is wider than a phone can hold for
+              "€5.569 EURC" -- and break-all then split it mid-ticker, so the
+              receipt read "5.569 EURC" with a lone "C" on the next line.
+              Clamp the size to the viewport and only ever break at the space,
+              never inside a word. Same treatment as ReceiptCard, so the two
+              rails produce visually identical confirmations. */}
+          <p
+            className="font-anton text-ink leading-none break-words"
+            style={{ fontSize: "clamp(1.75rem, 8.5vw, 56px)" }}
+          >
             {payAmount}
           </p>
           <p className="text-ink-dim text-scale-2 mt-2">
@@ -72,8 +81,10 @@ export function FxReceiptCard({
       <div className="p-6 space-y-3">
         <DetailRow label="To" value={shortenAddress(recipient)} mono />
         <DetailRow label="Token" value={<TokenBadge currency={receiveCurrency} size="sm" />} />
+        {/* The rate is already stated in the header line above; repeating it
+            as a row was the other half of "the cross-border receipt isn't
+            consistent with the same-currency one". */}
         <DetailRow label="Route" value="Circle StableFX" />
-        <DetailRow label="Rate" value={rate} mono />
       </div>
 
       {/* Only rendered with a hash: Circle's maker submits the settling

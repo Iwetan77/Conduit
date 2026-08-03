@@ -38,7 +38,13 @@ export function ReceiptCard({ receipt, onClose }: ReceiptCardProps) {
 
         <div className="text-center py-4">
           <p className="text-ink-dim text-scale-2 mb-1">Amount sent</p>
-          <p className="text-scale-6 font-anton text-ink">
+          {/* Clamped rather than a flat 56px -- see FxReceiptCard: long
+              amounts overflowed a phone. Both receipts share the treatment so
+              a payer can't tell the rails apart by how the receipt looks. */}
+          <p
+            className="font-anton text-ink leading-none break-words"
+            style={{ fontSize: "clamp(1.75rem, 8.5vw, 56px)" }}
+          >
             {formatAmount(receipt.payerAmount, payerCurrency)}
           </p>
           {isCrossChain && (

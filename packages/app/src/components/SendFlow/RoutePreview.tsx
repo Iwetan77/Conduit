@@ -43,7 +43,12 @@ export function RoutePreview({
               ) : isSameCurrency ? (
                 recipientAmount
               ) : (
-                <span className="text-ink-dim text-xs whitespace-nowrap">quoted at payment</span>
+                // Cross-currency: the recipient amount is EXACT (it's what the
+                // sender typed), only the payer's side floats with the rate.
+                // "quoted at payment" read like a missing value; "≈ market
+                // rate" says the same thing but frames it as a live rate, not
+                // a blank field.
+                <span className="text-ink-dim text-xs whitespace-nowrap">≈ market rate</span>
               )}
             </span>
           </div>
@@ -65,11 +70,18 @@ export function RoutePreview({
       </div>
 
       {!isSameCurrency && (
-        <div className="pt-2 border-t border-border">
+        <div className="pt-2 border-t border-border space-y-1">
           <div className="flex items-center gap-2 text-xs text-ink-dim">
-            <span className="w-1.5 h-1.5 bg-signal" />
-            Routed via Circle StableFX · Rate locked for 30s
+            <span className="w-1.5 h-1.5 bg-signal shrink-0" />
+            <span>
+              They receive exactly{" "}
+              <span className="text-ink">{recipientAmount}</span> — you pay the
+              live rate, shown for approval before you sign.
+            </span>
           </div>
+          <p className="text-[11px] text-ink-dim/70 pl-3.5">
+            Routed via Circle StableFX
+          </p>
         </div>
       )}
 

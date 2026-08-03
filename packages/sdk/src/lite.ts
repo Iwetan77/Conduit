@@ -16,7 +16,7 @@ export {
   CURRENCIES,
 } from "./currency.js";
 export { toHumanAmount, fromHumanAmount } from "./amount.js";
-export { ARC_TESTNET, ERC20_ABI, ROUTER_ABI, REGISTRY_ABI } from "./constants.js";
+export { ARC_TESTNET, ERC20_ABI, ROUTER_ABI, REGISTRY_ABI, DEFAULT_APP_URL } from "./constants.js";
 export { arcTestnet } from "./chains.js";
 export type {
   Address,

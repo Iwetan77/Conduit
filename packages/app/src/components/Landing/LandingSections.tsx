@@ -311,13 +311,17 @@ function ReceivePanel() {
             so on the page advertising "print-ready QR codes" it read as
             noise. */}
         <div className="flex-shrink-0 flex flex-col items-center gap-2">
-          <div className="bg-white p-2 border border-border">
+          {/* Conduit colours — signal green on the near-black bg, the same
+              palette every merchant QR uses. Literal hex, not CSS vars:
+              qrcode.react writes them into SVG attributes that can't resolve
+              custom properties. level H so the green-on-dark still scans. */}
+          <div style={{ background: "#050505", padding: 8, border: "1px solid var(--border)" }}>
             <QRCodeSVG
               value={appUrl}
               size={72}
-              level="M"
-              bgColor="#ffffff"
-              fgColor="#000000"
+              level="H"
+              bgColor="#050505"
+              fgColor="#B2F55A"
             />
           </div>
           <p className="font-mono text-[8px] text-ink-dim uppercase tracking-widest">Physical</p>

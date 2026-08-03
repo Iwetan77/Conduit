@@ -143,7 +143,8 @@ func (h *PaymentLinks) Create(w http.ResponseWriter, r *http.Request) {
 		expiresAt = &t
 	}
 
-	id := models.NewID("pl")
+	// Short id: this lands in a URL a customer sees, scans, or reads aloud.
+	id := models.NewShortID("pl")
 	ctx := r.Context()
 	_, err := h.Pool.Exec(ctx,
 		`INSERT INTO payment_links

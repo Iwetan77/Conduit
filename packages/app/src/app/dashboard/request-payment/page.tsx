@@ -1,10 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
-import { createPaymentLink, type PaymentLink, type AmountMode, type ReusePolicy, ConduitApiError } from "@/lib/conduit-api";
+import { createPaymentLink, getMyAccount, type PaymentLink, type AmountMode, type ReusePolicy, ConduitApiError } from "@/lib/conduit-api";
 import { SETTLE_CURRENCIES as CURRENCIES, currencyFlag, isoToToken } from "@/lib/currencies";
 import { currencyDecimals } from "@conduit/sdk/lite";
+import { shortenAddress } from "@/lib/format";
 
 // Minor units in the settle token's REAL decimals — BRLA/ZARU/KRW1 are
 // 18-decimals tokens; a hardcoded 6 mis-prices those links by 10^12.
@@ -27,9 +28,38 @@ export default function RequestPaymentPage() {
   const [expiresIn, setExpiresIn] = useState("3600");
   const [acceptCurrencies, setAcceptCurrencies] = useState<string[]>([]);
   const [settleAddress, setSettleAddress] = useState("");
+  // The merchant's own account address, prefilled below. Kept separately so
+  // "Use my account address" can restore it after the merchant has edited the
+  // field, and so we can show whether they're paying out to themselves or
+  // somewhere else.
+  const [accountAddress, setAccountAddress] = useState("");
+  const [editingAddress, setEditingAddress] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [result, setResult] = useState<PaymentLink | null>(null);
+
+  // Default the payout to the merchant's own settle address (and match their
+  // account's settle currency) rather than an empty field they must paste an
+  // address into every time. They can still send a link's proceeds elsewhere
+  // via "Use a different address".
+  useEffect(() => {
+    let cancelled = false;
+    getMyAccount()
+      .then((acct) => {
+        if (cancelled) return;
+        if (acct.settle_address) {
+          setAccountAddress(acct.settle_address);
+          setSettleAddress((cur) => cur || acct.settle_address);
+        }
+      })
+      .catch(() => {
+        // Non-fatal: the field stays editable and required, same as before.
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  const usingAccountAddress =
+    !!accountAddress && settleAddress.toLowerCase() === accountAddress.toLowerCase();
 
   const toggleAccept = (c: string) => {
     setAcceptCurrencies((prev) => (prev.includes(c) ? prev.filter((x) => x !== c) : [...prev, c]));
@@ -181,13 +211,46 @@ export default function RequestPaymentPage() {
 
         <div>
           <label className="text-scale-1 font-mono text-ink-dim uppercase tracking-wider block mb-1">Settle to address</label>
-          <input
-            className="w-full bg-surface border border-border px-3 py-2 text-sm font-mono focus:border-signal focus:outline-none"
-            placeholder="0x..."
-            value={settleAddress}
-            onChange={(e) => setSettleAddress(e.target.value)}
-            required
-          />
+
+          {/* Default: pay out to the merchant's own account address, shown as
+              a settled fact rather than an empty box. "Use a different address"
+              swaps in an editable field for the case where this link's money
+              should land somewhere else. */}
+          {!editingAddress && usingAccountAddress ? (
+            <div className="flex items-center justify-between gap-2 bg-surface border border-border px-3 py-2">
+              <span className="text-sm font-mono text-ink truncate" title={accountAddress}>
+                {shortenAddress(accountAddress)}
+                <span className="text-ink-dim ml-2 text-xs">your account</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => { setEditingAddress(true); setSettleAddress(""); }}
+                className="shrink-0 text-xs font-mono text-signal hover:underline"
+              >
+                Use a different address
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-1">
+              <input
+                className="w-full bg-surface border border-border px-3 py-2 text-sm font-mono focus:border-signal focus:outline-none"
+                placeholder="0x..."
+                value={settleAddress}
+                onChange={(e) => setSettleAddress(e.target.value)}
+                required
+                autoFocus={editingAddress}
+              />
+              {accountAddress && (
+                <button
+                  type="button"
+                  onClick={() => { setSettleAddress(accountAddress); setEditingAddress(false); }}
+                  className="text-xs font-mono text-ink-dim hover:text-ink"
+                >
+                  ← Use my account address
+                </button>
+              )}
+            </div>
+          )}
         </div>
 
         <div>

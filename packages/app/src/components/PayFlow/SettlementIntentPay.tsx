@@ -1,19 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { usePublicIntent } from "@/lib/use-public-intent";
-import { useAccount } from "wagmi";
-import type { Currency, PaymentReceipt } from "@conduit/sdk/lite";
+import type { Currency } from "@conduit/sdk/lite";
 import { currencyDecimals } from "@conduit/sdk/lite";
-import { type PublicSettlementIntent } from "@/lib/conduit-api";
-import { formatAmount, formatAmountRaw, shortenAddress } from "@/lib/format";
+import { formatAmountRaw, shortenAddress } from "@/lib/format";
 import { isoToToken } from "@/lib/currencies";
 import { CrossChainBridge } from "./CrossChainBridge";
-import { PayerCurrencyPicker } from "@/components/SendFlow/PayerCurrencyPicker";
-import { RoutePreview } from "@/components/SendFlow/RoutePreview";
-import { ReceiptCard } from "@/components/Shared/ReceiptCard";
-import { FxReceiptCard } from "@/components/Shared/FxReceiptCard";
-import { WalletConnectCompact } from "@/components/Shared/WalletConnect";
+import { ArcSettlePanel } from "./ArcSettlePanel";
 
 interface SettlementIntentPayProps {
   intentId: string;
@@ -96,168 +90,16 @@ export function SettlementIntentPay({ intentId }: SettlementIntentPayProps) {
       {intent.source_chain !== "arc" ? (
         <CrossChainBridge intentId={intentId} intent={intent} />
       ) : (
-        <ArcWalletPay intent={intent} />
-      )}
-    </div>
-  );
-}
-
-// Direct checkout from a wallet already funded on Arc.
-//
-// Two genuinely different settlement paths, chosen by whether the payer's
-// currency matches the merchant's:
-//
-//   same-currency  -> on-chain via ConduitRouter/AtomicSettler (SDK pay()),
-//                     sub-second, no FX involved.
-//   cross-currency -> Circle StableFX through the Conduit API:
-//                     quote -> payer signs -> prepare -> payer signs ->
-//                     confirm. This is the ONLY working cross-currency route;
-//                     the old on-chain AMM path had no USDC/EURC pool on Arc
-//                     and could never settle.
-//
-// Neither path needs API credentials: the payer's wallet signatures are the
-// only authority that moves their funds.
-function ArcWalletPay({ intent }: { intent: PublicSettlementIntent }) {
-  const { address, isConnected, connector } = useAccount();
-  const [mounted, setMounted] = useState(false);
-  const [payerCurrency, setPayerCurrency] = useState<Currency>("USDC");
-  const [step, setStep] = useState<"idle" | "pending" | "success" | "error">("idle");
-  const [receipt, setReceipt] = useState<PaymentReceipt | null>(null);
-  // A failed transaction — distinct from the outer component's load error,
-  // which means the intent itself could not be fetched.
-  const [txError, setTxError] = useState("");
-  // Real, stage-by-stage FX progress (cross-currency only) — each string is
-  // set when that step actually starts, never on a timer.
-  const [fxStage, setFxStage] = useState("");
-  const [fxDone, setFxDone] = useState(false);
-  const [fxTx, setFxTx] = useState("");
-  const [fxRate, setFxRate] = useState("");
-  const [fxPaid, setFxPaid] = useState("");
-
-  useEffect(() => { setMounted(true); }, []);
-
-  const settleToken = isoToToken(intent.settle_currency) as Currency;
-  const amountRaw = BigInt(intent.amount);
-  const amountHuman = formatAmountRaw(amountRaw, currencyDecimals(settleToken));
-
-  const handlePay = async () => {
-    if (!address) return;
-    setStep("pending");
-    setTxError("");
-    try {
-      if (payerCurrency === settleToken) {
-        // Same currency: straight on-chain settlement, no FX.
-        setFxStage("Settling on-chain…");
-        const { ConduitClient } = await import("@conduit/sdk");
-        const { ethers } = await import("ethers");
-      const { getWalletProvider } = await import("@/lib/wallet-provider");
-        const browserProvider = new ethers.BrowserProvider(await getWalletProvider(connector));
-        const client = ConduitClient.fromBrowserProvider(browserProvider, "");
-        const result = await client.pay({
-          recipient: intent.settle_address as `0x${string}`,
-          amount: amountRaw,
-          currency: settleToken,
-          payerToken: payerCurrency,
-        });
-        setReceipt(result);
-        setStep("success");
-        return;
-      }
-
-      // Cross-currency: Circle StableFX via the API. Real, stage-by-stage
-      // progress — two wallet signatures, never a timed animation.
-      const { runFxCheckout } = await import("@/lib/fx-checkout");
-      const res = await runFxCheckout(intent.id, payerCurrency, setFxStage, connector);
-      setFxTx(res.txHash);
-      setFxRate(res.rate);
-      setFxPaid(formatAmountRaw(BigInt(res.payAmount), currencyDecimals(payerCurrency)));
-      setFxDone(true);
-      setStep("success");
-    } catch (err) {
-      setTxError(err instanceof Error ? err.message : "Transaction failed");
-      setStep("error");
-    }
-  };
-
-  if (!mounted) return null;
-
-  if (step === "success" && receipt) {
-    return (
-      <div className="space-y-3">
-        <ReceiptCard receipt={receipt} />
-        <p className="text-ink-dim text-xs font-mono text-center">
-          Paid to {intent.display_name}. You can close this page.
-        </p>
-      </div>
-    );
-  }
-
-  // Cross-currency settles at Circle, not through our router, so there is no
-  // on-chain PaymentReceipt — but the payer shouldn't be able to tell which
-  // rail carried their money from how the confirmation looks. FxReceiptCard
-  // mirrors ReceiptCard's anatomy exactly.
-  if (step === "success" && fxDone) {
-    return (
-      <div className="space-y-3">
-        <FxReceiptCard
-          payAmount={fxPaid}
-          receiveAmount={formatAmount(BigInt(intent.amount), settleToken)}
-          receiveCurrency={settleToken}
-          recipient={intent.display_name}
-          rate={fxRate}
-          txHash={fxTx}
+        <ArcSettlePanel
+          settleToken={isoToToken(intent.settle_currency) as Currency}
+          settleCurrencyIso={intent.settle_currency}
+          settleAddress={intent.settle_address}
+          amountRaw={BigInt(intent.amount)}
+          displayName={intent.display_name}
+          // The intent already exists on this surface — just hand back its id.
+          ensureIntentId={async () => intent.id}
         />
-        <p className="text-ink-dim text-xs font-mono text-center">
-          Paid to {intent.display_name}. You can close this page.
-        </p>
-      </div>
-    );
-  }
-
-  if (step === "pending") {
-    return (
-      <div className="text-center py-10 space-y-4">
-        <div className="w-12 h-12 border-2 border-signal border-t-transparent animate-spin mx-auto" />
-        <p className="text-ink font-mono text-sm">{fxStage || "Settling on-chain…"}</p>
-        {payerCurrency !== settleToken && (
-          <p className="text-ink-dim text-xs font-mono max-w-xs mx-auto">
-            Cross-currency payments take longer than a direct transfer and need
-            two wallet signatures.
-          </p>
-        )}
-      </div>
-    );
-  }
-
-  if (!isConnected) {
-    return (
-      <div className="space-y-3">
-        <p className="text-ink-dim text-sm text-center">Connect a wallet to pay</p>
-        <WalletConnectCompact />
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-4">
-      <PayerCurrencyPicker value={payerCurrency} onChange={setPayerCurrency} />
-      <RoutePreview
-        payerCurrency={payerCurrency}
-        recipientCurrency={settleToken}
-        recipientAmount={amountHuman}
-      />
-      {step === "error" && (
-        <div className="bg-danger/10 border border-danger/30 p-3">
-          <p className="text-danger text-sm font-mono">{txError}</p>
-        </div>
       )}
-      <button
-        onClick={handlePay}
-        className="w-full py-4 bg-signal text-signal-ink font-mono text-lg
-                   hover:bg-signal/90 transition-colors"
-      >
-        Pay {amountHuman} {intent.settle_currency}
-      </button>
     </div>
   );
 }

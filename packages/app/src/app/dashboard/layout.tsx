@@ -7,6 +7,7 @@ import { usePrivy, useLogin, useCreateWallet } from "@privy-io/react-auth";
 import { useQueryClient } from "@tanstack/react-query";
 import { clearSessionToken, createAccountFromPrivy, setSessionToken } from "@/lib/conduit-api";
 import { SETTLE_CURRENCIES, currencyFlag } from "@/lib/currencies";
+import { Logo } from "@/components/Shared/Logo";
 
 // Signature moment: the major gridlines draw in once, here specifically —
 // the dashboard is the main surface, not every page. Reuses the single
@@ -24,15 +25,21 @@ function GridSignature() {
   return null;
 }
 
+// Ordered by how a merchant actually works: see what came in (Settlements),
+// then the three ways to get paid grouped together — Request payment,
+// Storefronts (per-location QR sub-accounts, formerly "Locations"), Links &
+// invoices — then Send, then the admin surfaces. Storefronts sits right after
+// Request payment because it's a collect-payment tool, not an afterthought
+// buried below Send.
 const NAV = [
   { href: "/dashboard/settlements", label: "Settlements" },
   { href: "/dashboard/request-payment", label: "Request payment" },
-  { href: "/dashboard/send", label: "Send" },
+  { href: "/dashboard/locations", label: "Storefronts" },
   { href: "/dashboard/links", label: "Links & invoices" },
-  { href: "/dashboard/locations", label: "Locations" },
-  { href: "/dashboard/settings", label: "Settings" },
-  { href: "/dashboard/developers", label: "Developers" },
+  { href: "/dashboard/send", label: "Send" },
   { href: "/dashboard/reconciliation", label: "Reconciliation" },
+  { href: "/dashboard/developers", label: "Developers" },
+  { href: "/dashboard/settings", label: "Settings" },
 ];
 
 // Opens Privy's own login modal (configured with loginMethods: ['email',
@@ -173,7 +180,12 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
   const { ready, authenticated, logout, getAccessToken } = usePrivy();
   const queryClient = useQueryClient();
   const [accountReady, setAccountReady] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const refreshing = useRef(false);
+
+  // Any navigation closes the mobile menu — otherwise it stayed open on top
+  // of the page the merchant just tapped through to.
+  useEffect(() => { setMenuOpen(false); }, [pathname]);
 
   // Keep the stored bearer token fresh with Privy's own (short-lived,
   // auto-rotated) access token for as long as the merchant stays on a
@@ -221,9 +233,10 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
     <div className="min-h-screen text-ink flex flex-col md:flex-row">
       <GridSignature />
 
-      {/* Desktop sidebar — hidden below md, replaced by the horizontal strip below */}
+      {/* Desktop sidebar — hidden below md, replaced by the hamburger bar below.
+          The brand is the ⊙D logo mark, not the word "Conduit". */}
       <aside className="hidden md:flex w-56 border-r border-border p-4 flex-col shrink-0">
-        <Link href="/" className="font-display text-xl font-bold mb-8">Conduit</Link>
+        <Link href="/" className="inline-block mb-8"><Logo size="sm" /></Link>
         <nav className="flex flex-col gap-1">
           {NAV.map((item) => (
             <Link
@@ -244,26 +257,55 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
         </button>
       </aside>
 
-      {/* Mobile: horizontal scrollable nav strip instead of a sidebar */}
-      <nav className="md:hidden flex items-center gap-1 border-b border-border px-3 py-2 overflow-x-auto shrink-0">
-        <Link href="/" className="font-display text-base font-bold mr-2 shrink-0">Conduit</Link>
-        {NAV.map((item) => (
-          <Link
-            key={item.href}
-            href={item.href}
-            className={`px-2.5 py-1.5 text-xs whitespace-nowrap shrink-0 ${
-              pathname?.startsWith(item.href)
-                ? "bg-surface text-signal"
-                : "text-ink-dim hover:text-ink"
-            }`}
+      {/* Mobile: a proper top bar with a hamburger, not a cramped horizontal
+          scroll strip that hid half the items off-screen. The menu opens as a
+          full-width panel below the bar. */}
+      <div className="md:hidden flex flex-col border-b border-border shrink-0">
+        <div className="flex items-center justify-between px-4 py-3">
+          <Link href="/" className="inline-block"><Logo size="sm" /></Link>
+          <button
+            onClick={() => setMenuOpen((v) => !v)}
+            aria-label={menuOpen ? "Close menu" : "Open menu"}
+            aria-expanded={menuOpen}
+            className="p-2 -mr-2 text-ink hover:text-signal transition-colors"
           >
-            {item.label}
-          </Link>
-        ))}
-        <button className="ml-auto shrink-0 text-xs text-ink-dim hover:text-ink" onClick={signOut}>
-          Sign out
-        </button>
-      </nav>
+            {/* Hamburger / close, drawn so it can't drift from theme colors. */}
+            <svg width="22" height="22" viewBox="0 0 22 22" fill="none" aria-hidden="true">
+              {menuOpen ? (
+                <path d="M4 4l14 14M18 4L4 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+              ) : (
+                <>
+                  <path d="M3 6h16M3 11h16M3 16h16" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                </>
+              )}
+            </svg>
+          </button>
+        </div>
+
+        {menuOpen && (
+          <nav className="flex flex-col border-t border-border">
+            {NAV.map((item) => (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={`px-4 py-3 text-sm border-b border-border/60 last:border-0 ${
+                  pathname?.startsWith(item.href)
+                    ? "bg-surface text-signal"
+                    : "text-ink-dim hover:text-ink"
+                }`}
+              >
+                {item.label}
+              </Link>
+            ))}
+            <button
+              className="px-4 py-3 text-sm text-left text-ink-dim hover:text-ink border-t border-border"
+              onClick={signOut}
+            >
+              Sign out
+            </button>
+          </nav>
+        )}
+      </div>
 
       <main className="flex-1 p-4 md:p-8 max-w-6xl overflow-x-hidden">{children}</main>
     </div>

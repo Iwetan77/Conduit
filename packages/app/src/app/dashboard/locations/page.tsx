@@ -73,7 +73,7 @@ export default function LocationsPage() {
       setSettleAddress("");
       refresh();
     } catch (err) {
-      setError(err instanceof ConduitApiError ? err.message : "Failed to create location");
+      setError(err instanceof ConduitApiError ? err.message : "Failed to create storefront");
     } finally {
       setBusy(false);
     }
@@ -82,12 +82,12 @@ export default function LocationsPage() {
   return (
     <div className="max-w-4xl">
       <div className="flex items-center justify-between mb-6">
-        <h1 className="font-display text-3xl font-bold">Locations</h1>
+        <h1 className="font-display text-3xl font-bold">Storefronts</h1>
         <button
           onClick={() => setShowForm((s) => !s)}
           className="border border-border px-4 py-2 text-sm"
         >
-          {showForm ? "Cancel" : "Add location"}
+          {showForm ? "Cancel" : "Add storefront"}
         </button>
       </div>
 
@@ -95,7 +95,7 @@ export default function LocationsPage() {
         <form onSubmit={handleCreate} className="border border-border p-4 mb-6 space-y-3 max-w-md">
           <input
             className="w-full bg-surface border border-border px-3 py-2 text-sm focus:border-signal focus:outline-none"
-            placeholder="Location name (e.g. Shibuya store)"
+            placeholder="Storefront name (e.g. Shibuya store)"
             value={name}
             onChange={(e) => setName(e.target.value)}
             required
@@ -120,7 +120,7 @@ export default function LocationsPage() {
             disabled={busy}
             className="w-full bg-signal text-signal-ink font-medium py-2 text-sm disabled:opacity-50"
           >
-            {busy ? "Creating..." : "Create location"}
+            {busy ? "Creating..." : "Create storefront"}
           </button>
         </form>
       )}
@@ -142,7 +142,7 @@ export default function LocationsPage() {
 
       {accounts?.length === 1 && !showForm && (
         <p className="text-ink-dim text-sm mt-4">
-          No locations yet beyond your main account — click &quot;Add location&quot; to create one.
+          No storefronts yet beyond your main account — click &quot;Add storefront&quot; to create one.
         </p>
       )}
     </div>

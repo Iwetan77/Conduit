@@ -1,23 +1,24 @@
 "use client";
 
 // Payer surface for a payment link (pl_ ids) — Phase 3 built the lifecycle
-// enforcement, Phase 5 wires the actual payer-facing consumption: show the
-// link's identity/description/amount policy, collect an amount for
-// open/open_with_suggested modes plus the payer's own reference (Phase
-// 3.1's two-sided reconciliation field), then turn it into a real
-// settlement_intent via POST /:id/pay and hand off to the existing si_ pay
-// flow -- same component, no page reload.
+// enforcement, Phase 5 wires the payer-facing consumption. Everything now
+// lives on ONE screen: the link's identity/description, the amount (fixed and
+// shown, or an input for open/suggested), the payer's own reference, the
+// pay-with currency picker, the route preview, and the Pay button. The
+// settlement_intent is minted at pay time (POST /:id/pay) inside the shared
+// ArcSettlePanel, so there's no dead "Continue to pay" hop and no orphan
+// intent created just from opening the link.
 import { useEffect, useState } from "react";
+import type { Currency } from "@conduit/sdk/lite";
 import {
   getPublicPaymentLink,
   payPaymentLink,
   type PublicPaymentLink,
-  ConduitApiError,
 } from "@/lib/conduit-api";
 import { formatAmountRaw, shortenAddress } from "@/lib/format";
 import { isoToToken } from "@/lib/currencies";
 import { currencyDecimals } from "@conduit/sdk/lite";
-import { SettlementIntentPay } from "./SettlementIntentPay";
+import { ArcSettlePanel } from "./ArcSettlePanel";
 
 interface PaymentLinkPayProps {
   linkId: string;
@@ -38,22 +39,16 @@ export function PaymentLinkPay({ linkId }: PaymentLinkPayProps) {
   const [amount, setAmount] = useState("");
   const [payerReference, setPayerReference] = useState("");
   const [showAddress, setShowAddress] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [intentId, setIntentId] = useState<string | null>(null);
 
   // Every piece of per-link state resets when linkId changes. Without this,
   // opening a second payment link showed the FIRST link's merchant name and
-  // prefilled amount, and — most seriously — a stale `intentId` meant the
-  // payer could be handed the previous link's settlement intent to pay.
-  // The cancelled flag additionally stops a slow response for the old link
-  // from overwriting the new one.
+  // prefilled amount.
   useEffect(() => {
     let cancelled = false;
     setLink(null);
     setError("");
     setAmount("");
     setPayerReference("");
-    setIntentId(null);
     setShowAddress(false);
 
     getPublicPaymentLink(linkId)
@@ -70,33 +65,6 @@ export function PaymentLinkPay({ linkId }: PaymentLinkPayProps) {
       });
     return () => { cancelled = true; };
   }, [linkId]);
-
-  const handlePay = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!link) return;
-    setError("");
-    setBusy(true);
-    try {
-      const needsAmount = link.amount_mode !== "fixed";
-      const decimals = currencyDecimals(isoToToken(link.settle_currency));
-      const result = await payPaymentLink(linkId, {
-        amount: needsAmount && amount ? toMinorUnits(amount, decimals) : undefined,
-        payer_reference: payerReference || undefined,
-      });
-      setIntentId(result.id);
-    } catch (err) {
-      setError(err instanceof ConduitApiError ? err.message : "This link can no longer be paid.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  // Once the link has been turned into a real settlement_intent, hand off
-  // to the exact same flow a bare si_ link would use -- balance-aware
-  // paying, honest bridge progress, everything.
-  if (intentId) {
-    return <SettlementIntentPay intentId={intentId} />;
-  }
 
   if (error) {
     return (
@@ -135,8 +103,36 @@ export function PaymentLinkPay({ linkId }: PaymentLinkPayProps) {
     );
   }
 
+  const decimals = currencyDecimals(isoToToken(link.settle_currency));
+  const settleToken = isoToToken(link.settle_currency) as Currency;
+  const isFixed = link.amount_mode === "fixed";
+
+  // The amount the intent will settle: the link's own for fixed, the payer's
+  // typed amount otherwise. Kept as minor units so nothing downstream ever
+  // touches a float.
+  const enteredMinor = amount ? toMinorUnits(amount, decimals) : "0";
+  const amountRaw = isFixed && link.amount ? BigInt(link.amount) : BigInt(enteredMinor);
+
+  // Open/suggested links must have a sane amount before the Pay button means
+  // anything. Enforce the merchant's min/max here too, in minor units.
+  const disabledReason = (() => {
+    if (isFixed) return undefined;
+    if (amountRaw <= 0n) return "Enter an amount";
+    if (link.min_amount && amountRaw < BigInt(link.min_amount)) return "Amount is below the minimum";
+    if (link.max_amount && amountRaw > BigInt(link.max_amount)) return "Amount is above the maximum";
+    return undefined;
+  })();
+
+  const ensureIntentId = async (): Promise<string> => {
+    const res = await payPaymentLink(linkId, {
+      amount: isFixed ? undefined : enteredMinor,
+      payer_reference: payerReference || undefined,
+    });
+    return res.id;
+  };
+
   return (
-    <form onSubmit={handlePay} className="space-y-6">
+    <div className="space-y-6">
       <div className="flex items-center gap-3">
         {link.logo_url ? (
           // eslint-disable-next-line @next/next/no-img-element
@@ -160,54 +156,60 @@ export function PaymentLinkPay({ linkId }: PaymentLinkPayProps) {
 
       {link.description && <p className="text-ink-dim text-sm">{link.description}</p>}
 
-      <div className="border border-border bg-surface p-4 space-y-1">
-        <p className="text-ink-dim text-xs uppercase tracking-wider font-mono">
-          {link.amount_mode === "fixed" ? "Requesting" : "Amount"}
-        </p>
-        {link.amount_mode === "fixed" && link.amount ? (
-          <p className="text-ink font-mono text-2xl">
-            {formatAmountRaw(BigInt(link.amount), currencyDecimals(isoToToken(link.settle_currency)))} {link.settle_currency}
-          </p>
-        ) : (
-          <div className="flex items-baseline gap-2">
-            <input
-              className="flex-1 bg-transparent text-ink font-mono text-2xl focus:outline-none"
-              placeholder="0.00"
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-              required
-            />
-            <span className="text-ink-dim font-mono">{link.settle_currency}</span>
-          </div>
-        )}
-        {(link.min_amount || link.max_amount) && (
-          <p className="text-ink-dim text-xs font-mono">
-            {link.min_amount && `min ${formatAmountRaw(BigInt(link.min_amount), currencyDecimals(isoToToken(link.settle_currency)))}`}
-            {link.min_amount && link.max_amount && " · "}
-            {link.max_amount && `max ${formatAmountRaw(BigInt(link.max_amount), currencyDecimals(isoToToken(link.settle_currency)))}`}
-          </p>
-        )}
-      </div>
-
-      <div>
-        <label className="text-ink-dim text-xs uppercase tracking-wider font-mono block mb-1">
-          Your reference (optional)
-        </label>
-        <input
-          className="w-full bg-surface border border-border px-3 py-2 text-sm focus:border-signal focus:outline-none"
-          placeholder="Your PO number, etc."
-          value={payerReference}
-          onChange={(e) => setPayerReference(e.target.value)}
-        />
-      </div>
-
-      <button
-        type="submit"
-        disabled={busy}
-        className="w-full py-4 bg-signal text-signal-ink font-mono text-lg hover:bg-signal/90 transition-colors disabled:opacity-50"
+      {/* Amount, currency picker, route preview and Pay all on one screen.
+          The amount box + reference are handed to ArcSettlePanel as children so
+          they sit above the pay-with picker; the settlement intent is created
+          only when the payer actually taps Pay. */}
+      <ArcSettlePanel
+        settleToken={settleToken}
+        settleCurrencyIso={link.settle_currency}
+        settleAddress={link.settle_address}
+        amountRaw={amountRaw}
+        displayName={link.display_name}
+        ensureIntentId={ensureIntentId}
+        disabledReason={disabledReason}
       >
-        {busy ? "Preparing..." : "Continue to pay"}
-      </button>
-    </form>
+        <div className="border border-border bg-surface p-4 space-y-1">
+          <p className="text-ink-dim text-xs uppercase tracking-wider font-mono">
+            {isFixed ? "Requesting" : "Amount"}
+          </p>
+          {isFixed && link.amount ? (
+            <p className="text-ink font-mono text-2xl">
+              {formatAmountRaw(BigInt(link.amount), decimals)} {link.settle_currency}
+            </p>
+          ) : (
+            <div className="flex items-baseline gap-2">
+              <input
+                inputMode="decimal"
+                className="flex-1 min-w-0 bg-transparent text-ink font-mono text-2xl focus:outline-none"
+                placeholder="0.00"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+              />
+              <span className="text-ink-dim font-mono shrink-0">{link.settle_currency}</span>
+            </div>
+          )}
+          {(link.min_amount || link.max_amount) && (
+            <p className="text-ink-dim text-xs font-mono">
+              {link.min_amount && `min ${formatAmountRaw(BigInt(link.min_amount), decimals)}`}
+              {link.min_amount && link.max_amount && " · "}
+              {link.max_amount && `max ${formatAmountRaw(BigInt(link.max_amount), decimals)}`}
+            </p>
+          )}
+        </div>
+
+        <div>
+          <label className="text-ink-dim text-xs uppercase tracking-wider font-mono block mb-1">
+            Your reference (optional)
+          </label>
+          <input
+            className="w-full bg-surface border border-border px-3 py-2 text-sm focus:border-signal focus:outline-none"
+            placeholder="Your PO number, etc."
+            value={payerReference}
+            onChange={(e) => setPayerReference(e.target.value)}
+          />
+        </div>
+      </ArcSettlePanel>
+    </div>
   );
 }

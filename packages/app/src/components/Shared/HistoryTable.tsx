@@ -101,51 +101,75 @@ export function HistoryTable({ rows, isLoading }: HistoryTableProps) {
         <span className="text-scale-1 font-mono text-ink-dim uppercase tracking-wider text-right">Amount</span>
         <span className="text-scale-1 font-mono text-ink-dim uppercase tracking-wider text-right">Tx</span>
       </div>
-      <div className="divide-y divide-border overflow-x-auto">
+      <div className="divide-y divide-border">
         {sorted.map((row) => {
           const isSender = row.direction === "sent";
           const txShort = row.txHash
             ? `${row.txHash.slice(0, 6)}…${row.txHash.slice(-4)}`
             : "—";
+          const amountText = `${isSender ? "-" : "+"}${formatAmount(row.amount, row.currency)}`;
+          const amountClass = `text-scale-2 font-mono font-medium whitespace-nowrap ${
+            isSender ? "text-ink" : "text-signal"
+          }`;
 
+          // Two layouts, not one squeezed into a min-width that forced
+          // horizontal scroll on mobile -- which pushed the amount and tx
+          // columns off the edge of the screen entirely, unreadable without
+          // scrolling sideways under each row. Below sm: two stacked lines,
+          // full width, nothing clipped. From sm: the original 4-column grid.
           const content = (
             <>
-              <div className="flex items-center gap-3">
-                <span className={`font-mono text-scale-2 ${isSender ? "text-ink-dim" : "text-signal"}`}>
-                  {isSender ? "↑" : "↓"}
-                </span>
-                <div className="flex flex-col">
-                  <span className="text-scale-2 font-mono text-ink">
+              {/* Mobile: counterparty on top, date + amount below it. */}
+              <div className="flex flex-col gap-1 sm:hidden min-w-0">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className={`font-mono text-scale-2 shrink-0 ${isSender ? "text-ink-dim" : "text-signal"}`}>
+                    {isSender ? "↑" : "↓"}
+                  </span>
+                  <span className="text-scale-2 font-mono text-ink truncate">
                     {isSender
                       ? `To ${shortenAddress(row.counterpartyAddress)}`
                       : `From ${shortenAddress(row.counterpartyAddress)}`}
                   </span>
                   <TokenBadge currency={row.currency} size="sm" />
                 </div>
+                <div className="flex items-center justify-between gap-2 pl-6">
+                  <span className="text-scale-1 font-mono text-ink-dim whitespace-nowrap">
+                    {formatDate(row.settledAt)}
+                  </span>
+                  <span className={amountClass}>{amountText}</span>
+                </div>
               </div>
 
-              <span className="text-scale-1 font-mono text-ink-dim whitespace-nowrap">
-                {formatDate(row.settledAt)}
-              </span>
+              {/* Desktop: the original 4-column grid. */}
+              <div className="hidden sm:grid grid-cols-[1fr_auto_auto_auto] gap-4 items-center w-full">
+                <div className="flex items-center gap-3">
+                  <span className={`font-mono text-scale-2 ${isSender ? "text-ink-dim" : "text-signal"}`}>
+                    {isSender ? "↑" : "↓"}
+                  </span>
+                  <div className="flex flex-col">
+                    <span className="text-scale-2 font-mono text-ink">
+                      {isSender
+                        ? `To ${shortenAddress(row.counterpartyAddress)}`
+                        : `From ${shortenAddress(row.counterpartyAddress)}`}
+                    </span>
+                    <TokenBadge currency={row.currency} size="sm" />
+                  </div>
+                </div>
 
-              <span
-                className={`text-scale-2 font-mono font-medium text-right whitespace-nowrap ${
-                  isSender ? "text-ink" : "text-signal"
-                }`}
-              >
-                {isSender ? "-" : "+"}
-                {formatAmount(row.amount, row.currency)}
-              </span>
+                <span className="text-scale-1 font-mono text-ink-dim whitespace-nowrap">
+                  {formatDate(row.settledAt)}
+                </span>
 
-              <span className="text-scale-1 font-mono text-ink-dim group-hover:text-ink transition-colors whitespace-nowrap">
-                {txShort}
-              </span>
+                <span className={`${amountClass} text-right`}>{amountText}</span>
+
+                <span className="text-scale-1 font-mono text-ink-dim group-hover:text-ink transition-colors whitespace-nowrap">
+                  {txShort}
+                </span>
+              </div>
             </>
           );
 
-          const rowClass =
-            "grid grid-cols-[1fr_auto_auto_auto] gap-4 items-center px-4 py-3 " +
-            "hover:bg-surface transition-colors group min-w-[560px] sm:min-w-0";
+          const rowClass = "flex items-center px-4 py-3 hover:bg-surface transition-colors group";
 
           return row.explorerUrl ? (
             <a key={row.key} href={row.explorerUrl} target="_blank" rel="noopener noreferrer" className={rowClass}>

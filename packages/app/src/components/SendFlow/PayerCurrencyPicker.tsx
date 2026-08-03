@@ -12,6 +12,8 @@
 import { useEffect, useState } from "react";
 import { useAccount } from "wagmi";
 import type { Currency } from "@conduit/sdk/lite";
+import { currencyDecimals } from "@conduit/sdk/lite";
+import { formatAmountRaw } from "@/lib/format";
 import { TokenIcon } from "@/components/Shared/TokenBadge";
 import { useBalances, type BalanceMap } from "@/lib/use-balances";
 
@@ -36,6 +38,13 @@ export function PayerCurrencyPicker({ value, onChange, onBalancesChange }: Payer
     .filter(([, b]) => b > 0n)
     .map(([currency, balance]) => ({ currency, balance }))
     .sort((a, b) => (b.balance > a.balance ? 1 : b.balance < a.balance ? -1 : 0));
+
+  // A payer choosing what to pay with couldn't see how much they actually
+  // held -- the picker named the currencies but not the amounts, so "do I even
+  // have enough?" was unanswerable on the /pay screen. Show the balance
+  // alongside each option.
+  const fmtBalance = (currency: Currency, balance: bigint) =>
+    formatAmountRaw(balance, currencyDecimals(currency));
 
   // Keep the selection inside the held set (largest balance wins) and report
   // balances up for the sufficiency check. Effects, never during render.
@@ -89,6 +98,9 @@ export function PayerCurrencyPicker({ value, onChange, onBalancesChange }: Payer
         <div className="flex items-center gap-2 border border-signal/50 bg-signal/5 px-3 py-2 text-sm font-mono text-ink">
           <TokenIcon currency={only} px={18} />
           {only}
+          <span className="ml-auto text-ink-dim">
+            Balance {fmtBalance(only, held[0].balance)}
+          </span>
         </div>
       </div>
     );
@@ -98,7 +110,7 @@ export function PayerCurrencyPicker({ value, onChange, onBalancesChange }: Payer
     <div className="flex flex-col gap-1.5">
       <label className="text-xs font-mono text-ink-dim uppercase tracking-wider">Pay with</label>
       <div className="flex gap-2 flex-wrap">
-        {held.map(({ currency }) => (
+        {held.map(({ currency, balance }) => (
           <button
             key={currency}
             onClick={() => onChange(currency)}
@@ -110,6 +122,7 @@ export function PayerCurrencyPicker({ value, onChange, onBalancesChange }: Payer
           >
             <TokenIcon currency={currency} px={16} />
             {currency}
+            <span className="text-ink-dim text-xs">{fmtBalance(currency, balance)}</span>
           </button>
         ))}
       </div>

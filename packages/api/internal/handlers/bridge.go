@@ -518,3 +518,179 @@ func (h *Bridge) Balance(w http.ResponseWriter, r *http.Request) {
 func arcAddressFromKey(key *ecdsa.PrivateKey) common.Address {
 	return crypto.PubkeyToAddress(key.PublicKey)
 }
+
+// ── Client-side UBK spend path (option B) ────────────────────────────────────
+//
+// When the browser drives Circle's Unified Balance Kit directly, it does the
+// deposit + burn-intent signing itself and Circle mints the USDC onto Arc at
+// our relayer address. The server no longer encodes or submits anything to
+// Gateway for these payers — it only needs (1) to tell the client where to mint
+// and how much USDC to spend, and (2) to be told the resulting Gateway transfer
+// id so it can poll the mint and run the existing settlement handoff. These two
+// endpoints provide exactly that; the tested pollAndCompleteFunding /
+// settleBridgedIntent pipeline below is reused unchanged.
+
+type bridgePlanResponse struct {
+	RecipientAddress string `json:"recipient_address"` // Conduit's Arc relayer — where the client mints USDC
+	RequiredUSDC     string `json:"required_usdc"`     // minor units of USDC the client must spend
+	SettleCurrency   string `json:"settle_currency"`
+	SettleAmount     string `json:"settle_amount"` // minor units, what the merchant receives
+}
+
+// Plan is GET /v1/settlement_intents/:id/bridge/plan. It answers "if I pay this
+// with USDC from another chain, where does it go and how much USDC do I need?"
+// For a USDC-settled intent the answer is 1:1; for a cross-currency intent it
+// prices the settle amount through StableFX and adds a margin so the post-mint
+// re-quote can't come up short (Gateway also enforces a min fee on the spend).
+func (h *Bridge) Plan(w http.ResponseWriter, r *http.Request) {
+	id := pathParam(r, "id")
+	ctx := r.Context()
+
+	var settleISO, settleAddress, status string
+	var settleAmount string
+	if err := h.Pool.QueryRow(ctx,
+		`SELECT settle_currency, settle_address, status, amount::text FROM settlement_intents WHERE id = $1`, id,
+	).Scan(&settleISO, &settleAddress, &status, &settleAmount); err != nil {
+		if err == pgx.ErrNoRows {
+			writeErr(w, apierrors.E(apierrors.CodeNotFound, "id"))
+			return
+		}
+		writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
+		return
+	}
+	if status == "settled" {
+		writeErr(w, apierrors.E(apierrors.CodeIntentAlreadySettled, "id"))
+		return
+	}
+
+	settleInfo, ok := currency.ByISO(settleISO)
+	if !ok {
+		writeErr(w, apierrors.E(apierrors.CodeCurrencyNotSupported, "settle_currency"))
+		return
+	}
+
+	settleAmt, _ := new(big.Int).SetString(settleAmount, 10)
+	var requiredUSDC *big.Int
+	if settleInfo.Symbol == "USDC" {
+		requiredUSDC = settleAmt
+	} else {
+		// Price the recipient's target amount in USDC. This is only a pre-quote
+		// for sizing the spend — the authoritative conversion still runs
+		// post-mint in settleBridgedIntent. Add a 2% margin so a small rate
+		// move between the two quotes can't under-fund the settlement.
+		q, err := h.StableFX.Quote(ctx, "USDC", settleInfo.Symbol, settleAmt, settleAddress)
+		if err != nil || q.FromAmount == nil {
+			writeErr(w, apierrors.E(apierrors.CodeFxProviderUnavailable, ""))
+			return
+		}
+		margin := new(big.Int).Div(new(big.Int).Mul(q.FromAmount, big.NewInt(2)), big.NewInt(100))
+		requiredUSDC = new(big.Int).Add(q.FromAmount, margin)
+	}
+
+	writeJSON(w, http.StatusOK, bridgePlanResponse{
+		RecipientAddress: h.RelayerAddr.Hex(),
+		RequiredUSDC:     requiredUSDC.String(),
+		SettleCurrency:   settleISO,
+		SettleAmount:     settleAmount,
+	})
+}
+
+type reportSpendRequest struct {
+	GatewayTransferID string `json:"gateway_transfer_id"`
+	SourceChain       string `json:"source_chain"` // "base" | "polygon" | "solana"
+	USDCAmount        string `json:"usdc_amount"`  // minor units actually spent
+}
+
+func sourceDomainFor(chain string) (uint32, bool) {
+	switch chain {
+	case "base":
+		return bridgepkg.BaseDomain, true
+	case "polygon":
+		return bridgepkg.PolygonDomain, true
+	case "solana":
+		return bridgepkg.SolanaDomain, true
+	default:
+		return 0, false
+	}
+}
+
+// ReportClientSpend is POST /v1/settlement_intents/:id/bridge/report_spend. The
+// client-side UBK spend already committed on Gateway; the browser hands back the
+// Gateway transfer id. We mark the intent cross-chain, record a bridge_transfers
+// row already at 'attested' (Gateway owns the burn/attestation — nothing for us
+// to submit), and kick the existing poll→mint→settle pipeline in the background.
+func (h *Bridge) ReportClientSpend(w http.ResponseWriter, r *http.Request) {
+	id := pathParam(r, "id")
+	ctx := r.Context()
+
+	var req reportSpendRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, apierrors.E(apierrors.CodeInvalidRequest, "body"))
+		return
+	}
+	if req.GatewayTransferID == "" {
+		writeErr(w, apierrors.E(apierrors.CodeInvalidRequest, "gateway_transfer_id"))
+		return
+	}
+	sourceDomain, ok := sourceDomainFor(req.SourceChain)
+	if !ok {
+		writeErr(w, apierrors.E(apierrors.CodeInvalidRequest, "source_chain"))
+		return
+	}
+	amount, ok := new(big.Int).SetString(req.USDCAmount, 10)
+	if !ok || amount.Sign() <= 0 {
+		writeErr(w, apierrors.E(apierrors.CodeInvalidRequest, "usdc_amount"))
+		return
+	}
+
+	var status string
+	if err := h.Pool.QueryRow(ctx, `SELECT status FROM settlement_intents WHERE id = $1`, id).Scan(&status); err != nil {
+		if err == pgx.ErrNoRows {
+			writeErr(w, apierrors.E(apierrors.CodeNotFound, "id"))
+			return
+		}
+		writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
+		return
+	}
+	if status == "settled" {
+		writeErr(w, apierrors.E(apierrors.CodeIntentAlreadySettled, "id"))
+		return
+	}
+
+	// Stamp the intent as cross-chain so the payer surface + status reads agree
+	// it's bridging (it was created 'arc' by default; the payer chose otherwise).
+	if _, err := h.Pool.Exec(ctx,
+		`UPDATE settlement_intents SET source_chain = $1, updated_at = now() WHERE id = $2 AND status <> 'settled'`,
+		req.SourceChain, id,
+	); err != nil {
+		writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
+		return
+	}
+
+	// Idempotency: one Gateway transfer id ⇒ one bridge_transfers row. A retried
+	// report returns the existing row rather than double-settling.
+	var transferID string
+	err := h.Pool.QueryRow(ctx,
+		`SELECT id FROM bridge_transfers WHERE intent_id = $1 AND attestation = $2`, id, req.GatewayTransferID,
+	).Scan(&transferID)
+	if err == pgx.ErrNoRows {
+		transferID = models.NewID("brg")
+		if _, err := h.Pool.Exec(ctx,
+			`INSERT INTO bridge_transfers (id, intent_id, source_domain, dest_domain, burn_amount, attestation, state)
+			 VALUES ($1,$2,$3,$4,$5,$6,'attested')`,
+			transferID, id, int(sourceDomain), int(bridgepkg.ArcDomain), amount.String(), req.GatewayTransferID,
+		); err != nil {
+			writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
+			return
+		}
+	} else if err != nil {
+		writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
+		return
+	}
+
+	// Poll Gateway for the mint, then hand off to the existing StableFX
+	// settlement — on a fresh context so it survives this HTTP response.
+	go h.pollAndCompleteFunding(context.Background(), id, transferID, req.GatewayTransferID)
+
+	writeJSON(w, http.StatusAccepted, map[string]any{"transfer_id": transferID, "state": string(bridgepkg.StateAttested)})
+}

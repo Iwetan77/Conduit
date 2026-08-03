@@ -2,16 +2,9 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { listSettlements, type Settlement, ConduitApiError } from "@/lib/conduit-api";
-import { formatDate, shortenAddress } from "@/lib/format";
+import { formatDate, shortenAddress, formatMinorUnits, minorUnitsToNumber } from "@/lib/format";
 
 const EXPLORER = process.env.NEXT_PUBLIC_EXPLORER ?? "https://testnet.arcscan.app";
-
-function formatMinor(amount: string, currency: string): string {
-  // Settlement rows carry pre-formatted decimal strings from the API (Postgres
-  // NUMERIC as text) — not raw minor-unit bigints, so no decimals lookup needed
-  // here; just present them.
-  return `${amount} ${currency}`;
-}
 
 export default function SettlementsPage() {
   const [settlements, setSettlements] = useState<Settlement[] | null>(null);
@@ -38,19 +31,46 @@ export default function SettlementsPage() {
     });
   }, [settlements, currencyFilter, search]);
 
-  const heroLabel = currencyFilter === "all" ? "Total settlements" : `Total settled · ${currencyFilter}`;
-  const heroValue =
-    currencyFilter === "all"
-      ? String(filtered.length)
-      : filtered
-          .reduce((sum, s) => sum + Number(s.settle_amount), 0)
-          .toLocaleString("en-US", { maximumFractionDigits: 2 });
+  // Money settled, not just a row count. Grouped by settle currency (rows can
+  // mix EUR/USD/…), each total converted from raw minor units to its currency's
+  // real precision — the same conversion the table cells were missing.
+  const settledTotals = useMemo(() => {
+    const byCurrency = new Map<string, { received: number; net: number; count: number }>();
+    for (const s of filtered) {
+      const cur = s.settle_currency;
+      const entry = byCurrency.get(cur) ?? { received: 0, net: 0, count: 0 };
+      entry.received += minorUnitsToNumber(s.settle_amount, cur);
+      entry.net += minorUnitsToNumber((BigInt(s.settle_amount) - BigInt(s.fee)).toString(), cur);
+      entry.count += 1;
+      byCurrency.set(cur, entry);
+    }
+    return Array.from(byCurrency.entries());
+  }, [filtered]);
+
+  const fmtMoney = (n: number) => n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   return (
     <div>
       <div className="mb-8">
-        <p className="text-scale-1 font-mono text-ink-dim uppercase tracking-wider mb-1">{heroLabel}</p>
-        <p className="font-anton text-scale-6 text-ink leading-none">{heroValue}</p>
+        <p className="text-scale-1 font-mono text-ink-dim uppercase tracking-wider mb-3">
+          {currencyFilter === "all" ? "Money settled" : `Settled · ${currencyFilter}`}
+        </p>
+        {settledTotals.length === 0 ? (
+          <p className="font-anton text-scale-6 text-ink leading-none">0</p>
+        ) : (
+          <div className="flex flex-wrap gap-x-10 gap-y-4">
+            {settledTotals.map(([cur, t]) => (
+              <div key={cur}>
+                <p className="font-anton text-scale-5 text-ink leading-none">
+                  {fmtMoney(t.net)} <span className="text-scale-3 text-ink-dim">{cur}</span>
+                </p>
+                <p className="text-scale-1 font-mono text-ink-dim mt-1">
+                  net received · {t.count} settlement{t.count === 1 ? "" : "s"} · {fmtMoney(t.received)} gross
+                </p>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="flex items-center justify-between mb-6">
@@ -104,17 +124,17 @@ export default function SettlementsPage() {
             </thead>
             <tbody>
               {filtered.map((s) => {
-                const net = (Number(s.settle_amount) - Number(s.fee)).toString();
+                const net = (BigInt(s.settle_amount) - BigInt(s.fee)).toString();
                 return (
                   <tr key={s.id} className="border-b border-border last:border-0 hover:bg-surface/50">
                     <td className="px-4 py-3 whitespace-nowrap font-mono text-ink-dim">{formatDate(new Date(s.settled_at).getTime() / 1000)}</td>
                     <td className="px-4 py-3 font-mono">{s.reference || "—"}</td>
                     <td className="px-4 py-3 font-mono text-xs">{shortenAddress(s.settle_address)}</td>
-                    <td className="px-4 py-3 whitespace-nowrap font-mono text-right">{formatMinor(s.pay_amount, s.pay_currency)}</td>
-                    <td className="px-4 py-3 whitespace-nowrap font-mono text-right">{formatMinor(s.settle_amount, s.settle_currency)}</td>
+                    <td className="px-4 py-3 whitespace-nowrap font-mono text-right">{formatMinorUnits(s.pay_amount, s.pay_currency)}</td>
+                    <td className="px-4 py-3 whitespace-nowrap font-mono text-right">{formatMinorUnits(s.settle_amount, s.settle_currency)}</td>
                     <td className="px-4 py-3 font-mono text-right">{s.rate_applied ?? "—"}</td>
-                    <td className="px-4 py-3 font-mono text-right">{s.fee}</td>
-                    <td className="px-4 py-3 font-mono text-right">{net} {s.settle_currency}</td>
+                    <td className="px-4 py-3 font-mono text-right">{formatMinorUnits(s.fee, s.settle_currency)}</td>
+                    <td className="px-4 py-3 whitespace-nowrap font-mono text-right">{formatMinorUnits(net, s.settle_currency)}</td>
                     <td className="px-4 py-3 text-right">
                       <a
                         href={`${EXPLORER}/tx/${s.tx_hash}`}

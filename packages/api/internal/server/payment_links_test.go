@@ -62,7 +62,7 @@ func errCode(t *testing.T, body string) string {
 // TestLinkLifecycle: create -> public view flips active to viewed -> pay
 // creates a real settlement_intent tied back to the link.
 func TestLinkLifecycle(t *testing.T) {
-	srv, key, _ := newLinkTestServer(t, 15501)
+	srv, key, pool := newLinkTestServer(t, 15501)
 
 	createBody := `{"amount_mode":"fixed","amount":50000,"settle_currency":"USD","settle_address":"0x0000000000000000000000000000000000000009","description":"Invoice #1","merchant_reference":"INV-1"}`
 	resp := doJSON(t, srv.URL, "POST", "/v1/payment_links", key, createBody, "")
@@ -109,21 +109,38 @@ func TestLinkLifecycle(t *testing.T) {
 		t.Errorf("expected amount=50000, got %s", payResp.Amount)
 	}
 
-	// The link (single_use by default) should now be 'paid'
+	// Starting checkout does NOT mark the link paid — it only reaches 'viewed'.
+	// The 'paid' transition happens when a real settlement lands (see
+	// payment_links.go Pay() and the confirm handler / indexer), so a payment
+	// that later fails on insufficient funds never leaves the link showing paid.
 	resp = doJSON(t, srv.URL, "GET", "/v1/payment_links/"+link.ID, key, "", "")
 	var got struct {
 		Status string `json:"status"`
 	}
 	json.Unmarshal([]byte(resp.body), &got)
+	if got.Status != "viewed" {
+		t.Errorf("expected status=viewed after checkout starts (paid only on settlement), got %s", got.Status)
+	}
+
+	// Simulate the settlement landing (what the confirm handler / indexer do):
+	// only now should the link read 'paid'.
+	if _, err := pool.Exec(context.Background(),
+		`UPDATE payment_links SET status = 'paid' WHERE id = $1`, link.ID); err != nil {
+		t.Fatalf("simulate settlement: %v", err)
+	}
+	resp = doJSON(t, srv.URL, "GET", "/v1/payment_links/"+link.ID, key, "", "")
+	json.Unmarshal([]byte(resp.body), &got)
 	if got.Status != "paid" {
-		t.Errorf("expected status=paid after a single_use link is paid, got %s", got.Status)
+		t.Errorf("expected status=paid after settlement lands, got %s", got.Status)
 	}
 }
 
-// TestSingleUse: a second payment attempt against an already-paid
-// single_use link must be rejected with a typed error, not silently allowed.
+// TestSingleUse: once a single_use link has actually been PAID (a settlement
+// landed), a further payment attempt must be rejected. Merely starting checkout
+// no longer burns the link — that was the bug where a failed payment left the
+// link unusable and falsely marked paid.
 func TestSingleUse(t *testing.T) {
-	srv, key, _ := newLinkTestServer(t, 15502)
+	srv, key, pool := newLinkTestServer(t, 15502)
 
 	resp := doJSON(t, srv.URL, "POST", "/v1/payment_links", key,
 		`{"amount_mode":"fixed","amount":10000,"settle_currency":"USD","settle_address":"0x0000000000000000000000000000000000000009","reuse_policy":"single_use"}`, "")
@@ -137,9 +154,22 @@ func TestSingleUse(t *testing.T) {
 		t.Fatalf("first pay should succeed: status=%d body=%s", resp.status, resp.body)
 	}
 
+	// Before settlement the link is still payable — a payer who abandoned or
+	// whose payment failed must not have permanently burned it.
+	resp = doJSON(t, srv.URL, "POST", "/v1/payment_links/"+link.ID+"/pay", "", `{}`, "")
+	if resp.status != http.StatusCreated {
+		t.Fatalf("retry before settlement should be allowed: status=%d body=%s", resp.status, resp.body)
+	}
+
+	// Now a settlement lands (confirm handler / indexer marks it paid).
+	if _, err := pool.Exec(context.Background(),
+		`UPDATE payment_links SET status = 'paid' WHERE id = $1`, link.ID); err != nil {
+		t.Fatalf("simulate settlement: %v", err)
+	}
+
 	resp = doJSON(t, srv.URL, "POST", "/v1/payment_links/"+link.ID+"/pay", "", `{}`, "")
 	if resp.status != http.StatusConflict {
-		t.Fatalf("second pay on single_use link: expected 409, got %d body=%s", resp.status, resp.body)
+		t.Fatalf("pay after a single_use link is paid: expected 409, got %d body=%s", resp.status, resp.body)
 	}
 	if code := errCode(t, resp.body); code != "payment_link_already_used" {
 		t.Errorf("expected payment_link_already_used, got %s", code)
@@ -191,7 +221,7 @@ func TestExpiry(t *testing.T) {
 // TestVoid: a voided link cannot be paid; voiding a paid/settled link is
 // rejected (immutable per spec).
 func TestVoid(t *testing.T) {
-	srv, key, _ := newLinkTestServer(t, 15504)
+	srv, key, pool := newLinkTestServer(t, 15504)
 
 	resp := doJSON(t, srv.URL, "POST", "/v1/payment_links", key,
 		`{"amount_mode":"fixed","amount":10000,"settle_currency":"USD","settle_address":"0x0000000000000000000000000000000000000009"}`, "")
@@ -223,6 +253,12 @@ func TestVoid(t *testing.T) {
 	resp = doJSON(t, srv.URL, "POST", "/v1/payment_links/"+link2.ID+"/pay", "", `{}`, "")
 	if resp.status != http.StatusCreated {
 		t.Fatalf("pay: status=%d body=%s", resp.status, resp.body)
+	}
+	// A link is immutable only once actually paid (a settlement landed) — not
+	// merely because checkout was started. Simulate the settlement first.
+	if _, err := pool.Exec(context.Background(),
+		`UPDATE payment_links SET status = 'paid' WHERE id = $1`, link2.ID); err != nil {
+		t.Fatalf("simulate settlement: %v", err)
 	}
 	resp = doJSON(t, srv.URL, "POST", "/v1/payment_links/"+link2.ID+"/void", key, "", "")
 	if resp.status != http.StatusConflict {

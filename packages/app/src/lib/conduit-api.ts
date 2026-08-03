@@ -332,6 +332,33 @@ export function getBridgeStatus(intentId: string) {
   return request<BridgeStatus>(`/v1/settlement_intents/${intentId}/bridge/status`);
 }
 
+// ── Client-side UBK spend path (option B) ────────────────────────────────────
+// The browser drives Circle's Unified Balance Kit directly (see
+// lib/unified-balance.ts), so it needs to know where to mint the USDC and how
+// much to spend (getBridgePlan), then reports the resulting Gateway transfer id
+// back so the server polls the mint and runs the existing StableFX settlement.
+
+export interface BridgePlan {
+  recipient_address: string; // Conduit's Arc relayer — mint the USDC here
+  required_usdc: string; // minor units of USDC to spend (already includes cross-currency margin)
+  settle_currency: string;
+  settle_amount: string;
+}
+
+export function getBridgePlan(intentId: string) {
+  return request<BridgePlan>(`/v1/settlement_intents/${intentId}/bridge/plan`);
+}
+
+export function reportBridgeSpend(
+  intentId: string,
+  body: { gateway_transfer_id: string; source_chain: string; usdc_amount: string }
+) {
+  return request<{ transfer_id: string; state: string }>(
+    `/v1/settlement_intents/${intentId}/bridge/report_spend`,
+    { method: "POST", body }
+  );
+}
+
 // ── Settlements (per-payment view: paid, received, rate, fee, tx link) ──────
 
 export interface Settlement {

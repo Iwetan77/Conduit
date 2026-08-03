@@ -527,7 +527,7 @@ export function Footer() {
         <div className="flex flex-col gap-2.5">
           {[
             { label: 'Docs', href: '/docs' },
-            { label: 'X / Twitter', href: 'https://x.com/conduit' },
+            { label: 'X / Twitter', href: 'https://x.com/conduitonarc' },
             { label: 'Arc', href: 'https://arc.network' },
           ].map(({ label, href }) => (
             <a

@@ -2,6 +2,14 @@ import { createConfig, http } from "wagmi";
 import { defineChain } from "viem";
 import { injected, walletConnect } from "wagmi/connectors";
 
+// Arc's public RPC rate-limits hard and its 429s come back with no CORS
+// headers, so the browser surfaces them as an opaque "Load failed" on
+// eth_blockNumber / eth_call. Allow pointing every browser-side read at a
+// reliable/proxied endpoint (a private RPC, or the Conduit API acting as an
+// RPC proxy) without a code change. Falls back to the public endpoint.
+export const ARC_RPC_URL =
+  process.env.NEXT_PUBLIC_ARC_RPC_URL ?? "https://rpc.testnet.arc.network";
+
 // Arc Testnet chain definition
 export const arcTestnet = defineChain({
   id: 5042002,
@@ -13,7 +21,7 @@ export const arcTestnet = defineChain({
   },
   rpcUrls: {
     default: {
-      http: ["https://rpc.testnet.arc.network"],
+      http: [ARC_RPC_URL],
       webSocket: ["wss://rpc.testnet.arc.network"],
     },
   },
@@ -52,7 +60,7 @@ export const wagmiConfigParams = {
     ...(wcProjectId ? [walletConnect({ projectId: wcProjectId })] : []),
   ],
   transports: {
-    [arcTestnet.id]: http("https://rpc.testnet.arc.network"),
+    [arcTestnet.id]: http(ARC_RPC_URL),
   },
 } as const;
 

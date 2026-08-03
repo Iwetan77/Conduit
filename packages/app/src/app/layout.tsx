@@ -13,6 +13,13 @@ import { Providers } from "./providers";
 import { ChainGuard } from "@/components/Shared/ChainGuard";
 
 export const metadata: Metadata = {
+  // Makes relative OG image URLs (e.g. the per-link /pay/[id]/opengraph-image)
+  // resolve to absolute ones so crawlers can fetch them. Falls back to the
+  // Vercel-provided deploy URL, then localhost for dev.
+  metadataBase: new URL(
+    process.env.NEXT_PUBLIC_APP_URL ??
+      (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000")
+  ),
   title: "Conduit — Accept Any Stablecoin, Settle in Yours",
   description:
     "Accept any stablecoin, settle in yours. Conduit routes and settles atomically in under a second on Arc Testnet.",

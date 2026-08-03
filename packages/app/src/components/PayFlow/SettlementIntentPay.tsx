@@ -19,6 +19,10 @@ interface SettlementIntentPayProps {
 // CCTP and CrossChainBridge drives the rest of this page.
 export function SettlementIntentPay({ intentId }: SettlementIntentPayProps) {
   const [showAddress, setShowAddress] = useState(false);
+  // Payer-chosen cross-chain: even an intent created for on-Arc payment can be
+  // paid with USDC from another chain (Solana / Base / Polygon). The merchant no
+  // longer has to pre-declare source_chain — the payer decides at pay time.
+  const [payFromOtherChain, setPayFromOtherChain] = useState(false);
 
   // Shared query with the page's title effect — one request, not two.
   // Keyed by intentId with NO previous-data retention, which is what keeps
@@ -87,18 +91,38 @@ export function SettlementIntentPay({ intentId }: SettlementIntentPayProps) {
         </p>
       </div>
 
-      {intent.source_chain !== "arc" ? (
-        <CrossChainBridge intentId={intentId} intent={intent} />
+      {intent.source_chain !== "arc" || payFromOtherChain ? (
+        <>
+          <CrossChainBridge intentId={intentId} intent={intent} />
+          {intent.source_chain === "arc" && (
+            <button
+              type="button"
+              onClick={() => setPayFromOtherChain(false)}
+              className="text-ink-dim text-xs font-mono hover:text-ink"
+            >
+              ← Pay on Arc instead
+            </button>
+          )}
+        </>
       ) : (
-        <ArcSettlePanel
-          settleToken={isoToToken(intent.settle_currency) as Currency}
-          settleCurrencyIso={intent.settle_currency}
-          settleAddress={intent.settle_address}
-          amountRaw={BigInt(intent.amount)}
-          displayName={intent.display_name}
-          // The intent already exists on this surface — just hand back its id.
-          ensureIntentId={async () => intent.id}
-        />
+        <>
+          <ArcSettlePanel
+            settleToken={isoToToken(intent.settle_currency) as Currency}
+            settleCurrencyIso={intent.settle_currency}
+            settleAddress={intent.settle_address}
+            amountRaw={BigInt(intent.amount)}
+            displayName={intent.display_name}
+            // The intent already exists on this surface — just hand back its id.
+            ensureIntentId={async () => intent.id}
+          />
+          <button
+            type="button"
+            onClick={() => setPayFromOtherChain(true)}
+            className="w-full text-center text-ink-dim text-xs font-mono hover:text-ink border border-border py-2 hover:border-signal/40 transition-colors"
+          >
+            Pay with USDC from another chain (Solana, Base, Polygon)
+          </button>
+        </>
       )}
     </div>
   );

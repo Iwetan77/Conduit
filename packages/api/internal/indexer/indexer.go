@@ -223,5 +223,17 @@ func (ix *Indexer) processLog(ctx context.Context, vLog types.Log) error {
 		`UPDATE settlement_intents SET status = 'settled', updated_at = now() WHERE declaration_id = $1`,
 		declarationID,
 	)
+	if err != nil {
+		return err
+	}
+
+	// A payment link backing this intent becomes 'paid' only here, on a real
+	// on-chain settlement — never at checkout start (see payment_links.go Pay()).
+	_, err = ix.pool.Exec(ctx,
+		`UPDATE payment_links SET status = 'paid', updated_at = now()
+		 WHERE id = (SELECT payment_link_id FROM settlement_intents WHERE declaration_id = $1)
+		   AND status NOT IN ('paid','settled','void')`,
+		declarationID,
+	)
 	return err
 }

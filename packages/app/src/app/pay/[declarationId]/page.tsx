@@ -1,174 +1,103 @@
-"use client";
+// Server Component wrapper for /pay/[declarationId]. Its ONLY job beyond
+// rendering the client body is generateMetadata: fetching the public
+// link/intent server-side so WhatsApp, X/Twitter, Telegram, iMessage etc. get
+// a real preview card (merchant name + amount + branded image) instead of a
+// bare URL. Crawlers never run JS, so this cannot live in the client component.
+import type { Metadata } from "next";
+import { toHumanAmount, currencyDecimals } from "@conduit/sdk/lite";
+import { isoToToken } from "@/lib/currencies";
+import { PayPageClient } from "./PayPageClient";
 
-import Link from "next/link";
+const API_BASE = process.env.NEXT_PUBLIC_CONDUIT_API_URL ?? "http://localhost:8080";
+const SYMBOLS: Record<string, string> = { EUR: "€", USD: "$", BRL: "R$", AUD: "A$", MXN: "MX$", CAD: "C$", GBP: "£", ZAR: "R", KRW: "₩" };
 
-// /pay/[declarationId] — The most public-facing page.
-// Someone who has never heard of Conduit lands here after clicking a link or scanning a QR.
-// Rules: no crypto jargon, mobile-first, works without wallet connected, 3 taps to pay.
-
-import { use, useEffect, useState } from "react";
-import type { PaymentDeclaration } from "@conduit/sdk/lite";
-import { usePublicIntent } from "@/lib/use-public-intent";
-import { DeclarationDisplay } from "@/components/PayFlow/DeclarationDisplay";
-import { PayConfirm } from "@/components/PayFlow/PayConfirm";
-import { SettlementIntentPay } from "@/components/PayFlow/SettlementIntentPay";
-import { PaymentLinkPay } from "@/components/PayFlow/PaymentLinkPay";
-import { Logo, Wordmark } from "@/components/Shared/Logo";
-import { motion } from "framer-motion";
-
-interface PageParams {
-  params: Promise<{ declarationId: string }>;
+interface PublicInfo {
+  display_name?: string;
+  amount?: string; // minor units
+  settle_currency?: string;
+  description?: string;
 }
 
-// A payer looking at a bare hex address won't pay; the business name is
-// what they need to see first -- reflect it in the browser tab too, not
-// just the page body (SettlementIntentPay renders display_name/logo_url in
-// the body itself).
-function useRecipientTitle(intentId: string) {
-  // Shares the SAME react-query as SettlementIntentPay below, so setting the
-  // tab title costs no extra request (it used to fire a second, identical
-  // fetch on every page load).
-  const { data: intent } = usePublicIntent(intentId || undefined);
-
-  useEffect(() => {
-    if (!intent?.display_name) return;
-    const previousTitle = document.title;
-    document.title = `Pay ${intent.display_name} · Conduit`;
-    // Without this the browser tab kept showing the previous merchant's
-    // name after navigating away from their invoice.
-    return () => { document.title = previousTitle; };
-  }, [intent?.display_name]);
-}
-
-export default function PayPage({ params }: PageParams) {
-  const { declarationId } = use(params);
-  const isSettlementIntent = declarationId.startsWith("si_");
-  const isPaymentLink = declarationId.startsWith("pl_");
-  useRecipientTitle(isSettlementIntent ? declarationId : "");
-
-  // Three payment surfaces share this route: settlement_intents (si_
-  // prefixed ids, the B2B REST API -- including the cross-chain funding
-  // flow), payment_links (pl_ prefixed ids, Phase 3's lifecycle layer --
-  // turned into a settlement_intent on pay, then handed to the same si_
-  // flow), and the older on-chain PaymentDeclaration flow (bytes32 hashes).
-  // Same hosted_url shape either way (AppBaseURL + "/pay/" + id), so this
-  // dispatches on id format rather than needing separate routes.
-  if (isSettlementIntent || isPaymentLink) {
-    return (
-      <div className="min-h-screen flex flex-col">
-        <header className="px-6 py-4 border-b border-border flex justify-center">
-          <Logo size="sm" />
-        </header>
-        <main className="flex-1 max-w-sm mx-auto w-full px-4 py-8 space-y-8">
-          {isPaymentLink ? (
-            <PaymentLinkPay key={declarationId} linkId={declarationId} />
-          ) : (
-            <SettlementIntentPay key={declarationId} intentId={declarationId} />
-          )}
-        </main>
-        <footer className="px-6 py-4 border-t border-border flex justify-center">
-          <div className="flex items-center gap-2 text-ink-dim text-xs font-mono">
-            <span>Powered by</span>
-            <Wordmark size="sm" />
-            <span>·</span>
-            <span>Arc Testnet</span>
-          </div>
-        </footer>
-      </div>
-    );
+// Fetch the payer-facing summary for either a payment_link (pl_) or a
+// settlement_intent (si_). Best-effort: any failure just falls back to the
+// generic Conduit card, never breaks the page.
+async function fetchPublicInfo(id: string): Promise<PublicInfo | null> {
+  const path = id.startsWith("pl_")
+    ? `/v1/payment_links/${id}/public`
+    : id.startsWith("si_")
+      ? `/v1/settlement_intents/${id}/public`
+      : null;
+  if (!path) return null;
+  try {
+    const res = await fetch(`${API_BASE}${path}`, { next: { revalidate: 30 } });
+    if (!res.ok) return null;
+    return (await res.json()) as PublicInfo;
+  } catch {
+    return null;
   }
-
-  return <DeclarationPay declarationId={declarationId} />;
 }
 
-function DeclarationPay({ declarationId }: { declarationId: string }) {
-  const [declaration, setDeclaration] = useState<PaymentDeclaration | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string>("");
+function formatMoney(minor: string | undefined, iso: string | undefined): string | null {
+  if (!minor || !iso) return null;
+  try {
+    const human = toHumanAmount(BigInt(minor), currencyDecimals(isoToToken(iso)));
+    const symbol = SYMBOLS[iso] ?? "";
+    const pretty = Number(human).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    return `${symbol}${pretty} ${iso}`;
+  } catch {
+    return null;
+  }
+}
 
-  useEffect(() => {
-    const load = async () => {
-      try {
-        const { ConduitClient } = await import("@conduit/sdk");
-        const { ethers } = await import("ethers");
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ declarationId: string }>;
+}): Promise<Metadata> {
+  const { declarationId } = await params;
+  const info = await fetchPublicInfo(declarationId);
 
-        const { arcReadProvider } = await import("@/lib/arc-provider");
-        const provider = arcReadProvider();
+  const merchant = info?.display_name?.trim();
+  const money = formatMoney(info?.amount, info?.settle_currency);
 
-        const mockSigner = {
-          getAddress: async () => "0x0000000000000000000000000000000000000000",
-          sendTransaction: async () => ({ hash: "0x", wait: async () => ({ status: 1, blockNumber: 0 }) }),
-        };
+  // Title: "Pay Acme — €200.00 EUR" when we have both; graceful degradation
+  // as pieces are missing.
+  const title = merchant
+    ? money
+      ? `Pay ${merchant} — ${money}`
+      : `Pay ${merchant}`
+    : "Pay with Conduit";
+  const description =
+    info?.description?.trim() ||
+    (merchant
+      ? `${merchant} is requesting a payment${money ? ` of ${money}` : ""} via Conduit. Pay with any stablecoin — settles instantly.`
+      : "Pay with any stablecoin, settled instantly on Arc.");
 
-        const client = new ConduitClient({ signer: mockSigner });
-        const decl = await client.resolveDeclaration(declarationId as `0x${string}`);
+  // Dynamic branded OG image lives alongside this route (opengraph-image.tsx);
+  // Next.js wires it automatically, but we set twitter card type so X renders
+  // the large image rather than a thumbnail.
+  return {
+    title,
+    description,
+    openGraph: {
+      title,
+      description,
+      type: "website",
+      siteName: "Conduit",
+    },
+    twitter: {
+      card: "summary_large_image",
+      title,
+      description,
+    },
+  };
+}
 
-        if (!decl.active) {
-          setError("This payment link is no longer active.");
-          return;
-        }
-
-        setDeclaration(decl);
-      } catch {
-        setError("Payment link not found or invalid.");
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    load();
-  }, [declarationId]);
-
-  return (
-    <div className="min-h-screen flex flex-col">
-      {/* Minimal header */}
-      <header className="px-6 py-4 border-b border-border flex justify-center">
-        <Logo size="sm" />
-      </header>
-
-      <main className="flex-1 max-w-sm mx-auto w-full px-4 py-8 space-y-8">
-        {isLoading && (
-          <div className="space-y-6 animate-pulse">
-            <div className="h-8 bg-surface" />
-            <div className="h-32 bg-surface" />
-            <div className="h-14 bg-surface" />
-          </div>
-        )}
-
-        {error && (
-          <div className="text-center py-16 space-y-3">
-            <p className="text-4xl">⚠</p>
-            <p className="text-ink font-medium">{error}</p>
-            <Link href="/" className="text-signal text-sm hover:underline">
-              Go to Conduit →
-            </Link>
-          </div>
-        )}
-
-        {declaration && !isLoading && (
-          <motion.div
-            initial={{ opacity: 0, y: 12 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="space-y-8"
-          >
-            {/* Who is requesting */}
-            <DeclarationDisplay declaration={declaration} />
-
-            {/* Pay button and wallet connect */}
-            <PayConfirm declaration={declaration} />
-          </motion.div>
-        )}
-      </main>
-
-      {/* Footer */}
-      <footer className="px-6 py-4 border-t border-border flex justify-center">
-        <div className="flex items-center gap-2 text-ink-dim text-xs font-mono">
-          <span>Powered by</span>
-          <Wordmark size="sm" />
-          <span>·</span>
-          <span>Arc Testnet</span>
-        </div>
-      </footer>
-    </div>
-  );
+export default async function PayPage({
+  params,
+}: {
+  params: Promise<{ declarationId: string }>;
+}) {
+  const { declarationId } = await params;
+  return <PayPageClient declarationId={declarationId} />;
 }

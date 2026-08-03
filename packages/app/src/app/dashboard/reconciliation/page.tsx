@@ -2,7 +2,15 @@
 
 import { useEffect, useState } from "react";
 import { listBalanceTransactions, downloadBalanceTransactionsCsv, type BalanceTransaction, ConduitApiError } from "@/lib/conduit-api";
-import { formatDate } from "@/lib/format";
+import { formatDate, minorUnitsToNumber } from "@/lib/format";
+
+// Value only (no currency suffix) — this table has a dedicated Currency column.
+function money(amount: string, currency: string): string {
+  return minorUnitsToNumber(amount, currency).toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
 
 export default function ReconciliationPage() {
   const [transactions, setTransactions] = useState<BalanceTransaction[] | null>(null);
@@ -59,9 +67,9 @@ export default function ReconciliationPage() {
               <tr key={t.id} className="border-b border-border last:border-0">
                 <td className="px-4 py-3 whitespace-nowrap font-mono text-ink-dim">{formatDate(new Date(t.created_at).getTime() / 1000)}</td>
                 <td className="px-4 py-3 font-mono">{t.type}</td>
-                <td className="px-4 py-3 font-mono text-right">{t.gross}</td>
-                <td className="px-4 py-3 font-mono text-right">{t.fee}</td>
-                <td className="px-4 py-3 font-mono text-right">{t.net}</td>
+                <td className="px-4 py-3 font-mono text-right">{money(t.gross, t.currency)}</td>
+                <td className="px-4 py-3 font-mono text-right">{money(t.fee, t.currency)}</td>
+                <td className="px-4 py-3 font-mono text-right">{money(t.net, t.currency)}</td>
                 <td className="px-4 py-3 font-mono">{t.currency}</td>
               </tr>
             ))}
@@ -72,7 +80,7 @@ export default function ReconciliationPage() {
         </table>
       </div>
       <p className="text-xs text-ink-dim mt-2">
-        Table shows raw minor-unit amounts; the CSV export converts each to its currency&apos;s real decimal precision.
+        Amounts are shown in each currency&apos;s real decimal precision; the CSV export matches.
       </p>
     </div>
   );

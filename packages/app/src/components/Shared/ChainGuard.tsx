@@ -27,6 +27,16 @@ export function ChainGuard({ children }: ChainGuardProps) {
   // Chain enforcement is handled inside PayConfirm.tsx instead.
   if (pathname.startsWith("/pay/")) return <>{children}</>;
 
+  // Dashboard work — creating payment links, viewing settlements/
+  // reconciliation, editing settings — is pure Conduit API traffic and never
+  // signs an Arc transaction, so it must NOT be network-gated: a merchant
+  // signed in with Google/email (or on any wallet network) was hitting the
+  // "Wrong Network" wall and could not create links at all. Only the Send
+  // flow actually submits an Arc tx; it guards its own chain at send time.
+  if (pathname.startsWith("/dashboard") && !pathname.startsWith("/dashboard/send")) {
+    return <>{children}</>;
+  }
+
   // Not connected — let the page handle its own connect state
   if (!isConnected || !chain) return <>{children}</>;
 

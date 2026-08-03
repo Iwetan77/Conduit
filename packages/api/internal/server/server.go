@@ -184,6 +184,11 @@ func New(cfg Config) http.Handler {
 			r.Post("/settlement_intents/{id}/bridge/initiate", bridgeH.Initiate)
 			r.Get("/settlement_intents/{id}/bridge/status", bridgeH.Status)
 			r.Get("/settlement_intents/{id}/bridge/balance", bridgeH.Balance)
+			// Client-side UBK spend path (option B): the browser drives Circle's
+			// SDK across any supported source chain, then reports the Gateway
+			// transfer id here for the server to poll + settle.
+			r.Get("/settlement_intents/{id}/bridge/plan", bridgeH.Plan)
+			r.Post("/settlement_intents/{id}/bridge/report_spend", bridgeH.ReportClientSpend)
 		}
 
 		r.Group(func(r chi.Router) {

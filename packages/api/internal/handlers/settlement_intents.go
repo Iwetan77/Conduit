@@ -701,6 +701,15 @@ func (h *SettlementIntents) Confirm(w http.ResponseWriter, r *http.Request) {
 	_, _ = h.Pool.Exec(r.Context(), `UPDATE fx_trades SET state = 'settled', updated_at = now() WHERE id = $1`, tradeID)
 	_, _ = h.Pool.Exec(r.Context(), `UPDATE settlement_intents SET status = 'settled', updated_at = now() WHERE id = $1`, id)
 
+	// Now — and only now, with money actually delivered — is the payment link
+	// (if this intent came from one) genuinely paid. This is the transition that
+	// used to fire prematurely at checkout start; see payment_links.go Pay().
+	_, _ = h.Pool.Exec(r.Context(),
+		`UPDATE payment_links SET status = 'paid', updated_at = now()
+		 WHERE id = (SELECT payment_link_id FROM settlement_intents WHERE id = $1)
+		   AND status NOT IN ('paid','settled','void')`,
+		id)
+
 	// Record settlements + balance_transactions so GET /v1/balance_transactions
 	// and the CSV export have something to show for FX-routed settlements
 	// (the indexer only ever sees direct/AMM ConduitRouter events — see its

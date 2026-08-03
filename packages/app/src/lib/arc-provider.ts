@@ -8,8 +8,11 @@ import { ARC_TESTNET } from "@conduit/sdk/lite";
 // batchMaxCount:1 disables ethers' request batching (batched payloads are
 // another thing the endpoint rejects under load).
 export function arcReadProvider(): ethers.JsonRpcProvider {
+  // Same env override as the wagmi transport (see lib/wagmi.ts): lets browser
+  // reads use a reliable/proxied RPC instead of Arc's rate-limited public one.
+  const rpc = process.env.NEXT_PUBLIC_ARC_RPC_URL ?? ARC_TESTNET.rpc;
   return new ethers.JsonRpcProvider(
-    ARC_TESTNET.rpc,
+    rpc,
     { chainId: ARC_TESTNET.chainId, name: "arc-testnet" },
     { staticNetwork: true, batchMaxCount: 1 }
   );

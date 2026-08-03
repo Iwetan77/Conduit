@@ -44,6 +44,14 @@ const (
 	// SolanaGatewayMinterProgram is the Gateway Minter program on Solana devnet.
 	SolanaGatewayMinterProgram = "GATEmKK2ECL1brEngQZWCgMWPbvrEYqsV6u29dAaHavr"
 
+	// BaseDomain and PolygonDomain are the Gateway/CCTP domain ids for the
+	// EVM source chains a payer can now bridge from via the client-side UBK
+	// SDK (Base Sepolia, Polygon Amoy). Recorded here so the client-spend
+	// report handler can stamp bridge_transfers.source_domain without the
+	// browser being trusted to supply a raw domain number.
+	BaseDomain    uint32 = 6
+	PolygonDomain uint32 = 7
+
 	// SuiTestnetDomain is Sui testnet's Gateway domain -- confirmed
 	// supported (the spec explicitly asked not to assume this either way;
 	// Sui IS Gateway-enabled on testnet, unlike Sui mainnet at time of

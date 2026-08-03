@@ -423,26 +423,18 @@ func (h *PaymentLinks) Pay(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Atomically claim the link for single-use links -- this is the actual
-	// double-payment guard, not just the earlier read-side status check
-	// (which is racy under concurrent requests).
-	if reusePolicy == "single_use" {
-		tag, err := h.Pool.Exec(ctx,
-			`UPDATE payment_links SET status = 'paid', updated_at = now()
-			 WHERE id = $1 AND reuse_policy = 'single_use' AND status IN ('active','viewed')`,
-			id,
-		)
-		if err != nil {
-			writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
-			return
-		}
-		if tag.RowsAffected() == 0 {
-			writeErr(w, apierrors.E(apierrors.CodeLinkAlreadyUsed, "id"))
-			return
-		}
-	} else {
-		h.Pool.Exec(ctx, `UPDATE payment_links SET status = 'viewed', updated_at = now() WHERE id = $1 AND status = 'active'`, id)
-	}
+	// Starting checkout does NOT mean the link is paid. Marking it 'paid' here
+	// (before the payer has moved any money) was the bug behind links showing
+	// PAID for payments that later failed on insufficient funds — the 'paid'
+	// transition now happens only when a real settlement lands (see the confirm
+	// handler in settlement_intents.go and the indexer). Here we just record
+	// that the link has been opened.
+	//
+	// The single-use double-payment guard is enforced at settlement time: once
+	// a link's intent settles it flips to 'paid', and the status checks above
+	// reject any further Pay() call. (A link only truly closes on real payment,
+	// not on someone merely reaching checkout.)
+	h.Pool.Exec(ctx, `UPDATE payment_links SET status = 'viewed', updated_at = now() WHERE id = $1 AND status = 'active'`, id)
 
 	intentID := models.NewID("si")
 	intentExpiresAt := time.Now().Add(1 * time.Hour)

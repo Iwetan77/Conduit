@@ -74,6 +74,10 @@ func New(cfg Config) http.Handler {
 		arcRPCForBalances = "https://rpc.testnet.arc.network"
 	}
 	balancesH := &handlers.Balances{ArcRPC: arcRPCForBalances}
+	// Server-side JSON-RPC relay to Arc. The browser points its RPC transport
+	// here so reads and the embedded wallet's broadcast don't hit Arc's
+	// Cloudflare-fronted public endpoint directly (which bot-blocks browsers).
+	rpcProxyH := handlers.NewRPCProxy(arcRPCForBalances)
 	webhookEndpointsH := &handlers.WebhookEndpoints{Pool: cfg.Pool, Dispatcher: dispatcher}
 	balanceTxH := &handlers.BalanceTransactions{Pool: cfg.Pool}
 	settlementsH := &handlers.Settlements{Pool: cfg.Pool}
@@ -129,6 +133,10 @@ func New(cfg Config) http.Handler {
 		r.Get("/currencies", currenciesH.List)
 		// Public: a payer has no API key, and this is read-only chain data.
 		r.Get("/balances", balancesH.List)
+		// Public JSON-RPC relay to Arc (method-allowlisted, fixed upstream).
+		// No API key: reads are public chain data and a broadcast carries an
+		// already-signed transaction. See handlers.RPCProxy.
+		r.Post("/rpc", rpcProxyH.Handle)
 		r.Post("/accounts", accountsH.Create)
 		// Privy-authenticated account bootstrap: verifies the bearer token
 		// itself (not gated by auth.Middleware, since a brand-new Privy user

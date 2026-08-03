@@ -66,7 +66,18 @@ export default function PrivyStack({
         // Google bypasses the OTP step; email falls back to OTP.
         loginMethods: ["email", "google"],
         // v3 splits embedded-wallet creation per chain family.
-        embeddedWallets: { ethereum: { createOnLogin: "users-without-wallets" } },
+        // showWalletUIs:false suppresses Privy's own confirmation modal on
+        // every embedded-wallet sign/transaction. That modal dumps the raw
+        // EIP-712 payload (Permit2 domain, hex token address, nonce, witness)
+        // in front of a Google-signed-in user who has no idea what any of it
+        // means -- terrifying for a normie, and redundant: the payer already
+        // approved the human-readable "Pay 7 USD" on our own screen, which is
+        // the real consent. The key never leaves Privy either way; this only
+        // hides the scary intermediate JSON.
+        embeddedWallets: {
+          ethereum: { createOnLogin: "users-without-wallets" },
+          showWalletUIs: false,
+        },
         appearance: {
           theme: "dark",
           accentColor: "#B2F55A",

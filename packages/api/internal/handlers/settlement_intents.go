@@ -230,9 +230,12 @@ func (h *SettlementIntents) personalAccountForWallet(ctx context.Context, wallet
 	}
 
 	accountID = models.NewID("acct")
-	// The name is never shown to the payer -- direct send has no business
-	// profile. It exists because accounts.name is NOT NULL.
-	name := "Personal " + wallet
+	// Shown to the payer as display_name on /pay for payer-created (si_) links,
+	// so it must be presentable. Just "Personal" -- the wallet address is
+	// already rendered, shortened, right below it on the pay screen, so
+	// appending the full 42-char address here only produced an ugly overflowing
+	// "Personal 0xa51dd4...b0..." header on mobile.
+	name := "Personal"
 	_, err = h.Pool.Exec(ctx,
 		`INSERT INTO accounts (id, name, settle_currency, settle_address, login_wallet, livemode)
 		 VALUES ($1,$2,$3,$4,$5,false)

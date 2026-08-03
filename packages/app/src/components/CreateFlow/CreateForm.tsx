@@ -30,24 +30,33 @@ export function CreateForm({ onSuccess }: CreateFormProps) {
     setError("");
 
     try {
-      const { ConduitClient } = await import("@conduit/sdk");
-      const { ethers } = await import("ethers");
-      const { getWalletProvider } = await import("@/lib/wallet-provider");
       const { parseAmount } = await import("@/lib/format");
-
-      const browserProvider = new ethers.BrowserProvider(await getWalletProvider(connector));
-      const client = ConduitClient.fromBrowserProvider(browserProvider, "");
+      const { createDirectSettlementIntent } = await import("@/lib/conduit-api");
 
       const amount = createFlow.amount ? parseAmount(createFlow.amount, createFlow.currency) : 0n;
+      if (amount <= 0n) {
+        setError("Enter an amount to request.");
+        setIsSubmitting(false);
+        return;
+      }
 
-      const result = await client.createLink({
-        amount,
-        currency: createFlow.currency,
-        recipient: address as `0x${string}`,
-        label: createFlow.label || undefined,
+      // Payer links now mint a server-side settlement intent (si_...) instead
+      // of registering an on-chain declaration. Three problems went away at
+      // once: no on-chain transaction to fail on Arc's flaky RPC (this was the
+      // "could not create link" error), a short shareable id instead of a
+      // 66-char declaration hash, and a real OG preview card on /pay/[id]
+      // (generateMetadata only resolves pl_/si_ ids, never raw hashes). The
+      // creator is both the intent's owner and its settle_address -- whoever
+      // opens the link later pays it with their own wallet.
+      const intent = await createDirectSettlementIntent({
+        payer_wallet: address,
+        amount: amount.toString(),
+        settle_currency: createFlow.currency,
+        settle_address: address,
       });
 
-      onSuccess(result.declarationId, result.paymentUrl, createFlow.amount, createFlow.currency, createFlow.label);
+      const paymentUrl = `${window.location.origin}/pay/${intent.id}`;
+      onSuccess(intent.id, paymentUrl, createFlow.amount, createFlow.currency, createFlow.label);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create payment link");
     } finally {
@@ -71,7 +80,7 @@ export function CreateForm({ onSuccess }: CreateFormProps) {
         onChange={(v) => setCreateFlow({ amount: v })}
         currency={createFlow.currency}
         onCurrencyChange={(c) => setCreateFlow({ currency: c as Currency })}
-        label="Request Amount (leave 0 for open amount)"
+        label="Request Amount"
       />
 
       <div className="flex flex-col gap-1.5">
@@ -103,11 +112,11 @@ export function CreateForm({ onSuccess }: CreateFormProps) {
                    font-mono text-lg hover:bg-signal/90 transition-colors
                    disabled:opacity-50 disabled:cursor-not-allowed"
       >
-        {isSubmitting ? "Creating on-chain..." : "Create Payment Link"}
+        {isSubmitting ? "Creating link…" : "Create Payment Link"}
       </button>
 
       <p className="text-xs text-ink-dim text-center">
-        Creates a declaration on Arc Testnet. Anyone with the link can pay you.
+        Anyone with the link can pay you in any stablecoin — Conduit converts to {createFlow.currency}.
       </p>
     </form>
   );

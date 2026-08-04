@@ -147,12 +147,17 @@ export default function SendPage() {
                   label="They receive"
                 />
 
-                {/* Balance-aware: only what this wallet actually holds. */}
-                <PayerCurrencyPicker
-                  value={payerCurrency}
-                  onChange={setPayerCurrency}
-                  onBalancesChange={setPayerBalances}
-                />
+                {/* Balance-aware: only what this wallet actually holds on Arc.
+                    Meaningless without a connected Arc wallet -- a payer whose
+                    USDC is on Solana would just see an empty picker and assume
+                    the form was broken. */}
+                {mounted && isConnected && (
+                  <PayerCurrencyPicker
+                    value={payerCurrency}
+                    onChange={setPayerCurrency}
+                    onBalancesChange={setPayerBalances}
+                  />
+                )}
 
                 {crossCurrency && (
                   <div className="border border-border bg-surface p-3 space-y-1">
@@ -194,10 +199,19 @@ export default function SendPage() {
 
               {!mounted || !isConnected ? (
                 <div className="text-center space-y-3">
-                  <p className="text-ink-dim text-sm">Connect your wallet to send</p>
+                  <p className="text-ink-dim text-sm">
+                    Connect a wallet to pay from Arc
+                  </p>
                   <div className="flex justify-center">
                     <WalletConnect />
                   </div>
+                  {/* Reads as "one of two ways", not "the requirement". Without
+                      this the prompt above looked mandatory, so a Solana payer
+                      stopped here -- at a wallet they don't have -- instead of
+                      using the cross-chain option right below. */}
+                  <p className="text-ink-dim text-xs font-mono pt-1">
+                    — or —
+                  </p>
                 </div>
               ) : (
                 <button

@@ -312,22 +312,44 @@ export async function spendUsdcToArc(params: {
   const { spend, deposit } = await import("@circle-fin/unified-balance-kit");
   const ctx = await context();
 
-  // Ensure each source chain has enough *deposited* Gateway balance; deposit
-  // the shortfall straight from the connected wallet if not. (spend() pulls
-  // only from already-deposited balance — matching the Go PrepareFund logic
-  // this replaces.)
-  const unified = await getUnifiedUsdc(params.payer);
-  for (const alloc of params.allocations) {
-    const have = unified.byChain.find((c) => c.chain === alloc.chain)?.confirmed ?? "0";
-    const haveMinor = usdcHumanToMinor(have);
-    if (haveMinor < alloc.amountMinor) {
-      const shortfall = alloc.amountMinor - haveMinor;
-      // DepositParams requires `token`; `from` is an AdapterContext {adapter,chain}.
-      await deposit(ctx as never, {
-        from: { adapter: params.payer.adapter as never, chain: alloc.chain as never },
-        amount: usdcMinorToHuman(shortfall),
-        token: TOKEN,
-      } as never);
+  const need = params.amountMinor;
+  // The chain we deposit into and later spend from. Single-family (Solana)
+  // wallet → the one chain the caller allocated.
+  const primaryChain = params.allocations[0]?.chain ?? SOURCE_CHAINS.solana;
+
+  // Total CONFIRMED balance already sitting in Circle Gateway. Using the total
+  // (not a per-chain string match) is deliberate: getUnifiedUsdc's chain
+  // identifiers don't always equal our SOURCE_CHAINS strings, so matching
+  // per-chain missed already-deposited funds and re-deposited on EVERY retry —
+  // stacking deposits and draining the wallet while the money sat stuck in
+  // Gateway.
+  const confirmedMinor = async () =>
+    usdcHumanToMinor((await getUnifiedUsdc(params.payer)).totalConfirmed);
+
+  let deposited = await confirmedMinor();
+
+  if (deposited < need) {
+    const shortfall = need - deposited;
+    await deposit(ctx as never, {
+      from: { adapter: params.payer.adapter as never, chain: primaryChain as never },
+      amount: usdcMinorToHuman(shortfall),
+      token: TOKEN,
+    } as never);
+
+    // A Gateway deposit is NOT spendable until it confirms. Depositing then
+    // immediately spending left the deposit unconfirmed: spend() saw only the
+    // old confirmed balance ("Available: 1, required: 5"), failed, and the
+    // fresh USDC stayed stuck in Gateway. Poll the confirmed balance until it
+    // covers the payment before spending.
+    const deadline = Date.now() + 90_000;
+    while (deposited < need && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 4000));
+      deposited = await confirmedMinor();
+    }
+    if (deposited < need) {
+      throw new Error(
+        "Your USDC deposited into Circle Gateway but is still confirming. It's safe and won't deposit again — wait ~30s, then press Pay once more to finish."
+      );
     }
   }
 
@@ -344,13 +366,12 @@ export async function spendUsdcToArc(params: {
     // example: from.allocations + a top-level `amount`). Omitting it made the
     // SDK validate a placeholder "unknown" and throw "Invalid amount
     // 'unknown'" — the per-chain allocation amounts alone weren't enough.
-    amount: usdcMinorToHuman(params.amountMinor),
+    amount: usdcMinorToHuman(need),
     from: {
       adapter: params.payer.adapter as never,
-      allocations: params.allocations.map((a) => ({
-        chain: a.chain as never,
-        amount: usdcMinorToHuman(a.amountMinor),
-      })),
+      // Spend the full amount from the chain we just confirmed the deposit on,
+      // rather than the pre-deposit wallet allocation.
+      allocations: [{ chain: primaryChain as never, amount: usdcMinorToHuman(need) }],
     },
     to: {
       chain: ARC_CHAIN as never,

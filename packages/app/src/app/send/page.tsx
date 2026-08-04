@@ -228,9 +228,20 @@ export default function SendPage() {
                   {bridgeBusy ? "Preparing…" : "Pay with USDC from another chain"}
                 </span>
                 <span className="text-ink-dim text-[11px] font-mono tracking-wide">
-                  Solana · Base · Polygon — no Arc wallet needed
+                  {/* Only the Solana route genuinely needs no EVM wallet -- the
+                      Base/Polygon route signs with the connected one. The old
+                      blanket "no Arc wallet needed" was true for one of the
+                      three. */}
+                  Solana · Base · Polygon
                 </span>
               </button>
+              {/* A disabled button with no explanation reads as broken -- say
+                  what's missing instead. */}
+              {(!isAddress(recipient) || !(parseFloat(amount) > 0)) && (
+                <p className="text-ink-dim text-[11px] font-mono text-center">
+                  Enter a recipient address and amount to pay from another chain.
+                </p>
+              )}
               {bridgeError && (
                 <p className="text-danger text-sm font-mono text-center">{bridgeError}</p>
               )}

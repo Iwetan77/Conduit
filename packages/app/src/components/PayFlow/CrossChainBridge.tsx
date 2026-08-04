@@ -125,7 +125,7 @@ export function CrossChainBridge({ intentId, intent }: CrossChainBridgeProps) {
         payer = await buildSolanaAdapter(getSolanaProvider(), addr);
       } else {
         if (!evmConnected || !evmAddress || !connector) {
-          throw new Error("Connect an EVM wallet first to pay from Base or Polygon.");
+          throw new Error("Connect an EVM wallet first to pay from an EVM chain.");
         }
         const provider = await connector.getProvider();
         payer = await buildEvmAdapter(provider, evmAddress);

@@ -126,7 +126,7 @@ export function SettlementIntentPay({ intentId }: SettlementIntentPayProps) {
               Pay with USDC from another chain
             </span>
             <span className="text-ink-dim text-[11px] font-mono tracking-wide">
-              Solana · Base · Polygon
+              Solana · Base · Arbitrum · Avalanche · +8 more
             </span>
           </button>
         </>

@@ -1,5 +1,7 @@
 "use client";
 
+import { ARC_RPC_URL } from "@/lib/wagmi";
+
 import { useEffect, useRef, useState } from "react";
 import { useAccount } from "wagmi";
 import type { Currency, PaymentReceipt } from "@conduit/sdk/lite";
@@ -87,7 +89,7 @@ export function ArcSettlePanel({
         const { ethers } = await import("ethers");
         const { getWalletProvider } = await import("@/lib/wallet-provider");
         const browserProvider = new ethers.BrowserProvider(await getWalletProvider(connector));
-        const client = ConduitClient.fromBrowserProvider(browserProvider, "");
+        const client = ConduitClient.fromBrowserProvider(browserProvider, "", undefined, ARC_RPC_URL);
         const result = await client.pay({
           recipient: settleAddress as `0x${string}`,
           amount: amountRaw,

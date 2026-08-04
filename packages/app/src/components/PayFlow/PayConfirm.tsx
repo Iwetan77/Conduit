@@ -1,5 +1,7 @@
 "use client";
 
+import { ARC_RPC_URL } from "@/lib/wagmi";
+
 import { useState } from "react";
 import type { PaymentDeclaration, PaymentReceipt } from "@conduit/sdk/lite";
 import { currencyDecimals, toHumanAmount } from "@conduit/sdk/lite";
@@ -38,7 +40,7 @@ export function PayConfirm({ declaration, openAmount }: PayConfirmProps) {
       const { getWalletProvider } = await import("@/lib/wallet-provider");
 
       const browserProvider = new ethers.BrowserProvider(await getWalletProvider(connector));
-      const client = ConduitClient.fromBrowserProvider(browserProvider, "");
+      const client = ConduitClient.fromBrowserProvider(browserProvider, "", undefined, ARC_RPC_URL);
 
       const result = await client.fulfill(declaration);
 

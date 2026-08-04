@@ -99,6 +99,11 @@ export interface ConduitClientConfig {
   network?: "arc-testnet";
   /** Override app URL for link generation */
   appUrl?: string;
+  /** Override the Arc JSON-RPC endpoint used for reads, gas estimation and
+   *  contract calls. Defaults to ARC_TESTNET.rpc (Arc's public endpoint),
+   *  which Cloudflare bot-blocks for browser-origin requests — browsers
+   *  should pass a proxied endpoint here (the app passes ARC_RPC_URL). */
+  rpcUrl?: string;
 }
 
 // Minimal signer abstraction — works with ethers v6 Signer and viem WalletClient

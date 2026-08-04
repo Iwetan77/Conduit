@@ -1,5 +1,7 @@
 "use client";
 
+import { ARC_RPC_URL } from "@/lib/wagmi";
+
 import Link from "next/link";
 
 import { useEffect, useState } from "react";
@@ -37,7 +39,7 @@ export default function LinksPage() {
       };
 
       const receiptClient = new ReceiptClient(provider);
-      const conduitClient = new ConduitClient({ signer: mockSigner });
+      const conduitClient = new ConduitClient({ signer: mockSigner, rpcUrl: ARC_RPC_URL });
 
       const [decls, receipts] = await Promise.all([
         conduitClient.getDeclarations(address as `0x${string}`),
@@ -75,7 +77,7 @@ export default function LinksPage() {
       const { ethers } = await import("ethers");
       const { getWalletProvider } = await import("@/lib/wallet-provider");
       const browserProvider = new ethers.BrowserProvider(await getWalletProvider(connector));
-      const client = ConduitClient.fromBrowserProvider(browserProvider, "");
+      const client = ConduitClient.fromBrowserProvider(browserProvider, "", undefined, ARC_RPC_URL);
       await client.deactivateLink(declarationId as `0x${string}`);
       await loadDeclarations();
     } catch (err) {

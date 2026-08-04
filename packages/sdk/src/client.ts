@@ -42,12 +42,18 @@ export class ConduitClient {
   private receiptClient: ReceiptClient;
 
   constructor(config: ConduitClientConfig) {
-    const rpc = ARC_TESTNET.rpc;
+    // The endpoint EVERY read, gas estimate and contract call goes through --
+    // for both browser wallets and server signers. Defaulting this to Arc's
+    // public RPC is what made ALL sends fail with "Load failed" regardless of
+    // which wallet was connected: Cloudflare bot-blocks browser-origin
+    // requests to it, so the failure was never in the wallet or the
+    // transaction, but in this shared provider. Browsers must pass a proxied
+    // endpoint (the app passes ARC_RPC_URL -> /v1/rpc); server/agent callers
+    // keep the public default, which works fine off-browser.
+    const rpc = config.rpcUrl ?? ARC_TESTNET.rpc;
     // staticNetwork skips an eth_chainId probe on every call, and
-    // batchMaxCount:1 disables request batching. Arc's public RPC rate-limits
-    // hard and its 429s come back without CORS headers, which a browser
-    // surfaces as an opaque "Load failed" — this is what made same-currency
-    // sends fail even though the transaction itself was fine.
+    // batchMaxCount:1 disables request batching (another thing the public
+    // endpoint rejects under load).
     this.provider = new ethers.JsonRpcProvider(
       rpc,
       { chainId: ARC_TESTNET.chainId, name: "arc-testnet" },
@@ -81,10 +87,14 @@ export class ConduitClient {
 
   // ── Static factory for browser (wagmi/viem) ──────────────────────────────
 
+  /// `rpcUrl` is effectively REQUIRED in a browser: reads and gas estimation
+  /// go through it, and Arc's public default is bot-blocked for browser
+  /// origins, which surfaces as an opaque "Load failed" on every send.
   static fromBrowserProvider(
     provider: ethers.BrowserProvider,
     kitKey: string,
-    appUrl?: string
+    appUrl?: string,
+    rpcUrl?: string
   ): ConduitClient {
     const mockSigner = {
       getAddress: async () => {
@@ -103,7 +113,12 @@ export class ConduitClient {
         };
       },
     };
-    const client = new ConduitClient({ signer: mockSigner, kitKey, ...(appUrl !== undefined ? { appUrl } : {}) });
+    const client = new ConduitClient({
+      signer: mockSigner,
+      kitKey,
+      ...(appUrl !== undefined ? { appUrl } : {}),
+      ...(rpcUrl !== undefined ? { rpcUrl } : {}),
+    });
     client.signerProvider = provider;
     return client;
   }

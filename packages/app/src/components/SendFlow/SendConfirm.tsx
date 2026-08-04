@@ -1,5 +1,7 @@
 "use client";
 
+import { ARC_RPC_URL } from "@/lib/wagmi";
+
 import { useState } from "react";
 import { useAccount } from "wagmi";
 import type { Currency, PaymentReceipt } from "@conduit/sdk/lite";
@@ -80,7 +82,7 @@ export function SendConfirm({
       // which is absent for Privy embedded wallets and ambiguous when more
       // than one extension is installed.
       const browserProvider = new ethers.BrowserProvider(await getWalletProvider(connector));
-      const client = ConduitClient.fromBrowserProvider(browserProvider, "");
+      const client = ConduitClient.fromBrowserProvider(browserProvider, "", undefined, ARC_RPC_URL);
 
       const result = await client.pay({
         recipient: recipient as `0x${string}`,

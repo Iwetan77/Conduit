@@ -336,12 +336,24 @@ export async function spendUsdcToArc(params: {
     };
   };
 
+  // Circle charges its OWN fees on top of the spend amount, and spend() checks
+  // the balance against amount + those fees. Measured live on devnet: a 3.00
+  // spend demanded 3.163727, 3.50 demanded 3.60, 5.00 demanded 5.16393 -- about
+  // 3-6% over. Depositing exactly `need` therefore ALWAYS fell short by the fee
+  // ("Available: 3.5, required: 3.6"), no matter how long we waited, because
+  // the shortfall was never a timing problem. Fund a 12% buffer (floor 0.30
+  // USDC for small amounts) so the fee is always covered. Unspent buffer stays
+  // in the payer's Gateway balance and is used by their next payment -- it is
+  // not a fee we charge and it is not lost.
+  const buffer = (need * 12n) / 100n;
+  const target = need + (buffer > 300_000n ? buffer : 300_000n);
+
   let { confirmed, pending } = await gatewayBalance();
 
   // Deposit only if nothing already in Gateway (confirmed OR mid-confirmation)
-  // covers the payment.
-  if (confirmed + pending < need) {
-    const shortfall = need - (confirmed + pending);
+  // covers the target.
+  if (confirmed + pending < target) {
+    const shortfall = target - (confirmed + pending);
     await deposit(ctx as never, {
       from: { adapter: params.payer.adapter as never, chain: primaryChain as never },
       amount: usdcMinorToHuman(shortfall),
@@ -350,14 +362,14 @@ export async function spendUsdcToArc(params: {
   }
 
   // A Gateway deposit isn't spendable until it CONFIRMS. Wait for the confirmed
-  // balance to cover the payment before spending — spend() draws confirmed
+  // balance to cover the target before spending — spend() draws confirmed
   // balance only, and running it early left the fresh USDC stuck in Gateway.
   const deadline = Date.now() + 120_000;
-  while (confirmed < need && Date.now() < deadline) {
+  while (confirmed < target && Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, 5000));
     ({ confirmed, pending } = await gatewayBalance());
   }
-  if (confirmed < need) {
+  if (confirmed < target) {
     throw new Error(
       "Your USDC is deposited in Circle Gateway and still confirming — it's safe and won't deposit again. Wait ~30s and press Pay to finish."
     );
@@ -390,31 +402,16 @@ export async function spendUsdcToArc(params: {
     },
   };
 
-  // Retry the spend (NOT the deposit) on a transient "insufficient balance":
-  // getUnifiedUsdc can report a deposit as confirmed a beat before spend()
-  // treats it as spendable, so the first spend can lose that race. Retrying
-  // without re-depositing lets the balance finalize. Never re-deposits, so it
-  // can't drain the wallet.
-  let result: { txHash: string; transferId?: string; explorerUrl?: string } | undefined;
-  for (let attempt = 0; attempt < 6 && !result; attempt++) {
-    try {
-      result = (await spend(ctx as never, spendParams as never)) as {
-        txHash: string;
-        transferId?: string;
-        explorerUrl?: string;
-      };
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      if (/insufficient/i.test(msg) && attempt < 5) {
-        await new Promise((r) => setTimeout(r, 6000));
-        continue;
-      }
-      throw err;
-    }
-  }
-  if (!result) {
-    throw new Error("The deposit is still finalizing on Circle Gateway. Your USDC is safe — try Pay again in a moment.");
-  }
+  // Call spend ONCE. It was retried in a loop here, but every attempt re-runs
+  // the burn-intent signature, so a persistent failure became an endless
+  // "sign → load → sign again" loop in the payer's wallet. The failure it was
+  // retrying (insufficient balance) was never transient anyway: it was the
+  // unfunded fee, fixed above by depositing to `target`.
+  const result = (await spend(ctx as never, spendParams as never)) as {
+    txHash: string;
+    transferId?: string;
+    explorerUrl?: string;
+  };
 
   return { txHash: result.txHash, transferId: result.transferId, explorerUrl: result.explorerUrl };
 }

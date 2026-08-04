@@ -138,7 +138,7 @@ export default function LinksPage() {
                       : "bg-surface/50 border-border/50 opacity-60"
                   }`}
                 >
-                  <div className="flex items-start justify-between gap-4">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-1.5">
                         <span className={`w-1.5 h-1.5 ${decl.active ? "bg-signal" : "bg-ink-dim"}`} />
@@ -159,7 +159,7 @@ export default function LinksPage() {
                       </p>
                     </div>
 
-                    <div className="flex items-center gap-2 shrink-0">
+                    <div className="flex items-center gap-2 shrink-0 flex-wrap">
                       <button
                         onClick={() => {
                           const url = typeof window !== "undefined"

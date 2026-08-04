@@ -87,17 +87,20 @@ function DeclarationPay({ declarationId }: { declarationId: string }) {
     const load = async () => {
       try {
         const { ConduitClient } = await import("@conduit/sdk");
-        const { ethers } = await import("ethers");
-
-        const { arcReadProvider } = await import("@/lib/arc-provider");
-        const provider = arcReadProvider();
 
         const mockSigner = {
           getAddress: async () => "0x0000000000000000000000000000000000000000",
           sendTransaction: async () => ({ hash: "0x", wait: async () => ({ status: 1, blockNumber: 0 }) }),
         };
 
-        const client = new ConduitClient({ signer: mockSigner });
+        // Read declarations through the same Arc RPC proxy every other browser
+        // read uses. Without rpcUrl the SDK falls back to the hardcoded public
+        // Arc RPC, which rate-limits/bot-blocks from the browser and made
+        // copied declaration links resolve as "not found" at random.
+        const client = new ConduitClient({
+          signer: mockSigner,
+          rpcUrl: process.env.NEXT_PUBLIC_ARC_RPC_URL,
+        });
         const decl = await client.resolveDeclaration(declarationId as `0x${string}`);
 
         if (!decl.active) {

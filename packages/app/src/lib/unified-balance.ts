@@ -274,6 +274,11 @@ export async function spendUsdcToArc(params: {
   // wallet and never returned a transferId for the API to poll.
   const result = (await spend(ctx as never, {
     token: TOKEN,
+    // Top-level total is REQUIRED by SpendParams (see estimateSpend's own
+    // example: from.allocations + a top-level `amount`). Omitting it made the
+    // SDK validate a placeholder "unknown" and throw "Invalid amount
+    // 'unknown'" — the per-chain allocation amounts alone weren't enough.
+    amount: usdcMinorToHuman(params.amountMinor),
     from: {
       adapter: params.payer.adapter as never,
       allocations: params.allocations.map((a) => ({

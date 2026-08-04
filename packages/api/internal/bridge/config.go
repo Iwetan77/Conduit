@@ -52,12 +52,28 @@ const (
 	BaseDomain    uint32 = 6
 	PolygonDomain uint32 = 7
 
-	// SuiTestnetDomain is Sui testnet's Gateway domain -- confirmed
-	// supported (the spec explicitly asked not to assume this either way;
-	// Sui IS Gateway-enabled on testnet, unlike Sui mainnet at time of
-	// writing). Not wired into a concrete provider implementation yet --
-	// recorded so a future Sui FundingProvider doesn't have to re-derive it.
-	SuiTestnetDomain uint32 = 10
+	// The remaining EVM source chains Circle Gateway supports. Every domain id
+	// in this block (including the three above) was read straight out of the
+	// shipped UBK SDK's own chain definitions via resolveChainIdentifier(...)
+	// .gateway.domain, NOT from memory or documentation -- these numbers route
+	// real money, and a wrong one burns USDC against the wrong chain. The four
+	// that predate this block (Arc 26, Solana 5, Base 6, Polygon 7) came back
+	// identical, which is what validates the extraction.
+	EthereumDomain   uint32 = 0
+	AvalancheDomain  uint32 = 1
+	OptimismDomain   uint32 = 2
+	ArbitrumDomain   uint32 = 3
+	UnichainDomain   uint32 = 10
+	SonicDomain      uint32 = 13
+	WorldChainDomain uint32 = 14
+	SeiDomain        uint32 = 16
+	HyperEVMDomain   uint32 = 19
+
+	// NOTE: a SuiTestnetDomain = 10 constant used to live here, described as
+	// "confirmed supported". Both halves were wrong: Sui is absent from
+	// Gateway's supported-chain enum entirely, and domain 10 is Unichain. It
+	// was never referenced, but leaving a wrong domain id lying around next to
+	// correct ones is how it eventually gets used. Removed.
 
 	// burnIntentMagic and transferSpecMagic are the magic tags in Gateway's
 	// binary burn-intent encoding, confirmed byte-exact from the shipped SDK

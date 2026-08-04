@@ -27,11 +27,42 @@ const USDC_DECIMALS = 6;
 // (verified against the shipped index.d.cts). Arc is the settlement
 // destination; the rest are payer source chains.
 export const ARC_CHAIN = "Arc_Testnet";
+// Every chain Circle Gateway supports, keyed by the slug the API's
+// report_spend expects (see sourceDomainFor in bridge.go -- the two lists must
+// stay in step). Chain ids are the SDK's own Blockchain enum spellings. We
+// previously wired only 3 of these, so a payer holding USDC on Arbitrum or
+// Avalanche was told they had none.
 export const SOURCE_CHAINS = {
+  solana: "Solana_Devnet",
   base: "Base_Sepolia",
   polygon: "Polygon_Amoy_Testnet",
-  solana: "Solana_Devnet",
+  ethereum: "Ethereum_Sepolia",
+  avalanche: "Avalanche_Fuji",
+  optimism: "Optimism_Sepolia",
+  arbitrum: "Arbitrum_Sepolia",
+  unichain: "Unichain_Sepolia",
+  sonic: "Sonic_Testnet",
+  worldchain: "World_Chain_Sepolia",
+  sei: "Sei_Testnet",
+  hyperevm: "HyperEVM_Testnet",
 } as const;
+
+// Human labels for the chains above, for anything that shows a payer where
+// their balance actually sits.
+export const SOURCE_CHAIN_LABELS: Record<SourceKind, string> = {
+  solana: "Solana",
+  base: "Base",
+  polygon: "Polygon",
+  ethereum: "Ethereum",
+  avalanche: "Avalanche",
+  optimism: "Optimism",
+  arbitrum: "Arbitrum",
+  unichain: "Unichain",
+  sonic: "Sonic",
+  worldchain: "World Chain",
+  sei: "Sei",
+  hyperevm: "HyperEVM",
+};
 
 export type SourceKind = keyof typeof SOURCE_CHAINS;
 

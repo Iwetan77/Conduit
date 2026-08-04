@@ -232,7 +232,7 @@ export default function SendPage() {
                       Base/Polygon route signs with the connected one. The old
                       blanket "no Arc wallet needed" was true for one of the
                       three. */}
-                  Solana · Base · Polygon
+                  Solana · Base · Arbitrum · Optimism · Avalanche · +7 more
                 </span>
               </button>
               {/* A disabled button with no explanation reads as broken -- say

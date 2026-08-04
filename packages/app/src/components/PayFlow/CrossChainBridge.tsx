@@ -224,7 +224,7 @@ export function CrossChainBridge({ intentId, intent }: CrossChainBridgeProps) {
           onClick={() => chooseSource("evm")}
           className="w-full py-4 border border-border text-ink font-mono hover:border-signal/40 transition-colors"
         >
-          Pay with USDC on Base or Polygon (connected wallet)
+          Pay with USDC on any EVM chain (connected wallet)
         </button>
         {error && <p className="text-danger text-sm">{error}</p>}
       </div>

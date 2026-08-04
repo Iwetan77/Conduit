@@ -601,15 +601,30 @@ func (h *Bridge) Balance(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// One table, shared with sourceDomainFor's slugs, so a chain can never be
+	// reported here under a name it can't actually be spent from. The previous
+	// hand-rolled version read domain 10 and labelled it "sui" -- domain 10 is
+	// Unichain, so any Unichain balance was displayed as Sui (a chain Gateway
+	// doesn't support at all).
 	byChain := map[string]string{}
-	if v, ok := balance.ByDomain[bridgepkg.SolanaDomain]; ok {
-		byChain["solana"] = v.String()
-	}
-	if v, ok := balance.ByDomain[bridgepkg.ArcDomain]; ok {
-		byChain["arc"] = v.String()
-	}
-	if v, ok := balance.ByDomain[bridgepkg.SuiTestnetDomain]; ok {
-		byChain["sui"] = v.String()
+	for slug, domain := range map[string]uint32{
+		"solana":     bridgepkg.SolanaDomain,
+		"arc":        bridgepkg.ArcDomain,
+		"base":       bridgepkg.BaseDomain,
+		"polygon":    bridgepkg.PolygonDomain,
+		"ethereum":   bridgepkg.EthereumDomain,
+		"avalanche":  bridgepkg.AvalancheDomain,
+		"optimism":   bridgepkg.OptimismDomain,
+		"arbitrum":   bridgepkg.ArbitrumDomain,
+		"unichain":   bridgepkg.UnichainDomain,
+		"sonic":      bridgepkg.SonicDomain,
+		"worldchain": bridgepkg.WorldChainDomain,
+		"sei":        bridgepkg.SeiDomain,
+		"hyperevm":   bridgepkg.HyperEVMDomain,
+	} {
+		if v, ok := balance.ByDomain[domain]; ok {
+			byChain[slug] = v.String()
+		}
 	}
 
 	total := "0"
@@ -709,12 +724,30 @@ type reportSpendRequest struct {
 
 func sourceDomainFor(chain string) (uint32, bool) {
 	switch chain {
+	case "solana":
+		return bridgepkg.SolanaDomain, true
 	case "base":
 		return bridgepkg.BaseDomain, true
 	case "polygon":
 		return bridgepkg.PolygonDomain, true
-	case "solana":
-		return bridgepkg.SolanaDomain, true
+	case "ethereum":
+		return bridgepkg.EthereumDomain, true
+	case "avalanche":
+		return bridgepkg.AvalancheDomain, true
+	case "optimism":
+		return bridgepkg.OptimismDomain, true
+	case "arbitrum":
+		return bridgepkg.ArbitrumDomain, true
+	case "unichain":
+		return bridgepkg.UnichainDomain, true
+	case "sonic":
+		return bridgepkg.SonicDomain, true
+	case "worldchain":
+		return bridgepkg.WorldChainDomain, true
+	case "sei":
+		return bridgepkg.SeiDomain, true
+	case "hyperevm":
+		return bridgepkg.HyperEVMDomain, true
 	default:
 		return 0, false
 	}

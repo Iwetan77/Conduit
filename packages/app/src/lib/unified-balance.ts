@@ -105,9 +105,22 @@ export async function buildEvmAdapter(provider: unknown, address: string): Promi
 // or shown for this path.
 export async function buildSolanaAdapter(provider: unknown, address: string): Promise<PayerAdapter> {
   const { createSolanaAdapterFromProvider } = await import("@circle-fin/adapter-solana");
+  const { resolveChainIdentifier } = await import("@circle-fin/unified-balance-kit");
+
+  // Pin the adapter to Solana DEVNET. With no explicit supportedChains the
+  // adapter defaults to Solana MAINNET and builds mainnet deposit transactions
+  // (mainnet RPC blockhash + mainnet Gateway program) -- which Solflare, set to
+  // devnet, rejects as a "network mismatch". Handing it the resolved
+  // Solana_Devnet ChainDefinition gives it the devnet RPC + devnet Gateway
+  // program so the deposit is a genuine devnet transaction.
+  const solanaDevnet = resolveChainIdentifier(SOURCE_CHAINS.solana);
   const adapter = await createSolanaAdapterFromProvider({
     provider: provider as never,
-  });
+    capabilities: {
+      addressContext: "user-controlled",
+      supportedChains: [solanaDevnet],
+    },
+  } as never);
   return { adapter, address, family: "solana" };
 }
 

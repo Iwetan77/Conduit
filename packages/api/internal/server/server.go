@@ -122,6 +122,7 @@ func New(cfg Config) http.Handler {
 	}))
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) })
 
+	// (deploy pipeline restored via deploy-api Action + Render Deploy Hook)
 	// Reports the deployed git commit so a deploy can be verified over HTTP
 	// instead of squinting at the dashboard. RENDER_GIT_COMMIT is injected
 	// by Render at build+runtime; it's a bare SHA (safe to interpolate).

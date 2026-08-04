@@ -48,6 +48,18 @@ export default function SendPage() {
   const [bridgeError, setBridgeError] = useState("");
 
   const startCrossChain = async () => {
+    // Validate on CLICK, never by disabling the button. A greyed-out control
+    // with no affordance reads as broken -- especially here, where this is the
+    // only path a payer without an Arc wallet can use, so "it does nothing" is
+    // a dead end rather than a hint.
+    if (!isAddress(recipient)) {
+      setBridgeError("Enter the recipient's Arc address above first.");
+      return;
+    }
+    if (!(parseFloat(amount) > 0)) {
+      setBridgeError("Enter an amount above first.");
+      return;
+    }
     setBridgeBusy(true);
     setBridgeError("");
     try {
@@ -232,7 +244,7 @@ export default function SendPage() {
               <button
                 type="button"
                 onClick={startCrossChain}
-                disabled={bridgeBusy || !isAddress(recipient) || !(parseFloat(amount) > 0)}
+                disabled={bridgeBusy}
                 className="w-full flex flex-col items-center gap-1 py-3.5 px-4 border border-signal/40
                            bg-signal/5 hover:bg-signal/10 hover:border-signal/60 transition-colors
                            disabled:opacity-30 disabled:cursor-not-allowed"
@@ -249,13 +261,6 @@ export default function SendPage() {
                   Solana · Base · Arbitrum · Optimism · Avalanche · +7 more
                 </span>
               </button>
-              {/* A disabled button with no explanation reads as broken -- say
-                  what's missing instead. */}
-              {(!isAddress(recipient) || !(parseFloat(amount) > 0)) && (
-                <p className="text-ink-dim text-[11px] font-mono text-center">
-                  Enter a recipient address and amount to pay from another chain.
-                </p>
-              )}
               {bridgeError && (
                 <p className="text-danger text-sm font-mono text-center">{bridgeError}</p>
               )}

@@ -73,6 +73,19 @@ async function context() {
 }
 
 // Convert a minor-unit bigint (6dp USDC) to the human decimal string UBK wants.
+// Display formatting for USDC amounts. usdcMinorToHuman below always emits all
+// 6 decimals because Circle's SDK needs that exact precision -- but showing a
+// payer "Pay 5.000000 USDC" is machine output, not money. This trims to 2
+// decimals (keeping more only when the amount genuinely has them).
+export function usdcDisplay(minor: bigint): string {
+  const full = usdcMinorToHuman(minor);
+  const [whole, frac = ""] = full.split(".");
+  const trimmed = frac.replace(/0+$/, "");
+  if (trimmed.length === 0) return `${whole}.00`;
+  if (trimmed.length === 1) return `${whole}.${trimmed}0`;
+  return `${whole}.${trimmed}`;
+}
+
 export function usdcMinorToHuman(minor: bigint): string {
   const negative = minor < 0n;
   const abs = negative ? -minor : minor;
@@ -200,59 +213,6 @@ export function mergeUsdc(deposited: UnifiedUsdc, wallet: ChainUsdc[]): UnifiedU
   }));
   const total = byChain.reduce((s, c) => s + usdcHumanToMinor(c.confirmed), 0n);
   return { totalConfirmed: usdcMinorToHuman(total), byChain };
-}
-
-// DIAGNOSTIC ONLY. Reproduces the exact balance read Circle's deposit does
-// (usdc.balanceOf), both with the address passed explicitly and auto-resolved
-// (the user-controlled path the deposit actually uses), plus our own direct
-// devnet read. Surfaced on-page so the browser reports what the SDK truly sees
-// instead of us guessing. Delete once cross-chain is verified.
-export interface SolanaBalanceProbe {
-  ourAddress: string;
-  directRead: string;
-  sdkExplicit: string;
-  sdkAuto: string;
-}
-
-export async function probeSolanaBalance(payer: PayerAdapter): Promise<SolanaBalanceProbe> {
-  const out: SolanaBalanceProbe = {
-    ourAddress: payer.address,
-    directRead: "?",
-    sdkExplicit: "?",
-    sdkAuto: "?",
-  };
-
-  try {
-    const wallet = await getWalletUsdc(payer);
-    out.directRead = wallet.length ? `${wallet[0].confirmed}` : "0 (none)";
-  } catch (e) {
-    out.directRead = `ERR ${(e as Error).message}`;
-  }
-
-  const adapter = payer.adapter as {
-    prepareAction: (
-      name: string,
-      params: unknown,
-      ctx: unknown
-    ) => Promise<{ execute: () => Promise<unknown> }>;
-  };
-  const ctx = { adapter: payer.adapter, chain: SOURCE_CHAINS.solana };
-
-  try {
-    const p = await adapter.prepareAction("usdc.balanceOf", { walletAddress: payer.address }, ctx);
-    out.sdkExplicit = String(await p.execute());
-  } catch (e) {
-    out.sdkExplicit = `ERR ${(e as Error).message}`;
-  }
-
-  try {
-    const p = await adapter.prepareAction("usdc.balanceOf", {}, ctx);
-    out.sdkAuto = String(await p.execute());
-  } catch (e) {
-    out.sdkAuto = `ERR ${(e as Error).message}`;
-  }
-
-  return out;
 }
 
 // Map a UBK chain identifier back to the short source-chain slug the API's

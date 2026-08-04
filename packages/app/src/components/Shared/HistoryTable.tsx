@@ -108,8 +108,11 @@ export function HistoryTable({ rows, isLoading }: HistoryTableProps) {
             ? `${row.txHash.slice(0, 6)}…${row.txHash.slice(-4)}`
             : "—";
           const amountText = `${isSender ? "-" : "+"}${formatAmount(row.amount, row.currency)}`;
+          // Money leaving is red, money arriving is green -- the direction a
+          // payer reads first. Outflow used to render in neutral ink, which
+          // made an outgoing payment look identical to a balance line.
           const amountClass = `text-scale-2 font-mono font-medium whitespace-nowrap ${
-            isSender ? "text-ink" : "text-signal"
+            isSender ? "text-danger" : "text-signal"
           }`;
 
           // Two layouts, not one squeezed into a min-width that forced
@@ -122,7 +125,7 @@ export function HistoryTable({ rows, isLoading }: HistoryTableProps) {
               {/* Mobile: counterparty on top, date + amount below it. */}
               <div className="flex flex-col gap-1 sm:hidden min-w-0">
                 <div className="flex items-center gap-2 min-w-0">
-                  <span className={`font-mono text-scale-2 shrink-0 ${isSender ? "text-ink-dim" : "text-signal"}`}>
+                  <span className={`font-mono text-scale-2 shrink-0 ${isSender ? "text-danger" : "text-signal"}`}>
                     {isSender ? "↑" : "↓"}
                   </span>
                   <span className="text-scale-2 font-mono text-ink truncate">
@@ -143,7 +146,7 @@ export function HistoryTable({ rows, isLoading }: HistoryTableProps) {
               {/* Desktop: the original 4-column grid. */}
               <div className="hidden sm:grid grid-cols-[1fr_auto_auto_auto] gap-4 items-center w-full">
                 <div className="flex items-center gap-3">
-                  <span className={`font-mono text-scale-2 ${isSender ? "text-ink-dim" : "text-signal"}`}>
+                  <span className={`font-mono text-scale-2 ${isSender ? "text-danger" : "text-signal"}`}>
                     {isSender ? "↑" : "↓"}
                   </span>
                   <div className="flex flex-col">

@@ -139,6 +139,56 @@ export async function getUnifiedUsdc(payer: PayerAdapter): Promise<UnifiedUsdc> 
   return { totalConfirmed: res.totalConfirmedBalance ?? "0", byChain };
 }
 
+// Circle's USDC mint on Solana Devnet -- what faucet.circle.com dispenses.
+const SOLANA_DEVNET_USDC_MINT = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
+
+// The payer's raw WALLET USDC -- the balance getUnifiedUsdc can't see, because
+// it reports only what's already been deposited into Circle Gateway. Since
+// spendUsdcToArc() deposits from the wallet on demand, this wallet balance is
+// genuinely spendable; without counting it, a payer who just holds USDC in
+// Phantom (nothing deposited yet) is wrongly told "insufficient" before the
+// deposit step ever runs -- the exact "found 0.000" bug. Solana only for now
+// (the tested cross-chain path); EVM source chains are a follow-up.
+export async function getWalletUsdc(payer: PayerAdapter): Promise<ChainUsdc[]> {
+  if (payer.family !== "solana") return [];
+  try {
+    const { Connection, PublicKey } = await import("@solana/web3.js");
+    const conn = new Connection("https://api.devnet.solana.com", "confirmed");
+    const accounts = await conn.getParsedTokenAccountsByOwner(new PublicKey(payer.address), {
+      mint: new PublicKey(SOLANA_DEVNET_USDC_MINT),
+    });
+    let minor = 0n;
+    for (const acc of accounts.value) {
+      const amt = (
+        acc.account.data as { parsed?: { info?: { tokenAmount?: { amount?: string } } } }
+      ).parsed?.info?.tokenAmount?.amount;
+      if (amt) minor += BigInt(amt);
+    }
+    return minor > 0n ? [{ chain: SOURCE_CHAINS.solana, confirmed: usdcMinorToHuman(minor) }] : [];
+  } catch {
+    // A wallet-balance read failure must not block: fall back to whatever
+    // getUnifiedUsdc found. Worst case the payer sees the old behaviour.
+    return [];
+  }
+}
+
+// Combine already-deposited Gateway balance with spendable wallet balance into
+// one per-chain view, so planAllocations sizes against everything the payer can
+// actually pay with. spendUsdcToArc() then deposits any wallet portion at spend
+// time (its deposit-if-needed loop covers the shortfall between the two).
+export function mergeUsdc(deposited: UnifiedUsdc, wallet: ChainUsdc[]): UnifiedUsdc {
+  const minorByChain = new Map<string, bigint>();
+  for (const c of [...deposited.byChain, ...wallet]) {
+    minorByChain.set(c.chain, (minorByChain.get(c.chain) ?? 0n) + usdcHumanToMinor(c.confirmed));
+  }
+  const byChain = [...minorByChain].map(([chain, minor]) => ({
+    chain,
+    confirmed: usdcMinorToHuman(minor),
+  }));
+  const total = byChain.reduce((s, c) => s + usdcHumanToMinor(c.confirmed), 0n);
+  return { totalConfirmed: usdcMinorToHuman(total), byChain };
+}
+
 // Map a UBK chain identifier back to the short source-chain slug the API's
 // report_spend endpoint expects.
 export function chainToSourceSlug(chain: string): SourceKind | null {

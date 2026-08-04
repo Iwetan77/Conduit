@@ -118,9 +118,12 @@ export function SettlementIntentPay({ intentId }: SettlementIntentPayProps) {
           <button
             type="button"
             onClick={() => setPayFromOtherChain(true)}
-            className="w-full text-center text-ink-dim text-xs font-mono hover:text-ink border border-border py-2 hover:border-signal/40 transition-colors"
+            className="w-full flex items-center justify-center gap-2 py-3.5 border border-signal/40 bg-signal/5
+                       text-signal font-mono text-sm hover:bg-signal/10 hover:border-signal/60 transition-colors"
           >
-            Pay with USDC from another chain (Solana, Base, Polygon)
+            <span aria-hidden className="text-base leading-none">⇄</span>
+            Pay with USDC from another chain
+            <span className="text-ink-dim text-xs">· Solana · Base · Polygon</span>
           </button>
         </>
       )}

@@ -25,6 +25,8 @@ import {
   buildEvmAdapter,
   buildSolanaAdapter,
   getUnifiedUsdc,
+  getWalletUsdc,
+  mergeUsdc,
   spendUsdcToArc,
   planAllocations,
   usdcMinorToHuman,
@@ -120,7 +122,16 @@ export function CrossChainBridge({ intentId, intent }: CrossChainBridgeProps) {
       setAdapter(payer);
       setPhase("checking_balance");
 
-      const [plan, bal] = await Promise.all([getBridgePlan(intentId), getUnifiedUsdc(payer)]);
+      // Size against deposited Gateway balance AND raw wallet balance: the
+      // wallet portion is deposited on demand at spend time, so counting only
+      // the deposited balance falsely reported "found 0" for a payer who holds
+      // USDC in their wallet but hasn't pre-deposited into Gateway.
+      const [plan, deposited, wallet] = await Promise.all([
+        getBridgePlan(intentId),
+        getUnifiedUsdc(payer),
+        getWalletUsdc(payer),
+      ]);
+      const bal = mergeUsdc(deposited, wallet);
       setRequiredUSDC(plan.required_usdc);
       setRecipient(plan.recipient_address);
       setUnified(bal);
@@ -223,9 +234,13 @@ export function CrossChainBridge({ intentId, intent }: CrossChainBridgeProps) {
   if (phase === "insufficient") {
     return (
       <div className="space-y-4">
-        <p className="text-ink-dim text-sm">
-          Connected: <span className="text-ink font-mono">{adapter?.address}</span>
-        </p>
+        <div className="inline-flex items-center gap-2 px-3 py-1.5 border border-border bg-surface">
+          <span className="w-1.5 h-1.5 bg-signal animate-pulse" />
+          <span className="text-ink-dim text-xs font-mono">Connected</span>
+          <span className="text-ink text-xs font-mono">
+            {adapter?.address ? `${adapter.address.slice(0, 5)}…${adapter.address.slice(-4)}` : "—"}
+          </span>
+        </div>
         <p className="text-danger text-sm">
           You need {formatAmountRaw(BigInt(requiredUSDC ?? "0"), 6)} USDC, but Conduit found only{" "}
           {unified?.totalConfirmed ?? "0"} across your chains. Add USDC and try again.
@@ -243,9 +258,13 @@ export function CrossChainBridge({ intentId, intent }: CrossChainBridgeProps) {
   if (phase === "confirm") {
     return (
       <div className="space-y-4">
-        <p className="text-ink-dim text-sm">
-          Connected: <span className="text-ink font-mono">{adapter?.address}</span>
-        </p>
+        <div className="inline-flex items-center gap-2 px-3 py-1.5 border border-border bg-surface">
+          <span className="w-1.5 h-1.5 bg-signal animate-pulse" />
+          <span className="text-ink-dim text-xs font-mono">Connected</span>
+          <span className="text-ink text-xs font-mono">
+            {adapter?.address ? `${adapter.address.slice(0, 5)}…${adapter.address.slice(-4)}` : "—"}
+          </span>
+        </div>
         <div className="border border-border bg-surface p-4 space-y-2">
           <p className="text-ink-dim text-xs uppercase tracking-wider font-mono">Paying with</p>
           <p className="text-ink font-mono text-xl">

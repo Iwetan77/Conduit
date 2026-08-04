@@ -601,6 +601,8 @@ export interface WalletSettlementRow {
   settle_address: string;
   rate_applied: string | null;
   settled_at: string; // unix seconds, as a string
+  /** "sent" when this wallet funded it, "received" when it was paid out to. */
+  direction?: "sent" | "received";
 }
 
 // A payer's own cross-currency settlements — the ones ConduitRouter never

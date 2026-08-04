@@ -50,6 +50,9 @@ type walletSettlementRow struct {
 	SettleAddress  string  `json:"settle_address"`
 	RateApplied    *string `json:"rate_applied"`
 	SettledAt      string  `json:"settled_at"`
+	// "sent" when this wallet funded the payment, "received" when it was the
+	// payout address. Lets /history colour and sign the row correctly.
+	Direction string `json:"direction"`
 }
 
 // walletHistoryMessage is the exact string the wallet must have signed. Fixed
@@ -120,14 +123,23 @@ func (h *WalletHistory) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Both directions, and both settlement kinds:
+	//   - LEFT JOIN on fx_trades, not INNER: a cross-CHAIN settlement that
+	//     needed no FX (USD merchant, USDC minted straight to them) has no
+	//     fx_trade at all, so an inner join dropped every bridged payment.
+	//   - matched on settle_address as well as pay_address, so the RECIPIENT
+	//     of a cross-currency or bridged payment sees the money arrive. Before
+	//     this, an off-chain settlement was visible only to the sender —
+	//     a merchant paid this way had no record of it anywhere.
 	rows, err := h.Pool.Query(context.Background(),
 		`SELECT s.id, s.tx_hash, s.pay_currency, s.pay_amount::text,
 		        si.settle_currency, s.settle_amount::text, si.settle_address,
-		        s.rate_applied::text, s.settled_at
+		        s.rate_applied::text, s.settled_at,
+		        CASE WHEN lower(si.settle_address) = lower($1) THEN 'received' ELSE 'sent' END AS direction
 		 FROM settlements s
-		 JOIN fx_trades ft ON ft.id = s.fx_trade_id
 		 JOIN settlement_intents si ON si.id = s.intent_id
-		 WHERE lower(ft.pay_address) = lower($1)
+		 LEFT JOIN fx_trades ft ON ft.id = s.fx_trade_id
+		 WHERE lower(ft.pay_address) = lower($1) OR lower(si.settle_address) = lower($1)
 		 ORDER BY s.settled_at DESC
 		 LIMIT 200`,
 		req.Wallet,
@@ -144,7 +156,8 @@ func (h *WalletHistory) List(w http.ResponseWriter, r *http.Request) {
 		var rate *string
 		var settledAt time.Time
 		if err := rows.Scan(&row.ID, &row.TxHash, &row.PayCurrency, &row.PayAmount,
-			&row.SettleCurrency, &row.SettleAmount, &row.SettleAddress, &rate, &settledAt); err != nil {
+			&row.SettleCurrency, &row.SettleAmount, &row.SettleAddress, &rate, &settledAt,
+			&row.Direction); err != nil {
 			writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
 			return
 		}

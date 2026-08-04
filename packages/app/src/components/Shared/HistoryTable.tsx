@@ -44,22 +44,26 @@ export function onChainReceiptsToRows(receipts: PaymentReceipt[], walletAddress?
   });
 }
 
-// Cross-currency settlements are always the connected wallet PAYING (Circle's
-// maker delivers to the recipient; a payer's own wallet never receives a
-// StableFX settlement from this endpoint), so direction is always "sent" and
-// the amount is what THEY paid, in their own currency — not what the
-// recipient received.
+// Off-chain settlements (cross-currency via StableFX, and cross-chain via the
+// Gateway bridge) leave no ConduitRouter event, so this endpoint is the only
+// place either side can see them. The server now reports direction: a wallet
+// can be the PAYER (funded the trade) or the RECIPIENT (the payout address) --
+// a merchant paid this way previously saw nothing at all. Amounts follow the
+// direction: what you paid in your currency, or what you received in theirs.
 export function walletSettlementsToRows(rows: WalletSettlementRow[]): HistoryRow[] {
-  return rows.map((r) => ({
+  return rows.map((r) => {
+    const received = r.direction === "received";
+    return {
     key: r.id,
-    direction: "sent" as const,
+    direction: received ? ("received" as const) : ("sent" as const),
     counterpartyAddress: r.settle_address,
-    currency: isoToToken(r.pay_currency) as Currency,
-    amount: BigInt(r.pay_amount),
+    currency: isoToToken(received ? r.settle_currency : r.pay_currency) as Currency,
+    amount: BigInt(received ? r.settle_amount : r.pay_amount),
     settledAt: Number(r.settled_at),
     txHash: r.tx_hash,
     explorerUrl: r.tx_hash ? `https://testnet.arcscan.app/tx/${r.tx_hash}` : "",
-  }));
+    };
+  });
 }
 
 interface HistoryTableProps {

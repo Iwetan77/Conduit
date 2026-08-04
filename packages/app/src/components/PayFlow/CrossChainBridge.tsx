@@ -206,9 +206,9 @@ export function CrossChainBridge({ intentId, intent }: CrossChainBridgeProps) {
           disabled={!hasPhantom}
           className="w-full py-4 bg-signal text-signal-ink font-mono hover:bg-signal/90 transition-colors disabled:opacity-40"
         >
-          Pay with USDC on Solana (Phantom)
+          Pay with USDC on Solana
         </button>
-        {!hasPhantom && <p className="text-ink-dim text-xs">Install Phantom to pay from Solana.</p>}
+        {!hasPhantom && <p className="text-ink-dim text-xs">Install a Solana wallet (Solflare, Backpack, Phantom) to pay from Solana.</p>}
         <button
           onClick={() => chooseSource("evm")}
           className="w-full py-4 border border-border text-ink font-mono hover:border-signal/40 transition-colors"

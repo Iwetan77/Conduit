@@ -12,8 +12,12 @@ import (
 	"strings"
 	"time"
 
+	ethereum "github.com/ethereum/go-ethereum"
+	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	bridgepkg "github.com/kzn-labs/conduit/api/internal/bridge"
@@ -38,6 +42,10 @@ type Bridge struct {
 	Webhooks    *webhooks.Dispatcher
 	RelayerKey  *ecdsa.PrivateKey
 	RelayerAddr common.Address
+	// ArcRPC is where the relayer submits the direct USDC transfer that settles
+	// a same-asset (USD→USDC) bridged intent — the minted USDC is already at
+	// the relayer, so it just forwards it to the merchant.
+	ArcRPC string
 	// StaleAfter is how long a bridge_transfers row can sit without forward
 	// progress before ReconcileOrphanedBridges treats it as orphaned.
 	StaleAfter time.Duration
@@ -319,6 +327,35 @@ func (h *Bridge) settleBridgedIntent(ctx context.Context, intentID string) error
 	amount, _ := new(big.Int).SetString(amountStr, 10)
 	relayerAddrHex := h.RelayerAddr.Hex()
 
+	// Same-asset settlement (USD settles in USDC): the bridge already minted
+	// the USDC to the relayer, so there's nothing to convert — the relayer just
+	// forwards it to the merchant. StableFX is only for cross-currency.
+	if settleInfo.Symbol == "USDC" {
+		txHash, terr := h.transferUSDCFromRelayer(ctx, settleAddress, amount)
+		if terr != nil {
+			return fmt.Errorf("relayer usdc transfer: %w", terr)
+		}
+		_, _ = h.Pool.Exec(ctx, `UPDATE settlement_intents SET status = 'settled', updated_at = now() WHERE id = $1`, intentID)
+		settlementID := models.NewID("stl")
+		h.Pool.Exec(ctx,
+			`INSERT INTO settlements (id, intent_id, tx_hash, receipt_id, pay_currency, pay_amount, settle_amount, rate_applied, fee, block_number, log_index, settled_at)
+			 VALUES ($1,$2,$3,$3,'USDC',$4,$4,1,0,0,0,now())`,
+			settlementID, intentID, txHash, amountStr,
+		)
+		var accountID string
+		h.Pool.QueryRow(ctx, `SELECT account_id FROM settlement_intents WHERE id = $1`, intentID).Scan(&accountID)
+		if accountID != "" {
+			balTxID := models.NewID("btx")
+			h.Pool.Exec(ctx,
+				`INSERT INTO balance_transactions (id, account_id, settlement_id, type, gross, fee, net, currency)
+				 VALUES ($1,$2,$3,'settlement',$4,0,$4,'USDC')`,
+				balTxID, accountID, settlementID, amountStr,
+			)
+		}
+		h.emitWebhook(ctx, intentID, "settlement.succeeded", map[string]any{"intent_id": intentID, "tx_hash": txHash, "status": "settled"})
+		return nil
+	}
+
 	var q fx.Quote
 	var prep fx.Preparation
 	var err error
@@ -392,6 +429,75 @@ func (h *Bridge) settleBridgedIntent(ctx context.Context, intentID string) error
 
 	h.emitWebhook(ctx, intentID, "settlement.succeeded", map[string]any{"intent_id": intentID, "tx_hash": makerTxHash, "status": "settled"})
 	return nil
+}
+
+// transferUSDCFromRelayer sends `amount` USDC from the relayer to `to` on Arc.
+// Used to settle a same-asset (USD→USDC) bridged intent: the minted USDC is
+// already at the relayer, so this is a plain ERC-20 transfer, signed with the
+// relayer key. EIP-1559 to match what Arc accepts (its browser txs are type 2).
+func (h *Bridge) transferUSDCFromRelayer(ctx context.Context, to string, amount *big.Int) (string, error) {
+	if h.ArcRPC == "" {
+		return "", fmt.Errorf("no Arc RPC configured for relayer transfer")
+	}
+	client, err := ethclient.DialContext(ctx, h.ArcRPC)
+	if err != nil {
+		return "", fmt.Errorf("dial arc: %w", err)
+	}
+	defer client.Close()
+
+	usdc := common.HexToAddress("0x3600000000000000000000000000000000000000")
+	toAddr := common.HexToAddress(to)
+
+	// transfer(address,uint256)
+	selector := crypto.Keccak256([]byte("transfer(address,uint256)"))[:4]
+	data := make([]byte, 0, 4+32+32)
+	data = append(data, selector...)
+	data = append(data, common.LeftPadBytes(toAddr.Bytes(), 32)...)
+	data = append(data, common.LeftPadBytes(amount.Bytes(), 32)...)
+
+	chainID, err := client.ChainID(ctx)
+	if err != nil {
+		return "", fmt.Errorf("chain id: %w", err)
+	}
+	nonce, err := client.PendingNonceAt(ctx, h.RelayerAddr)
+	if err != nil {
+		return "", fmt.Errorf("nonce: %w", err)
+	}
+	tip, err := client.SuggestGasTipCap(ctx)
+	if err != nil {
+		tip = big.NewInt(1_000_000_000)
+	}
+	head, err := client.HeaderByNumber(ctx, nil)
+	if err != nil {
+		return "", fmt.Errorf("head: %w", err)
+	}
+	// maxFee = 2*baseFee + tip, generous enough to survive a base-fee bump.
+	maxFee := new(big.Int).Add(new(big.Int).Mul(head.BaseFee, big.NewInt(2)), tip)
+
+	gasLimit, err := client.EstimateGas(ctx, ethereum.CallMsg{From: h.RelayerAddr, To: &usdc, Data: data})
+	if err != nil {
+		gasLimit = 120_000
+	}
+
+	tx := types.NewTx(&types.DynamicFeeTx{
+		ChainID: chainID, Nonce: nonce, To: &usdc, Value: big.NewInt(0),
+		Gas: gasLimit, GasTipCap: tip, GasFeeCap: maxFee, Data: data,
+	})
+	signed, err := types.SignTx(tx, types.LatestSignerForChainID(chainID), h.RelayerKey)
+	if err != nil {
+		return "", fmt.Errorf("sign: %w", err)
+	}
+	if err := client.SendTransaction(ctx, signed); err != nil {
+		return "", fmt.Errorf("send: %w", err)
+	}
+	receipt, err := bind.WaitMined(ctx, client, signed)
+	if err != nil {
+		return "", fmt.Errorf("wait mined: %w", err)
+	}
+	if receipt.Status != types.ReceiptStatusSuccessful {
+		return "", fmt.Errorf("transfer reverted (tx %s)", signed.Hash().Hex())
+	}
+	return signed.Hash().Hex(), nil
 }
 
 func (h *Bridge) setState(ctx context.Context, transferID string, to bridgepkg.State) {

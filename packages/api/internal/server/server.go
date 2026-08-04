@@ -276,10 +276,15 @@ func newBridgeHandler(cfg Config, stableFX *fx.StableFXProvider, dispatcher *web
 		solanaRPC = "https://api.devnet.solana.com"
 	}
 	provider := bridgepkg.NewGatewayProvider(solanaRPC, crypto.PubkeyToAddress(key.PublicKey))
+	arcRPC := cfg.ArcRPC
+	if arcRPC == "" {
+		arcRPC = "https://rpc.testnet.arc.network"
+	}
 	return &handlers.Bridge{
 		Pool: cfg.Pool, Provider: provider, StableFX: stableFX, Webhooks: dispatcher,
 		RelayerKey: key, RelayerAddr: crypto.PubkeyToAddress(key.PublicKey),
 		StaleAfter: cfg.BridgeStaleAfter,
+		ArcRPC:     arcRPC,
 	}, nil
 }
 

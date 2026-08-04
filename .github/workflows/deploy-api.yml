@@ -1,0 +1,32 @@
+# Restores auto-deploy for the Render API after the repo recreate dropped the
+# GitHub webhook Render relied on. Instead of that webhook, this fires on every
+# push touching the API and POSTs Render's Deploy Hook, which triggers a build.
+#
+# One-time setup: Render service -> Settings -> Deploy Hook -> copy the URL,
+# then add it as a repo secret named RENDER_DEPLOY_HOOK_URL
+# (github.com/Iwetan77/Conduit -> Settings -> Secrets and variables -> Actions).
+# Until the secret exists this job no-ops instead of failing.
+name: deploy-api
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "packages/api/**"
+      - ".github/workflows/deploy-api.yml"
+  workflow_dispatch: {}
+
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Render deploy
+        env:
+          HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+        run: |
+          if [ -z "$HOOK" ]; then
+            echo "RENDER_DEPLOY_HOOK_URL not set — skipping (add it in repo secrets to enable)."
+            exit 0
+          fi
+          code=$(curl -fsS -m 30 -o /dev/null -w "%{http_code}" -X POST "$HOOK")
+          echo "Render deploy hook responded HTTP $code"

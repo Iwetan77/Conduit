@@ -48,3 +48,6 @@ Thumbs.db
 audit/
 packages/app/audit/
 .vercel
+
+# Internal error-code reference (not for the repo)
+errorcodes.md

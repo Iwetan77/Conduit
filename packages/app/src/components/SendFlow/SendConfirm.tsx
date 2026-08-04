@@ -94,7 +94,8 @@ export function SendConfirm({
       setReceipt(result);
       setStep("success");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Transaction failed");
+      const { formatTxError } = await import("@/lib/tx-errors");
+      setError(formatTxError(err));
       setStep("error");
     }
   };

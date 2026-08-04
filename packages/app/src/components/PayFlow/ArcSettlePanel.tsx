@@ -112,7 +112,8 @@ export function ArcSettlePanel({
       setFxDone(true);
       setStep("success");
     } catch (err) {
-      setTxError(err instanceof Error ? err.message : "Transaction failed");
+      const { formatTxError } = await import("@/lib/tx-errors");
+      setTxError(formatTxError(err));
       setStep("error");
     }
   };

@@ -1,0 +1,83 @@
+// Human-facing error codes for payment failures.
+//
+// Raw wallet / RPC / SDK errors are developer noise and frankly scary to a
+// payer: "could not coalesce error ... viem@2.55.5", walls of JSON, stack
+// traces, "execution reverted: TRANSFER_FROM_FAILED". classifyTxError maps
+// them to a stable numeric code plus one plain sentence. The UI shows
+// "Error 101 — Not enough balance…"; the code is the thing a user can quote to
+// support, and every code is documented in errorcodes.md (gitignored).
+//
+// Ranges: 1xx funds · 2xx network/infra · 3xx FX/quote · 4xx wallet/signing ·
+// 9xx unknown. Keep this table and errorcodes.md in lockstep.
+
+export interface TxError {
+  code: number;
+  message: string;
+}
+
+const contains = (haystack: string, ...needles: string[]) =>
+  needles.some((n) => haystack.includes(n));
+
+export function classifyTxError(err: unknown): TxError {
+  const raw = (err instanceof Error ? err.message : String(err ?? "")).toLowerCase();
+  const name = err instanceof Error ? err.name : "";
+
+  // 1xx — funds
+  if (
+    name === "InsufficientFundsError" ||
+    contains(raw, "insufficient", "transfer_from_failed", "exceeds balance", "exceeds allowance")
+  ) {
+    return { code: 101, message: "Not enough balance to cover this payment." };
+  }
+  if (contains(raw, "insufficient funds for gas", "gas required exceeds", "out of gas")) {
+    return { code: 102, message: "Not enough gas to send this transaction." };
+  }
+
+  // 4xx — wallet / signing
+  if (contains(raw, "user rejected", "user denied", "action_rejected", "rejected the request", "denied transaction")) {
+    return { code: 401, message: "You cancelled the request in your wallet." };
+  }
+  if (contains(raw, "could not be verified against the expected address", "3015")) {
+    return { code: 402, message: "Your wallet signed with a different account than expected. Reconnect and try again." };
+  }
+  if (contains(raw, "no wallet", "no account is connected", "connect a wallet")) {
+    return { code: 403, message: "No wallet connected. Connect a wallet or sign in, then try again." };
+  }
+
+  // 3xx — FX / quote
+  if (contains(raw, "quote has expired", "fx_quote_expired", "rate kept moving", "rate moved")) {
+    return { code: 301, message: "The exchange rate moved before you approved. Please try again." };
+  }
+  if (contains(raw, "fx provider", "stablefx", "no payload to sign", "unsigned-able")) {
+    return { code: 302, message: "The currency-conversion provider is unavailable right now. Try again shortly." };
+  }
+
+  // 2xx — network / infrastructure
+  if (
+    contains(
+      raw,
+      "load failed",
+      "failed to fetch",
+      "could not coalesce",
+      "network error",
+      "networkerror",
+      "timeout",
+      "timed out",
+      "fetch failed"
+    )
+  ) {
+    return { code: 201, message: "Couldn't reach the network. Check your connection and try again." };
+  }
+  if (contains(raw, "revert", "rpc", "json-rpc")) {
+    return { code: 202, message: "The network rejected this transaction. Please try again in a moment." };
+  }
+
+  // 9xx — unknown
+  return { code: 900, message: "Something went wrong sending this payment. Please try again." };
+}
+
+// "Error 101 — Not enough balance to cover this payment."
+export function formatTxError(err: unknown): string {
+  const { code, message } = classifyTxError(err);
+  return `Error ${code} — ${message}`;
+}

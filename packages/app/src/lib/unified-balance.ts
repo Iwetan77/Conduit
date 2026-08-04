@@ -202,6 +202,59 @@ export function mergeUsdc(deposited: UnifiedUsdc, wallet: ChainUsdc[]): UnifiedU
   return { totalConfirmed: usdcMinorToHuman(total), byChain };
 }
 
+// DIAGNOSTIC ONLY. Reproduces the exact balance read Circle's deposit does
+// (usdc.balanceOf), both with the address passed explicitly and auto-resolved
+// (the user-controlled path the deposit actually uses), plus our own direct
+// devnet read. Surfaced on-page so the browser reports what the SDK truly sees
+// instead of us guessing. Delete once cross-chain is verified.
+export interface SolanaBalanceProbe {
+  ourAddress: string;
+  directRead: string;
+  sdkExplicit: string;
+  sdkAuto: string;
+}
+
+export async function probeSolanaBalance(payer: PayerAdapter): Promise<SolanaBalanceProbe> {
+  const out: SolanaBalanceProbe = {
+    ourAddress: payer.address,
+    directRead: "?",
+    sdkExplicit: "?",
+    sdkAuto: "?",
+  };
+
+  try {
+    const wallet = await getWalletUsdc(payer);
+    out.directRead = wallet.length ? `${wallet[0].confirmed}` : "0 (none)";
+  } catch (e) {
+    out.directRead = `ERR ${(e as Error).message}`;
+  }
+
+  const adapter = payer.adapter as {
+    prepareAction: (
+      name: string,
+      params: unknown,
+      ctx: unknown
+    ) => Promise<{ execute: () => Promise<unknown> }>;
+  };
+  const ctx = { adapter: payer.adapter, chain: SOURCE_CHAINS.solana };
+
+  try {
+    const p = await adapter.prepareAction("usdc.balanceOf", { walletAddress: payer.address }, ctx);
+    out.sdkExplicit = String(await p.execute());
+  } catch (e) {
+    out.sdkExplicit = `ERR ${(e as Error).message}`;
+  }
+
+  try {
+    const p = await adapter.prepareAction("usdc.balanceOf", {}, ctx);
+    out.sdkAuto = String(await p.execute());
+  } catch (e) {
+    out.sdkAuto = `ERR ${(e as Error).message}`;
+  }
+
+  return out;
+}
+
 // Map a UBK chain identifier back to the short source-chain slug the API's
 // report_spend endpoint expects.
 export function chainToSourceSlug(chain: string): SourceKind | null {

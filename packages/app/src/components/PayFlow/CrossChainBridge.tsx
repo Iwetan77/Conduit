@@ -27,6 +27,8 @@ import {
   getUnifiedUsdc,
   getWalletUsdc,
   mergeUsdc,
+  probeSolanaBalance,
+  type SolanaBalanceProbe,
   spendUsdcToArc,
   planAllocations,
   usdcMinorToHuman,
@@ -61,6 +63,7 @@ export function CrossChainBridge({ intentId, intent }: CrossChainBridgeProps) {
   const [recipient, setRecipient] = useState<string | null>(null);
   const [intentStatus, setIntentStatus] = useState(intent.status);
   const [error, setError] = useState("");
+  const [probe, setProbe] = useState<SolanaBalanceProbe | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const { connector, address: evmAddress, isConnected: evmConnected } = useAccount();
@@ -82,8 +85,21 @@ export function CrossChainBridge({ intentId, intent }: CrossChainBridgeProps) {
     setRequiredUSDC(null);
     setRecipient(null);
     setError("");
+    setProbe(null);
     setIntentStatus(intent.status);
   }, [intentId, intent.status]);
+
+  // DIAGNOSTIC panel — shows exactly what the SDK's balance read returns vs our
+  // direct on-chain read. Remove with probeSolanaBalance once verified.
+  const probePanel = probe ? (
+    <div className="border border-signal/30 bg-signal/5 p-3 text-[11px] font-mono text-ink-dim space-y-1 break-all">
+      <p className="text-signal uppercase tracking-wider">Balance diagnostic</p>
+      <p>addr: {probe.ourAddress}</p>
+      <p>direct on-chain read: <span className="text-ink">{probe.directRead}</span></p>
+      <p>SDK balanceOf (explicit addr): <span className="text-ink">{probe.sdkExplicit}</span></p>
+      <p>SDK balanceOf (auto-resolve): <span className="text-ink">{probe.sdkAuto}</span></p>
+    </div>
+  ) : null;
 
   function startPolling() {
     if (pollRef.current) clearInterval(pollRef.current);
@@ -135,6 +151,12 @@ export function CrossChainBridge({ intentId, intent }: CrossChainBridgeProps) {
       setRequiredUSDC(plan.required_usdc);
       setRecipient(plan.recipient_address);
       setUnified(bal);
+
+      // DIAGNOSTIC: reproduce Circle's own deposit balance read so the browser
+      // reports what the SDK actually sees. Remove once cross-chain verifies.
+      if (kind === "solana") {
+        probeSolanaBalance(payer).then(setProbe).catch(() => {});
+      }
 
       const need = BigInt(plan.required_usdc);
       if (planAllocations(bal, need)) {
@@ -279,6 +301,7 @@ export function CrossChainBridge({ intentId, intent }: CrossChainBridgeProps) {
         <p className="text-ink-dim text-xs">
           Your USDC moves to Arc, then converts to {intent.settle_currency} and settles to the recipient.
         </p>
+        {probePanel}
         <button
           onClick={handleSpend}
           className="w-full py-4 bg-signal text-signal-ink font-mono hover:bg-signal/90 transition-colors"
@@ -313,6 +336,7 @@ export function CrossChainBridge({ intentId, intent }: CrossChainBridgeProps) {
         </ol>
         {phase === "settled" && <p className="text-signal font-mono">Settled. Thank you.</p>}
         {error && <p className="text-danger text-sm">{error}</p>}
+        {phase === "error" && probePanel}
       </div>
     );
   }

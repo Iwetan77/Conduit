@@ -50,7 +50,23 @@ async function request<T>(
   });
 
   const text = await res.text();
-  const json = text ? JSON.parse(text) : {};
+  let json: { error?: { message?: string; code?: string; doc_url?: string } } & Record<string, unknown> = {};
+  if (text) {
+    try {
+      json = JSON.parse(text);
+    } catch {
+      // Non-JSON body: a plain-text "404 page not found" from a route that
+      // isn't registered (e.g. the bridge endpoints when ARC_RELAYER_KEY is
+      // unset), or an HTML error page from a proxy. Surfacing the raw
+      // "unable to parse JSON string" to a payer is the bug this replaces.
+      throw new ConduitApiError(
+        res.status === 404
+          ? "This feature isn't available yet."
+          : `The server returned an unexpected response (HTTP ${res.status}).`,
+        res.status === 404 ? "not_available" : "bad_response"
+      );
+    }
+  }
 
   if (!res.ok) {
     const err = json.error ?? {};

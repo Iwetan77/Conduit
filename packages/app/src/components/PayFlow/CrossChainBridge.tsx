@@ -132,7 +132,15 @@ export function CrossChainBridge({ intentId, intent }: CrossChainBridgeProps) {
         setPhase("insufficient");
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not connect wallet");
+      const notAvailable =
+        err instanceof ConduitApiError && err.code === "not_available";
+      setError(
+        notAvailable
+          ? "Cross-chain payments aren't enabled on this deployment yet. Pay on Arc instead."
+          : err instanceof Error
+            ? err.message
+            : "Could not connect wallet"
+      );
       setPhase("choose_source");
     }
   }

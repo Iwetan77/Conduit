@@ -12,7 +12,10 @@ import type { Transaction } from "@solana/web3.js";
 interface SolanaProvider {
   isPhantom?: boolean;
   publicKey?: { toString(): string } | null;
-  connect(): Promise<{ publicKey: { toString(): string } }>;
+  // Phantom resolves connect() to { publicKey }; Solflare resolves it WITHOUT
+  // a return value and instead populates provider.publicKey. Type the return as
+  // optional so we never assume Phantom's shape.
+  connect(): Promise<{ publicKey?: { toString(): string } } | void>;
   signTransaction(tx: Transaction): Promise<Transaction>;
   signMessage(message: Uint8Array, encoding?: string): Promise<{ signature: Uint8Array }>;
 }
@@ -41,6 +44,14 @@ export async function connectSolanaWallet(): Promise<string> {
   if (!provider) {
     throw new Error("No Solana wallet found. Install Solflare, Backpack or Phantom to pay from Solana.");
   }
-  const { publicKey } = await provider.connect();
-  return publicKey.toString();
+  // Read the address off the provider, not the connect() return: Solflare
+  // resolves connect() with nothing and sets provider.publicKey instead, so
+  // destructuring `{ publicKey }` from the result gave undefined and blew up on
+  // `.toString()`. Both Phantom and Solflare populate provider.publicKey.
+  const result = await provider.connect();
+  const pk = provider.publicKey ?? result?.publicKey;
+  if (!pk) {
+    throw new Error("Wallet connected but returned no public key. Reopen the wallet and try again.");
+  }
+  return pk.toString();
 }

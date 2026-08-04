@@ -10,6 +10,8 @@ import { AddressInput } from "@/components/SendFlow/AddressInput";
 import { AmountInput } from "@/components/SendFlow/AmountInput";
 import { RoutePreview } from "@/components/SendFlow/RoutePreview";
 import { SendConfirm } from "@/components/SendFlow/SendConfirm";
+import { CrossChainBridge } from "@/components/PayFlow/CrossChainBridge";
+import type { PublicSettlementIntent } from "@/lib/conduit-api";
 import { PayerCurrencyPicker } from "@/components/SendFlow/PayerCurrencyPicker";
 import { WalletConnect } from "@/components/Shared/WalletConnect";
 import { ScanToPay } from "@/components/PayFlow/ScanToPay";
@@ -36,6 +38,39 @@ export default function SendPage() {
   const [recipientCurrency, setRecipientCurrency] = useState<Currency>("USDC");
   const [payerCurrency, setPayerCurrency] = useState<Currency>("USDC");
   const [payerBalances, setPayerBalances] = useState<BalanceMap>({});
+  // Cross-CHAIN funding lives on THIS step, not the confirm step, and is not
+  // gated on isConnected. Someone whose USDC is on Solana has no Arc/EVM
+  // wallet at all -- putting this behind "Connect your wallet to send" made the
+  // one path built for them reachable only by first connecting the exact wallet
+  // they don't have.
+  const [bridgeIntent, setBridgeIntent] = useState<PublicSettlementIntent | null>(null);
+  const [bridgeBusy, setBridgeBusy] = useState(false);
+  const [bridgeError, setBridgeError] = useState("");
+
+  const startCrossChain = async () => {
+    setBridgeBusy(true);
+    setBridgeError("");
+    try {
+      const { createDirectSettlementIntent, getPublicSettlementIntent } = await import("@/lib/conduit-api");
+      const { parseAmount: pa } = await import("@/lib/format");
+      const intent = await createDirectSettlementIntent({
+        // No EVM wallet is connected on this path, so the intent is keyed by the
+        // recipient -- personalAccountForWallet treats it as an opaque owner id,
+        // and settle_address is what actually decides the payout.
+        payer_wallet: recipient,
+        amount: pa(amount, recipientCurrency).toString(),
+        settle_currency: recipientCurrency,
+        settle_address: recipient,
+        accept_currencies: ["USDC"],
+      });
+      setBridgeIntent(await getPublicSettlementIntent(intent.id));
+    } catch (err) {
+      const { formatTxError } = await import("@/lib/tx-errors");
+      setBridgeError(formatTxError(err));
+    } finally {
+      setBridgeBusy(false);
+    }
+  };
 
   // What this send actually costs in the payer's currency (AMM exact-out
   // quote for cross-currency, 1:1 for same), checked against their real
@@ -76,7 +111,20 @@ export default function SendPage() {
         </div>
 
         <AnimatePresence mode="wait">
-          {step === "input" && (
+          {bridgeIntent && (
+            <div className="space-y-4">
+              <CrossChainBridge intentId={bridgeIntent.id} intent={bridgeIntent} />
+              <button
+                onClick={() => setBridgeIntent(null)}
+                className="w-full py-3 border border-border text-ink-dim hover:text-ink
+                           transition-colors font-mono text-sm"
+              >
+                ← Back
+              </button>
+            </div>
+          )}
+
+          {!bridgeIntent && step === "input" && (
             <motion.div
               key="input"
               initial={{ opacity: 0, y: 12 }}
@@ -161,6 +209,30 @@ export default function SendPage() {
                 >
                   Review Payment →
                 </button>
+              )}
+
+              {/* Deliberately OUTSIDE the isConnected gate: this is the path for
+                  a payer holding USDC on another chain, who by definition may
+                  have no Arc wallet to connect. Needs only a recipient and an
+                  amount. */}
+              <button
+                type="button"
+                onClick={startCrossChain}
+                disabled={bridgeBusy || !isAddress(recipient) || !(parseFloat(amount) > 0)}
+                className="w-full flex flex-col items-center gap-1 py-3.5 px-4 border border-signal/40
+                           bg-signal/5 hover:bg-signal/10 hover:border-signal/60 transition-colors
+                           disabled:opacity-30 disabled:cursor-not-allowed"
+              >
+                <span className="flex items-center gap-2 text-signal font-mono text-sm">
+                  <span aria-hidden className="text-base leading-none">⇄</span>
+                  {bridgeBusy ? "Preparing…" : "Pay with USDC from another chain"}
+                </span>
+                <span className="text-ink-dim text-[11px] font-mono tracking-wide">
+                  Solana · Base · Polygon — no Arc wallet needed
+                </span>
+              </button>
+              {bridgeError && (
+                <p className="text-danger text-sm font-mono text-center">{bridgeError}</p>
               )}
 
               <div className="text-center">

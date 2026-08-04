@@ -10,8 +10,6 @@ import { RoutePreview } from "./RoutePreview";
 import { ReceiptCard } from "@/components/Shared/ReceiptCard";
 import { FxReceiptCard } from "@/components/Shared/FxReceiptCard";
 import { StepProgress } from "@/components/Shared/StepProgress";
-import { CrossChainBridge } from "@/components/PayFlow/CrossChainBridge";
-import type { PublicSettlementIntent } from "@/lib/conduit-api";
 import { motion, AnimatePresence } from "framer-motion";
 
 interface SendConfirmProps {
@@ -40,35 +38,6 @@ export function SendConfirm({
   const [fxTx, setFxTx] = useState("");
   const [fxRate, setFxRate] = useState("");
   const [fxPaid, setFxPaid] = useState("");
-  // Cross-CHAIN funding from /send: the payer holds their USDC on Solana (or
-  // another Gateway chain) rather than on Arc. Same machinery the payment-link
-  // checkout uses -- a direct settlement intent plus CrossChainBridge -- so
-  // /send is no longer Arc-only for funding.
-  const [bridgeIntent, setBridgeIntent] = useState<PublicSettlementIntent | null>(null);
-  const [bridgeBusy, setBridgeBusy] = useState(false);
-
-  const startCrossChain = async () => {
-    if (!address) return;
-    setBridgeBusy(true);
-    setError("");
-    try {
-      const { createDirectSettlementIntent, getPublicSettlementIntent } = await import("@/lib/conduit-api");
-      const intent = await createDirectSettlementIntent({
-        payer_wallet: address,
-        amount: parsedAmount.toString(),
-        settle_currency: recipientCurrency,
-        settle_address: recipient,
-        accept_currencies: [payerCurrency],
-      });
-      setBridgeIntent(await getPublicSettlementIntent(intent.id));
-    } catch (err) {
-      const { formatTxError } = await import("@/lib/tx-errors");
-      setError(formatTxError(err));
-    } finally {
-      setBridgeBusy(false);
-    }
-  };
-
   const parsedAmount = parseAmount(amount, recipientCurrency);
   const isCrossCurrency = payerCurrency !== recipientCurrency;
 
@@ -138,21 +107,7 @@ export function SendConfirm({
       />
 
       <AnimatePresence mode="wait">
-        {/* Cross-chain funding takes over the whole surface once started: it
-            has its own connect / balance / confirm / bridging states. */}
-        {bridgeIntent && (
-          <motion.div key="bridge" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
-            <CrossChainBridge intentId={bridgeIntent.id} intent={bridgeIntent} />
-            <button
-              onClick={() => setBridgeIntent(null)}
-              className="w-full py-3 border border-border text-ink-dim hover:text-ink transition-colors font-mono text-sm"
-            >
-              ← Pay from Arc instead
-            </button>
-          </motion.div>
-        )}
-
-        {!bridgeIntent && step === "confirm" && (
+        {step === "confirm" && (
           <motion.div
             key="confirm"
             initial={{ opacity: 0, y: 12 }}
@@ -179,25 +134,6 @@ export function SendConfirm({
               recipientCurrency={recipientCurrency}
               recipientAmount={amount}
             />
-
-            {/* Fund this send from another chain — same flow the payment-link
-                checkout offers, so a payer holding USDC on Solana can pay an
-                Arc recipient straight from /send. */}
-            <button
-              type="button"
-              onClick={startCrossChain}
-              disabled={bridgeBusy}
-              className="w-full flex flex-col items-center gap-1 py-3.5 px-4 border border-signal/40 bg-signal/5
-                         hover:bg-signal/10 hover:border-signal/60 transition-colors disabled:opacity-50"
-            >
-              <span className="flex items-center gap-2 text-signal font-mono text-sm">
-                <span aria-hidden className="text-base leading-none">⇄</span>
-                {bridgeBusy ? "Preparing…" : "Pay with USDC from another chain"}
-              </span>
-              <span className="text-ink-dim text-[11px] font-mono tracking-wide">
-                Solana · Base · Polygon
-              </span>
-            </button>
 
             <div className="flex gap-3">
               <button

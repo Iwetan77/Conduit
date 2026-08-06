@@ -16,6 +16,7 @@ import { PayConfirm } from "@/components/PayFlow/PayConfirm";
 import { SettlementIntentPay } from "@/components/PayFlow/SettlementIntentPay";
 import { PaymentLinkPay } from "@/components/PayFlow/PaymentLinkPay";
 import { Logo, Wordmark } from "@/components/Shared/Logo";
+import { CHECKOUT_SETTLED_EVENT } from "@/lib/checkout-events";
 import { motion } from "framer-motion";
 
 // A payer looking at a bare hex address won't pay; the business name is
@@ -38,6 +39,59 @@ function useRecipientTitle(intentId: string) {
   }, [intent?.display_name]);
 }
 
+// When the hosted checkout is opened inside the Conduit inline popup
+// (conduit.js, ?embed=1), it has no way to know the payment finished — the
+// settlement is driven by components deep in the tree. This bridges that: it
+// polls the public intent status and postMessages the parent window when it
+// flips to "settled", which is what conduit.js listens for to fire onSuccess.
+// Read-only status, non-sensitive, so "*" targetOrigin is fine (the popup
+// validates our origin on its end).
+function EmbedBridge({ intentId }: { intentId: string }) {
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (new URLSearchParams(window.location.search).get("embed") !== "1") return;
+    const parent = window.parent;
+    if (!parent || parent === window) return;
+
+    const post = (status: string) =>
+      parent.postMessage({ type: "conduit:checkout", status, intent: intentId }, "*");
+
+    post("loaded");
+    let done = false;
+    const settle = () => {
+      if (done) return;
+      done = true;
+      post("settled");
+      clearInterval(timer);
+      window.removeEventListener(CHECKOUT_SETTLED_EVENT, onInPage);
+    };
+
+    // Instant path: direct and cross-currency pays settle in THIS browser, so
+    // the pay component fires this the moment it's done — no poll-interval wait.
+    const onInPage = (e: Event) => {
+      if ((e as CustomEvent<{ intentId: string }>).detail?.intentId === intentId) settle();
+    };
+    window.addEventListener(CHECKOUT_SETTLED_EVENT, onInPage);
+
+    // Fallback + the ONLY signal for cross-chain (settled server-side): poll.
+    const timer = setInterval(async () => {
+      try {
+        const { getPublicSettlementIntent } = await import("@/lib/conduit-api");
+        const fresh = await getPublicSettlementIntent(intentId);
+        if (fresh.status === "settled") settle();
+      } catch {
+        // transient — keep polling
+      }
+    }, 2500);
+
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener(CHECKOUT_SETTLED_EVENT, onInPage);
+    };
+  }, [intentId]);
+  return null;
+}
+
 export function PayPageClient({ declarationId }: { declarationId: string }) {
   const isSettlementIntent = declarationId.startsWith("si_");
   const isPaymentLink = declarationId.startsWith("pl_");
@@ -57,6 +111,7 @@ export function PayPageClient({ declarationId }: { declarationId: string }) {
           <Logo size="sm" />
         </header>
         <main className="flex-1 max-w-sm mx-auto w-full px-4 py-8 space-y-8">
+          {isSettlementIntent && <EmbedBridge intentId={declarationId} />}
           {isPaymentLink ? (
             <PaymentLinkPay key={declarationId} linkId={declarationId} />
           ) : (

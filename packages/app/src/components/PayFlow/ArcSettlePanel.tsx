@@ -98,6 +98,10 @@ export function ArcSettlePanel({
         });
         setReceipt(result);
         setStep("success");
+        if (intentIdRef.current) {
+          const { emitCheckoutSettled } = await import("@/lib/checkout-events");
+          emitCheckoutSettled(intentIdRef.current);
+        }
         return;
       }
 
@@ -111,6 +115,10 @@ export function ArcSettlePanel({
       setFxPaid(formatAmountRaw(BigInt(res.payAmount), currencyDecimals(payerCurrency)));
       setFxDone(true);
       setStep("success");
+      if (intentIdRef.current) {
+        const { emitCheckoutSettled } = await import("@/lib/checkout-events");
+        emitCheckoutSettled(intentIdRef.current);
+      }
     } catch (err) {
       const { formatTxError } = await import("@/lib/tx-errors");
       setTxError(formatTxError(err));

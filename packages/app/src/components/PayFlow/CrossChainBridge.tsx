@@ -32,10 +32,12 @@ import {
   planAllocations,
   usdcMinorToHuman,
   usdcDisplay,
+  chainLabel,
+  chainToSourceSlug,
+  fundedChains,
   type PayerAdapter,
   type UnifiedUsdc,
 } from "@/lib/unified-balance";
-import { formatAmountRaw } from "@/lib/format";
 
 interface CrossChainBridgeProps {
   intentId: string;
@@ -62,6 +64,10 @@ export function CrossChainBridge({ intentId, intent }: CrossChainBridgeProps) {
   const [requiredUSDC, setRequiredUSDC] = useState<string | null>(null);
   const [recipient, setRecipient] = useState<string | null>(null);
   const [intentStatus, setIntentStatus] = useState(intent.status);
+  // Which chain the payer pays from. The spend draws from ONE chain, so this is
+  // a real choice, not a display detail — defaulted to the richest funded chain
+  // and overridable whenever more than one can cover the amount.
+  const [sourceChain, setSourceChain] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [mintTx, setMintTx] = useState("");
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -148,7 +154,11 @@ export function CrossChainBridge({ intentId, intent }: CrossChainBridgeProps) {
       setUnified(bal);
 
       const need = BigInt(plan.required_usdc);
-      if (planAllocations(bal, need)) {
+      // Default to the richest chain that can cover this on its own — that's
+      // the one the spend would actually succeed from.
+      const payable = fundedChains(bal).find((c) => c.minor >= need);
+      setSourceChain(payable?.chain ?? null);
+      if (payable || planAllocations(bal, need)) {
         setPhase("confirm");
       } else {
         setPhase("insufficient");
@@ -173,14 +183,18 @@ export function CrossChainBridge({ intentId, intent }: CrossChainBridgeProps) {
     setPhase("spending");
     try {
       const need = BigInt(requiredUSDC);
-      const plan = planAllocations(unified, need);
-      if (!plan) throw new Error("Balance changed — not enough USDC across your chains.");
+      // Honour the payer's chosen chain; fall back to the greedy plan only when
+      // nothing was picked (single-chain case).
+      const chosen = sourceChain
+        ? { allocations: [{ chain: sourceChain, amountMinor: need }], primary: chainToSourceSlug(sourceChain) }
+        : planAllocations(unified, need);
+      if (!chosen?.primary) throw new Error("Balance changed — not enough USDC across your chains.");
 
       const result = await spendUsdcToArc({
         payer: adapter,
         amountMinor: need,
         recipientAddress: recipient,
-        allocations: plan.allocations,
+        allocations: chosen.allocations,
       });
 
       // Hand the Gateway transfer id to the server; it polls the mint and runs
@@ -188,7 +202,7 @@ export function CrossChainBridge({ intentId, intent }: CrossChainBridgeProps) {
       if (result.transferId) {
         await reportBridgeSpend(intentId, {
           gateway_transfer_id: result.transferId,
-          source_chain: plan.primary,
+          source_chain: chosen.primary,
           usdc_amount: requiredUSDC,
         });
       }
@@ -253,9 +267,19 @@ export function CrossChainBridge({ intentId, intent }: CrossChainBridgeProps) {
           </span>
         </div>
         <p className="text-danger text-sm">
-          You need {formatAmountRaw(BigInt(requiredUSDC ?? "0"), 6)} USDC, but Conduit found only{" "}
-          {unified?.totalConfirmed ?? "0"} across your chains. Add USDC and try again.
+          You need {usdcDisplay(BigInt(requiredUSDC ?? "0"))} USDC, but Conduit found only{" "}
+          {usdcDisplay(
+            (unified ? fundedChains(unified) : []).reduce((sum, c) => sum + c.minor, 0n)
+          )}{" "}
+          USDC across your chains. Add USDC and try again.
         </p>
+        {unified && fundedChains(unified).length > 0 && (
+          <p className="text-ink-dim text-xs font-mono">
+            {fundedChains(unified)
+              .map((c) => `${chainLabel(c.chain)} ${usdcDisplay(c.minor)}`)
+              .join(" · ")}
+          </p>
+        )}
         <button
           onClick={() => setPhase("choose_source")}
           className="text-xs font-mono text-ink-dim hover:text-ink"
@@ -267,6 +291,8 @@ export function CrossChainBridge({ intentId, intent }: CrossChainBridgeProps) {
   }
 
   if (phase === "confirm") {
+    const funded = unified ? fundedChains(unified) : [];
+    const need = BigInt(requiredUSDC ?? "0");
     return (
       <div className="space-y-4">
         <div className="inline-flex items-center gap-2 px-3 py-1.5 border border-border bg-surface">
@@ -281,12 +307,52 @@ export function CrossChainBridge({ intentId, intent }: CrossChainBridgeProps) {
           <p className="text-ink font-mono text-xl">
             {usdcDisplay(BigInt(requiredUSDC ?? "0"))} USDC
           </p>
-          {unified && (
+          {funded.length === 1 && (
             <p className="text-ink-dim text-xs font-mono">
-              from your unified balance ({unified.byChain.map((c) => `${c.confirmed} on ${c.chain}`).join(", ") || "—"})
+              from {chainLabel(funded[0].chain)} · {usdcDisplay(funded[0].minor)} USDC available
             </p>
           )}
         </div>
+
+        {/* More than one funded chain — let the payer choose, rather than
+            silently spending from whichever happened to sort first. Chains that
+            can't cover the amount on their own are shown but not selectable:
+            the spend draws from a single chain, so an under-funded one would
+            fail at signing time. */}
+        {funded.length > 1 && (
+          <div className="space-y-2">
+            <p className="text-ink-dim text-xs uppercase tracking-wider font-mono">Pay from</p>
+            {funded.map((c) => {
+              const enough = c.minor >= need;
+              const active = c.chain === sourceChain;
+              return (
+                <button
+                  key={c.chain}
+                  onClick={() => enough && setSourceChain(c.chain)}
+                  disabled={!enough}
+                  className={`w-full flex items-center justify-between px-4 py-3 border font-mono text-sm
+                    transition-colors ${
+                      active
+                        ? "border-signal bg-signal/10 text-ink"
+                        : enough
+                          ? "border-border text-ink hover:border-signal/40"
+                          : "border-border text-ink-dim opacity-50 cursor-not-allowed"
+                    }`}
+                >
+                  <span className="flex items-center gap-2">
+                    <span
+                      className={`w-1.5 h-1.5 ${active ? "bg-signal" : "bg-transparent border border-ink-dim"}`}
+                    />
+                    {chainLabel(c.chain)}
+                  </span>
+                  <span className={active ? "text-ink" : "text-ink-dim"}>
+                    {usdcDisplay(c.minor)} USDC
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
         <p className="text-ink-dim text-xs">
           Your USDC moves to Arc, then converts to {intent.settle_currency} and settles to the recipient.
         </p>

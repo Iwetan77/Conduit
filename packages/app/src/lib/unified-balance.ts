@@ -108,13 +108,50 @@ async function context() {
 // 6 decimals because Circle's SDK needs that exact precision -- but showing a
 // payer "Pay 5.000000 USDC" is machine output, not money. This trims to 2
 // decimals (keeping more only when the amount genuinely has them).
+// Human amount with NO trailing-zero noise: 5 USDC reads "5", not "5.00" or
+// "5.000000". Padding a whole number out to decimals it doesn't have made a
+// simple payment look like a machine dump; a payer reads "5" the way they'd
+// read a price tag. Fractions keep exactly the digits they need ("5.25",
+// "0.000001").
 export function usdcDisplay(minor: bigint): string {
-  const full = usdcMinorToHuman(minor);
-  const [whole, frac = ""] = full.split(".");
+  const [whole, frac = ""] = usdcMinorToHuman(minor).split(".");
   const trimmed = frac.replace(/0+$/, "");
-  if (trimmed.length === 0) return `${whole}.00`;
-  if (trimmed.length === 1) return `${whole}.${trimmed}0`;
-  return `${whole}.${trimmed}`;
+  return trimmed.length === 0 ? whole : `${whole}.${trimmed}`;
+}
+
+// Human-readable chain names. The SDK's identifiers ("Polygon_Amoy_Testnet")
+// are correct but unreadable in a sentence a payer is meant to act on.
+const CHAIN_LABELS: Record<string, string> = {
+  [SOURCE_CHAINS.solana]: "Solana",
+  [SOURCE_CHAINS.base]: "Base",
+  [SOURCE_CHAINS.polygon]: "Polygon",
+  [SOURCE_CHAINS.ethereum]: "Ethereum",
+  [SOURCE_CHAINS.avalanche]: "Avalanche",
+  [SOURCE_CHAINS.optimism]: "Optimism",
+  [SOURCE_CHAINS.arbitrum]: "Arbitrum",
+  [SOURCE_CHAINS.unichain]: "Unichain",
+  [SOURCE_CHAINS.sonic]: "Sonic",
+  [SOURCE_CHAINS.worldchain]: "World Chain",
+  [SOURCE_CHAINS.sei]: "Sei",
+  [SOURCE_CHAINS.hyperevm]: "HyperEVM",
+  Arc_Testnet: "Arc",
+};
+
+export function chainLabel(chain: string): string {
+  return (
+    CHAIN_LABELS[chain] ??
+    chain.replace(/_(Sepolia|Devnet|Testnet|Fuji|Amoy(_Testnet)?)$/i, "").replace(/_/g, " ")
+  );
+}
+
+// The payer's funded chains only, richest first. Zero-balance chains are noise:
+// listing every supported chain (mostly "0.000000 on …") buried the one or two
+// that actually matter.
+export function fundedChains(unified: UnifiedUsdc): Array<{ chain: string; minor: bigint }> {
+  return unified.byChain
+    .map((c) => ({ chain: c.chain, minor: usdcHumanToMinor(c.confirmed) }))
+    .filter((c) => c.minor > 0n && chainToSourceSlug(c.chain) !== null)
+    .sort((a, b) => (b.minor > a.minor ? 1 : -1));
 }
 
 export function usdcMinorToHuman(minor: bigint): string {

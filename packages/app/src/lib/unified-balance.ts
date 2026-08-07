@@ -240,6 +240,23 @@ export async function getWalletUsdc(payer: PayerAdapter): Promise<ChainUsdc[]> {
 // definitions (resolveChainIdentifier -> { usdcAddress, rpcEndpoints }), never a
 // hardcoded table -- a wrong hardcoded token address would silently report the
 // wrong balance, which is worse than reporting none.
+// Extra RPC endpoints, appended AFTER the SDK's own. The SDK ships exactly one
+// endpoint per chain, so without these a single unreachable or CORS-refusing
+// host means that chain reads as empty and the payer is told they have no USDC
+// on a chain they're actually funded on (measured: the SDK's Polygon Amoy
+// endpoint already fails). Only RPC URLs are listed here, never token
+// addresses -- a bad RPC fails closed and falls through, whereas a bad token
+// address would confidently report a wrong balance.
+const BACKUP_RPCS: Record<string, string[]> = {
+  [SOURCE_CHAINS.base]: ["https://base-sepolia-rpc.publicnode.com"],
+  [SOURCE_CHAINS.polygon]: ["https://polygon-amoy-bor-rpc.publicnode.com"],
+  [SOURCE_CHAINS.ethereum]: ["https://rpc.sepolia.org"],
+  [SOURCE_CHAINS.avalanche]: ["https://avalanche-fuji-c-chain-rpc.publicnode.com"],
+  [SOURCE_CHAINS.optimism]: ["https://optimism-sepolia-rpc.publicnode.com"],
+  [SOURCE_CHAINS.arbitrum]: ["https://arbitrum-sepolia-rpc.publicnode.com"],
+  [SOURCE_CHAINS.unichain]: ["https://unichain-sepolia-rpc.publicnode.com"],
+};
+
 async function getEvmWalletUsdc(address: string): Promise<ChainUsdc[]> {
   const { resolveChainIdentifier } = await import("@circle-fin/unified-balance-kit");
 
@@ -252,8 +269,10 @@ async function getEvmWalletUsdc(address: string): Promise<ChainUsdc[]> {
           usdcAddress?: string | null;
           rpcEndpoints?: readonly string[];
         };
-        if (def?.type !== "evm" || !def.usdcAddress || !def.rpcEndpoints?.length) return null;
-        const minor = await erc20BalanceOfAnyRpc(def.rpcEndpoints, def.usdcAddress, address);
+        if (def?.type !== "evm" || !def.usdcAddress) return null;
+        const endpoints = [...(def.rpcEndpoints ?? []), ...(BACKUP_RPCS[chainId] ?? [])];
+        if (!endpoints.length) return null;
+        const minor = await erc20BalanceOfAnyRpc(endpoints, def.usdcAddress, address);
         return minor > 0n ? { chain: chainId, confirmed: usdcMinorToHuman(minor) } : null;
       } catch {
         // One unreachable/rate-limited public RPC must not zero out the payer's

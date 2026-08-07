@@ -74,6 +74,13 @@ export interface PayerAdapter {
   address: string;
   /** "evm" adapters can source from every EVM chain; "solana" only Solana. */
   family: "evm" | "solana";
+  /**
+   * The raw EIP-1193 provider this adapter was built over. Kept because
+   * depositing from a given EVM chain requires the WALLET to be on that chain
+   * (viem rejects it otherwise: "chainId should be same as current chainId"),
+   * and switching networks needs the provider, not the SDK adapter.
+   */
+  provider?: unknown;
 }
 
 export interface ChainUsdc {
@@ -178,7 +185,62 @@ export async function buildEvmAdapter(provider: unknown, address: string): Promi
   const adapter = await createViemAdapterFromProvider({
     provider: provider as never,
   });
-  return { adapter, address, family: "evm" };
+  return { adapter, address, family: "evm", provider };
+}
+
+// Put the wallet on `chain` before we try to deposit from it.
+//
+// Circle's viem adapter builds the Gateway deposit against whatever network the
+// wallet is CURRENTLY on, so paying with USDC held on Polygon while the wallet
+// sits on Arc (which is where a payer on the checkout normally is) failed with
+// "chainId should be same as current chainId" — the payer had the funds, on the
+// chain they picked, and still couldn't pay. Nothing in the flow switched
+// networks, so this does.
+export async function ensureEvmChain(provider: unknown, chain: string): Promise<void> {
+  const p = provider as {
+    request?: (args: { method: string; params?: unknown[] }) => Promise<unknown>;
+  };
+  if (!p?.request) return;
+
+  const { resolveChainIdentifier } = await import("@circle-fin/unified-balance-kit");
+  const def = resolveChainIdentifier(chain as never) as unknown as {
+    type?: string;
+    chainId?: number;
+    name?: string;
+    rpcEndpoints?: readonly string[];
+    explorerUrl?: string;
+    nativeCurrency?: { name?: string; symbol?: string; decimals?: number };
+  };
+  if (def?.type !== "evm" || typeof def.chainId !== "number") return;
+
+  const wanted = `0x${def.chainId.toString(16)}`;
+  const current = (await p.request({ method: "eth_chainId" }).catch(() => null)) as string | null;
+  if (current && current.toLowerCase() === wanted.toLowerCase()) return;
+
+  try {
+    await p.request({ method: "wallet_switchEthereumChain", params: [{ chainId: wanted }] });
+  } catch (err) {
+    // 4902 = the wallet doesn't know this network yet. Add it, then it's
+    // switched to as part of the add on every wallet that implements this.
+    const code = (err as { code?: number })?.code;
+    if (code !== 4902) throw err;
+    await p.request({
+      method: "wallet_addEthereumChain",
+      params: [
+        {
+          chainId: wanted,
+          chainName: def.name ?? chain,
+          rpcUrls: [...(def.rpcEndpoints ?? []), ...(BACKUP_RPCS[chain] ?? [])],
+          nativeCurrency: {
+            name: def.nativeCurrency?.name ?? "Ether",
+            symbol: def.nativeCurrency?.symbol ?? "ETH",
+            decimals: def.nativeCurrency?.decimals ?? 18,
+          },
+          blockExplorerUrls: def.explorerUrl ? [def.explorerUrl.replace(/\/tx\/.*$/, "")] : undefined,
+        },
+      ],
+    });
+  }
 }
 
 // Build a UBK adapter over Phantom (window.solana). This is what finally makes

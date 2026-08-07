@@ -24,6 +24,7 @@ import {
 } from "@/lib/conduit-api";
 import {
   buildEvmAdapter,
+  ensureEvmChain,
   buildSolanaAdapter,
   getUnifiedUsdc,
   getWalletUsdc,
@@ -68,6 +69,9 @@ export function CrossChainBridge({ intentId, intent }: CrossChainBridgeProps) {
   // a real choice, not a display detail — defaulted to the richest funded chain
   // and overridable whenever more than one can cover the amount.
   const [sourceChain, setSourceChain] = useState<string | null>(null);
+  // What the wallet is being asked to do right now (e.g. approve a network
+  // switch), so the spinner isn't silent while a wallet prompt is waiting.
+  const [fxNote, setFxNote] = useState("");
   const [error, setError] = useState("");
   const [mintTx, setMintTx] = useState("");
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -190,8 +194,22 @@ export function CrossChainBridge({ intentId, intent }: CrossChainBridgeProps) {
         : planAllocations(unified, need);
       if (!chosen?.primary) throw new Error("Balance changed — not enough USDC across your chains.");
 
+      // Depositing from an EVM chain requires the wallet to BE on that chain —
+      // the payer is normally sitting on Arc, so without this the SDK rejects
+      // the deposit ("chainId should be same as current chainId"). Switch, then
+      // rebuild the adapter so it's bound to the network we just moved to.
+      let payer = adapter;
+      const sourceChainId = chosen.allocations[0]?.chain;
+      if (payer.family === "evm" && sourceChainId) {
+        setFxNote(`Switch to ${chainLabel(sourceChainId)} in your wallet…`);
+        await ensureEvmChain(payer.provider, sourceChainId);
+        payer = await buildEvmAdapter(payer.provider, payer.address);
+        setAdapter(payer);
+        setFxNote("");
+      }
+
       const result = await spendUsdcToArc({
-        payer: adapter,
+        payer,
         amountMinor: need,
         recipientAddress: recipient,
         allocations: chosen.allocations,
@@ -371,7 +389,7 @@ export function CrossChainBridge({ intentId, intent }: CrossChainBridgeProps) {
     return (
       <div className="text-center py-8 space-y-3">
         <div className="w-10 h-10 border-2 border-signal border-t-transparent animate-spin mx-auto" />
-        <p className="text-ink font-mono text-sm">Confirm in your wallet…</p>
+        <p className="text-ink font-mono text-sm">{fxNote || "Confirm in your wallet…"}</p>
       </div>
     );
   }

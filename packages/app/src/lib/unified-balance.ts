@@ -204,10 +204,10 @@ const SOLANA_DEVNET_USDC_MINT = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
 // spendUsdcToArc() deposits from the wallet on demand, this wallet balance is
 // genuinely spendable; without counting it, a payer who just holds USDC in
 // Phantom (nothing deposited yet) is wrongly told "insufficient" before the
-// deposit step ever runs -- the exact "found 0.000" bug. Solana only for now
-// (the tested cross-chain path); EVM source chains are a follow-up.
+// deposit step ever runs -- the exact "found 0.000" bug. Covers BOTH families:
+// Solana below, every EVM source chain via getEvmWalletUsdc.
 export async function getWalletUsdc(payer: PayerAdapter): Promise<ChainUsdc[]> {
-  if (payer.family !== "solana") return [];
+  if (payer.family === "evm") return getEvmWalletUsdc(payer.address);
   try {
     const { Connection, PublicKey } = await import("@solana/web3.js");
     const conn = new Connection("https://api.devnet.solana.com", "confirmed");
@@ -226,6 +226,96 @@ export async function getWalletUsdc(payer: PayerAdapter): Promise<ChainUsdc[]> {
     // A wallet-balance read failure must not block: fall back to whatever
     // getUnifiedUsdc found. Worst case the payer sees the old behaviour.
     return [];
+  }
+}
+
+// The EVM half of getWalletUsdc. An EVM payer holding USDC on Base (or any
+// other supported source chain) but who has never deposited into Circle Gateway
+// was shown "0.00 USDC" and could not pay at all -- getUnifiedUsdc reports only
+// DEPOSITED balance, and this function used to bail out for every non-Solana
+// wallet ("EVM source chains are a follow-up"). Since spendUsdcToArc deposits on
+// demand, that wallet balance is genuinely spendable, so it has to be counted.
+//
+// The USDC address and RPC for each chain come from the SDK's own chain
+// definitions (resolveChainIdentifier -> { usdcAddress, rpcEndpoints }), never a
+// hardcoded table -- a wrong hardcoded token address would silently report the
+// wrong balance, which is worse than reporting none.
+async function getEvmWalletUsdc(address: string): Promise<ChainUsdc[]> {
+  const { resolveChainIdentifier } = await import("@circle-fin/unified-balance-kit");
+
+  const evmChains = Object.entries(SOURCE_CHAINS).filter(([slug]) => slug !== "solana");
+  const results = await Promise.all(
+    evmChains.map(async ([, chainId]): Promise<ChainUsdc | null> => {
+      try {
+        const def = resolveChainIdentifier(chainId) as unknown as {
+          type?: string;
+          usdcAddress?: string | null;
+          rpcEndpoints?: readonly string[];
+        };
+        if (def?.type !== "evm" || !def.usdcAddress || !def.rpcEndpoints?.length) return null;
+        const minor = await erc20BalanceOfAnyRpc(def.rpcEndpoints, def.usdcAddress, address);
+        return minor > 0n ? { chain: chainId, confirmed: usdcMinorToHuman(minor) } : null;
+      } catch {
+        // One unreachable/rate-limited public RPC must not zero out the payer's
+        // whole balance view -- skip that chain and keep the others.
+        return null;
+      }
+    })
+  );
+  return results.filter((r): r is ChainUsdc => r !== null);
+}
+
+// Try each of a chain's RPC endpoints until one answers. These are public
+// endpoints called straight from the browser, so the first one can fail for
+// reasons that have nothing to do with the payer -- rate limiting, or no CORS
+// headers at all. Falling back through the list means one unfriendly primary
+// endpoint doesn't report a funded chain as empty.
+async function erc20BalanceOfAnyRpc(
+  rpcUrls: readonly string[],
+  token: string,
+  owner: string
+): Promise<bigint> {
+  for (const url of rpcUrls) {
+    try {
+      return await erc20BalanceOf(url, token, owner);
+    } catch {
+      // try the next endpoint
+    }
+  }
+  return 0n;
+}
+
+// Minimal ERC-20 balanceOf via raw JSON-RPC. Deliberately not viem/ethers: this
+// runs against a dozen public testnet RPCs whose chain configs we don't control,
+// and a plain eth_call needs no per-chain client setup.
+async function erc20BalanceOf(rpcUrl: string, token: string, owner: string): Promise<bigint> {
+  // balanceOf(address) selector + 32-byte left-padded owner address.
+  const data = "0x70a08231" + owner.replace(/^0x/, "").toLowerCase().padStart(64, "0");
+  // A hanging RPC must not stall the balance screen behind it.
+  const abort = new AbortController();
+  const timeout = setTimeout(() => abort.abort(), 6000);
+  try {
+    const res = await fetch(rpcUrl, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "eth_call",
+        params: [{ to: token, data }, "latest"],
+      }),
+      signal: abort.signal,
+    });
+    // Throw rather than return 0 on a transport/RPC failure: a failed call and
+    // a genuine zero balance are completely different answers, and only the
+    // former should fall through to the next endpoint.
+    if (!res.ok) throw new Error(`rpc ${res.status}`);
+    const json = (await res.json()) as { result?: string; error?: { message?: string } };
+    if (json.error) throw new Error(json.error.message ?? "rpc error");
+    if (!json.result || json.result === "0x") return 0n;
+    return BigInt(json.result);
+  } finally {
+    clearTimeout(timeout);
   }
 }
 

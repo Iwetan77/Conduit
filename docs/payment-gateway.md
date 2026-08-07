@@ -36,10 +36,23 @@ curl -s -X POST https://conduit-z56x.onrender.com/v1/settlement_intents \
     "amount": 7000000,
     "settle_currency": "USD",
     "settle_address": "0xYourMerchantWallet",
+    "return_url": "https://yourstore.com/thank-you",
     "reference": "order_1481",
     "metadata": { "order_id": "1481" }
   }'
 ```
+
+**Always set `return_url`** — it's what makes mobile work. On a phone, and
+always inside a wallet's in-app browser (MetaMask, Solflare), the checkout
+replaces your page instead of opening a tab, so it needs somewhere to send the
+buyer afterwards. Conduit returns them to that URL with
+`?conduit_intent=si_…&conduit_status=settled`. Treat those params as a hint
+only and confirm the charge server-side (webhook, or `GET
+/v1/settlement_intents/{id}`) before showing a receipt.
+
+It's accepted **only here**, on the authenticated `sk_` call — never from the
+browser. A browser-supplied return URL would let anyone craft a checkout link
+that sent your paying buyers to a phishing page.
 
 `amount` is always in **minor units** (integer, never a float): `7000000` = 7.00
 USD at USDC's 6 decimals. See [Currencies](./currencies.md) for each currency's
@@ -105,14 +118,23 @@ navigates it once the charge exists. This matters — a `window.open` that runs
 - `onError(e)` — called if `createCharge` throws.
 - `onLoad(r)` — optional; the checkout finished loading.
 
-**Why a new tab, not an iframe or a small popup window:** the checkout needs a
-real wallet — Google/Privy sign-in, browser wallet extensions, and cross-chain
-signing. A cross-origin iframe blocks all of those (third-party cookies, OAuth
-popups, extension injection). A chrome-less popup window is nearly as bad:
-wallet extensions route their approval UI and OAuth redirects differently there,
-so Solflare/Phantom `connect()` hangs and the injected-wallet path renders
-blank. A plain tab is an ordinary top-level page, so every wallet path behaves
-exactly as it does when you open the hosted checkout directly.
+**Desktop opens a tab; mobile redirects in place.** `conduit.js` picks
+automatically, and you don't configure anything beyond `return_url`:
+
+- **Desktop** → a new tab. The checkout needs a real wallet (Google/Privy
+  sign-in, browser extensions, cross-chain signing). A cross-origin iframe
+  blocks all of those, and a chrome-less popup window is nearly as bad —
+  extensions route their approval UI differently there, so Solflare/Phantom
+  `connect()` hangs and the injected-wallet path renders blank. A plain tab is
+  an ordinary top-level page, so every wallet path just works.
+- **Mobile, and any wallet in-app browser** (MetaMask, Solflare, Phantom,
+  Trust, Coinbase Wallet) → the checkout **replaces your page**. Those browsers
+  can't open a usable second tab at all: you get a blank white page that never
+  loads. The buyer pays, then Conduit returns them to your `return_url`. This is
+  why `return_url` isn't optional in practice.
+
+In redirect mode your page is unloaded, so `onSuccess` never fires — detect the
+return via the `conduit_intent` query param (and confirm server-side).
 
 The tab and your page talk over `postMessage` scoped strictly to the checkout's
 own origin, so a page can't forge a `settled`. `onSuccess` is a UX convenience —

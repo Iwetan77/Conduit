@@ -9,6 +9,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/kzn-labs/conduit/api/internal/auth"
@@ -24,6 +28,10 @@ type SettlementIntents struct {
 	StableFX   *fx.StableFXProvider
 	AppBaseURL string
 	Webhooks   *webhooks.Dispatcher
+	// ArcRPC is used by RecordDirectSettlement to fetch a same-currency
+	// payment's tx receipt and verify on-chain that the settle token actually
+	// reached the merchant — the record endpoint never trusts the caller's word.
+	ArcRPC string
 }
 
 type createIntentRequest struct {
@@ -748,6 +756,175 @@ func (h *SettlementIntents) Confirm(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, confirmResponse{Status: "settled", TxHash: makerTxHash})
+}
+
+// erc20TransferTopic is keccak256("Transfer(address,address,uint256)") — the
+// topic[0] of every ERC-20 Transfer log. RecordDirectSettlement scans for one
+// of these paying the settle token to the merchant.
+var erc20TransferTopic = crypto.Keccak256Hash([]byte("Transfer(address,address,uint256)"))
+
+type recordSettlementRequest struct {
+	TxHash string `json:"tx_hash"`
+}
+
+// RecordDirectSettlement is POST /v1/settlement_intents/:id/record — the
+// missing server-side recording for SAME-CURRENCY direct pays.
+//
+// Why this exists: a same-currency pay (USD merchant, USDC payer) settles
+// straight on-chain via ConduitRouter in the payer's browser (see
+// ArcSettlePanel). The money moves and PaymentSettled fires, but nothing on
+// the server ever marked the intent settled: the indexer keys off
+// settlement_intents.declaration_id, which the API never writes, so it's always
+// NULL and never matches. Cross-currency (/confirm) and cross-chain (bridge)
+// both record their own settlement server-side; this closes the same gap for
+// the direct path, so the gateway's most common case actually fires a webhook
+// and flips the merchant's checkout to "payment received".
+//
+// Unauthenticated, exactly like quote/prepare/confirm: a payer opening a
+// hosted checkout or QR has no API key, and the intent id is the capability.
+// It moves no money and grants no cross-account read. The report is never
+// trusted — we fetch the tx receipt from Arc and verify the settle token
+// actually reached the merchant's settle_address for at least the intent
+// amount before recording anything. Idempotent on (tx_hash, log_index).
+func (h *SettlementIntents) RecordDirectSettlement(w http.ResponseWriter, r *http.Request) {
+	id := pathParam(r, "id")
+	ctx := r.Context()
+
+	var req recordSettlementRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, apierrors.E(apierrors.CodeInvalidRequest, "tx_hash"))
+		return
+	}
+	txHash := strings.TrimSpace(req.TxHash)
+	if !strings.HasPrefix(txHash, "0x") || len(txHash) != 66 {
+		writeErr(w, apierrors.E(apierrors.CodeInvalidRequest, "tx_hash"))
+		return
+	}
+
+	var accountID, amountStr, settleISO, settleAddress, status string
+	err := h.Pool.QueryRow(ctx,
+		`SELECT account_id, amount::text, settle_currency, settle_address, status FROM settlement_intents WHERE id = $1`, id,
+	).Scan(&accountID, &amountStr, &settleISO, &settleAddress, &status)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			writeErr(w, apierrors.E(apierrors.CodeNotFound, "id"))
+			return
+		}
+		writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
+		return
+	}
+	if status == "settled" {
+		// Already recorded (a retried report, or the indexer beat us). Report
+		// success rather than erroring so the payer surface never sees a spurious
+		// failure after the money has already landed.
+		writeJSON(w, http.StatusOK, confirmResponse{Status: "settled", TxHash: txHash})
+		return
+	}
+
+	settleInfo, ok := currency.ByISO(settleISO)
+	if !ok {
+		writeErr(w, apierrors.E(apierrors.CodeCurrencyNotSupported, "settle_currency"))
+		return
+	}
+	amount, ok := new(big.Int).SetString(amountStr, 10)
+	if !ok {
+		writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
+		return
+	}
+
+	if h.ArcRPC == "" {
+		writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
+		return
+	}
+	client, err := ethclient.DialContext(ctx, h.ArcRPC)
+	if err != nil {
+		writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
+		return
+	}
+	defer client.Close()
+
+	receipt, err := client.TransactionReceipt(ctx, common.HexToHash(txHash))
+	if err != nil {
+		// Not mined / unknown hash — the caller reported a tx we can't see.
+		writeErr(w, apierrors.E(apierrors.CodeInvalidRequest, "tx_hash not found"))
+		return
+	}
+	if receipt.Status != types.ReceiptStatusSuccessful {
+		writeErr(w, apierrors.E(apierrors.CodeInvalidRequest, "tx reverted"))
+		return
+	}
+
+	// The only thing that makes this intent settled: an on-chain ERC-20
+	// Transfer of the settle token, to the merchant's settle_address, for at
+	// least the intent amount, inside the reported tx. We verify that directly
+	// rather than trusting a PaymentSettled event (which would tie this to the
+	// router address, unset in prod) — reaching the merchant's wallet is the
+	// fact the merchant is paid on.
+	tokenAddr := common.HexToAddress(settleInfo.Token)
+	settleAddr := common.HexToAddress(settleAddress)
+	var paidAmount *big.Int
+	var matchedLogIndex uint
+	for _, lg := range receipt.Logs {
+		if lg.Address != tokenAddr || len(lg.Topics) != 3 || lg.Topics[0] != erc20TransferTopic {
+			continue
+		}
+		to := common.BytesToAddress(lg.Topics[2].Bytes())
+		if to != settleAddr {
+			continue
+		}
+		value := new(big.Int).SetBytes(lg.Data)
+		if value.Cmp(amount) >= 0 {
+			paidAmount = value
+			matchedLogIndex = lg.Index
+			break
+		}
+	}
+	if paidAmount == nil {
+		writeErr(w, apierrors.E(apierrors.CodeInvalidRequest, "tx does not settle this intent"))
+		return
+	}
+
+	// Idempotent record. The unique (tx_hash, log_index) constraint means a
+	// double report — or the indexer having beaten us — inserts nothing and we
+	// skip the balance_transaction + webhook so neither ever fires twice.
+	settlementID := models.NewID("stl")
+	tag, err := h.Pool.Exec(ctx,
+		`INSERT INTO settlements (id, intent_id, tx_hash, receipt_id, pay_currency, pay_amount, settle_amount, rate_applied, fee, block_number, log_index, settled_at)
+		 VALUES ($1,$2,$3,$3,$4,$5,$6,1,0,$7,$8,now())
+		 ON CONFLICT (tx_hash, log_index) DO NOTHING`,
+		settlementID, id, txHash, settleInfo.Symbol, paidAmount.String(), amountStr,
+		receipt.BlockNumber.Uint64(), matchedLogIndex,
+	)
+	if err != nil {
+		writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
+		return
+	}
+	if tag.RowsAffected() == 0 {
+		writeJSON(w, http.StatusOK, confirmResponse{Status: "settled", TxHash: txHash})
+		return
+	}
+
+	_, _ = h.Pool.Exec(ctx, `UPDATE settlement_intents SET status = 'settled', updated_at = now() WHERE id = $1`, id)
+	_, _ = h.Pool.Exec(ctx,
+		`UPDATE payment_links SET status = 'paid', updated_at = now()
+		 WHERE id = (SELECT payment_link_id FROM settlement_intents WHERE id = $1)
+		   AND status NOT IN ('paid','settled','void')`,
+		id)
+
+	balanceTxID := models.NewID("btx")
+	_, _ = h.Pool.Exec(ctx,
+		`INSERT INTO balance_transactions (id, account_id, settlement_id, type, gross, fee, net, currency)
+		 VALUES ($1,$2,$3,'settlement',$4,0,$4,$5)`,
+		balanceTxID, accountID, settlementID, amountStr, settleInfo.Symbol,
+	)
+
+	if h.Webhooks != nil {
+		_ = h.Webhooks.Enqueue(ctx, accountID, "settlement.succeeded", map[string]any{
+			"intent_id": id, "tx_hash": txHash, "status": "settled",
+		})
+	}
+
+	writeJSON(w, http.StatusOK, confirmResponse{Status: "settled", TxHash: txHash})
 }
 
 func (h *SettlementIntents) toResponse(id, amount, status, settleCurrency, settleAddress string,

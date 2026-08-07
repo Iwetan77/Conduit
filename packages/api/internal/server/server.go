@@ -73,6 +73,7 @@ func New(cfg Config) http.Handler {
 	}
 	intentsH := &handlers.SettlementIntents{Pool: cfg.Pool, StableFX: stableFX, AppBaseURL: cfg.AppBaseURL, Webhooks: dispatcher, ArcRPC: arcRPCForBalances}
 	currenciesH := &handlers.Currencies{}
+	fxRatesH := &handlers.FxRates{StableFX: stableFX}
 	balancesH := &handlers.Balances{ArcRPC: arcRPCForBalances}
 	// Server-side JSON-RPC relay to Arc. The browser points its RPC transport
 	// here so reads and the embedded wallet's broadcast don't hit Arc's
@@ -144,6 +145,11 @@ func New(cfg Config) http.Handler {
 		// "Conduit-Account" header flow) still require an authenticated parent
 		// account key — this only covers creating a brand new top-level account.
 		r.Get("/currencies", currenciesH.List)
+		// Indicative FX rates, no state touched. Public so any payer surface can
+		// show "you'll receive ≈ X" — and whether the pair routes at all, and
+		// whether the amount clears the provider's minimum — BEFORE the payer
+		// commits to a checkout. See handlers.FxRates.
+		r.Get("/fx/rates", fxRatesH.Get)
 		// Public: a payer has no API key, and this is read-only chain data.
 		r.Get("/balances", balancesH.List)
 		// Public JSON-RPC relay to Arc (method-allowlisted, fixed upstream).

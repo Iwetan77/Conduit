@@ -62,41 +62,57 @@ The response carries what the browser needs:
 Return `hosted_url` (and, if you want a QR, `id`) to your page. Never return your
 secret key.
 
-## 2a. Inline popup (same device)
+## 2a. Popup checkout (same device)
 
-Drop the script in, hand it the `hosted_url`, and Conduit opens the checkout in a
-modal iframe over your page. Callbacks fire when the buyer settles or dismisses.
+Drop the script in and Conduit opens the checkout in a **popup window** over your
+page. Callbacks fire when the buyer settles or closes it.
+
+Pass a `createCharge` function rather than a raw URL: `conduit.js` opens the
+window **synchronously inside the click** (before your server call resolves) and
+navigates it once the charge exists. This matters — a `window.open` that runs
+*after* an `await` is blocked by the browser as an unsolicited popup.
 
 ```html
 <script src="https://useconduit-app.vercel.app/conduit.js"></script>
 <script>
-  async function pay() {
-    // Your endpoint calls step 1 with your secret key and returns hosted_url.
-    const res = await fetch("/api/checkout", { method: "POST" });
-    const { hosted_url } = await res.json();
-
+  function pay() {
     Conduit.checkout({
-      url: hosted_url,
-      onSuccess: function (r) {          // r.intent = "si_…"
+      createCharge: async function () {
+        // Your endpoint runs step 1 with your SECRET key, server-side.
+        const res = await fetch("/api/checkout", { method: "POST" });
+        const { hosted_url } = await res.json();
+        return hosted_url;                // (or return the whole { hosted_url })
+      },
+      onSuccess: function (r) {           // r.intent = "si_…"
         window.location = "/thank-you?ref=" + r.intent;
       },
-      onClose: function () {},           // buyer dismissed the popup
+      onClose: function () {},            // buyer closed the window unpaid
+      onError: function (e) {},           // charge creation failed
     });
   }
 </script>
+<button onclick="pay()">Pay with Conduit</button>
 ```
 
 `Conduit.checkout(opts)` accepts:
 
-- `url` — the `hosted_url` your server received. **Required.**
+- `createCharge()` — async, returns the `hosted_url` (or `{ hosted_url }`).
+  **Recommended.** Opens the window in the click, so it's never popup-blocked.
+- `url` — a `hosted_url` you already have. Accepted, but may be popup-blocked if
+  you fetched it via an `await` before calling `checkout`.
 - `onSuccess(r)` — called once the payment settles; `r.intent` is the intent id.
-- `onClose()` — called if the buyer dismisses the popup without paying.
+- `onClose()` — called if the buyer closes the window without paying.
+- `onError(e)` — called if `createCharge` throws.
 - `onLoad(r)` — optional; the checkout finished loading.
 
-The iframe and the script talk over `postMessage` scoped strictly to the
-checkout's own origin, so a page embedding the script can't forge a `settled`.
-`onSuccess` is a UX convenience — treat the **webhook** (below) as the source of
-truth before you release goods.
+**Why a popup window, not an iframe:** the checkout needs a real wallet —
+Google/Privy sign-in, browser wallet extensions, and cross-chain signing.
+Browsers block every one of those inside a cross-origin iframe (third-party
+cookies, OAuth popups, extension injection). A popup is a genuine top-level
+context, so the wallet actually works. The popup and the script talk over
+`postMessage` scoped strictly to the checkout's own origin, so a page can't
+forge a `settled`. `onSuccess` is a UX convenience — treat the **webhook**
+(below) as the source of truth before you release goods.
 
 ## 2b. Scan to pay (buyer's phone)
 

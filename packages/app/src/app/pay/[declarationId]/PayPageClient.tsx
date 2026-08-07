@@ -50,11 +50,16 @@ function EmbedBridge({ intentId }: { intentId: string }) {
   useEffect(() => {
     if (typeof window === "undefined") return;
     if (new URLSearchParams(window.location.search).get("embed") !== "1") return;
-    const parent = window.parent;
-    if (!parent || parent === window) return;
+    // The launcher is window.opener when conduit.js opened us in a popup window
+    // (the real flow — a popup is a top-level context where Google/Privy
+    // sign-in, wallet extensions and cross-chain signing actually work), or
+    // window.parent in the legacy iframe embed. Post to whichever launched us.
+    const target =
+      window.opener || (window.parent && window.parent !== window ? window.parent : null);
+    if (!target) return;
 
     const post = (status: string) =>
-      parent.postMessage({ type: "conduit:checkout", status, intent: intentId }, "*");
+      target.postMessage({ type: "conduit:checkout", status, intent: intentId }, "*");
 
     post("loaded");
     let done = false;

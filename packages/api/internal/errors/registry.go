@@ -44,7 +44,13 @@ type entry struct {
 var registry = map[Code]entry{
 	CodeFxQuoteExpired:        {http.StatusConflict, "The FX quote has expired. Request a new quote."},
 	CodeFxNoRoute:             {http.StatusUnprocessableEntity, "No route exists between these currencies right now."},
-	CodeFxInvalidAmount:       {http.StatusUnprocessableEntity, "This amount is outside the FX provider's quotable range (too small or too large)."},
+	// Measured against the live provider: the floor is ~1.00 USD of value, on
+	// the amount being converted -- not a per-currency rule. It bites hardest on
+	// low-unit-value currencies (1 ZAR is about 6 US cents, so "10 ZAR" is only
+	// ~57c and is rejected while "10 BRL" is ~$1.97 and goes through), which
+	// read as "ZAR is broken" rather than "that amount is too small". Say the
+	// actual number so the payer can act on it.
+	CodeFxInvalidAmount:       {http.StatusUnprocessableEntity, "Amount is too small to convert — it must be worth at least about 1.00 USD. Try a larger amount."},
 	CodeFxProviderUnavailable: {http.StatusServiceUnavailable, "The FX provider is temporarily unavailable."},
 	CodeCurrencyNotSupported:  {http.StatusUnprocessableEntity, "This currency is not currently supported."},
 	CodeIntentExpired:         {http.StatusConflict, "This settlement intent has expired."},

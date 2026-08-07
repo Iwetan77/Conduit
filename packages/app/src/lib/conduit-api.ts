@@ -283,6 +283,20 @@ export function getPublicSettlementIntent(id: string) {
   return request<PublicSettlementIntent>(`/v1/settlement_intents/${id}/public`);
 }
 
+// Report a same-currency direct pay's on-chain tx so the server verifies it and
+// marks the intent settled + fires the settlement.succeeded webhook. Without
+// this, a same-currency pay moves the money on-chain but the intent stays
+// "created" forever (the indexer keys off a declaration_id the API never
+// writes) — so a gateway checkout never flips to "payment received". Public,
+// like quote/prepare/confirm: the intent id is the capability and the server
+// trusts only the chain, not this call.
+export function recordDirectSettlement(id: string, txHash: string) {
+  return request<{ status: string; tx_hash?: string }>(
+    `/v1/settlement_intents/${id}/record`,
+    { method: "POST", body: { tx_hash: txHash } }
+  );
+}
+
 // ── Cross-chain funding (Circle Gateway, Solana -> Arc) ──────────────────────
 // Two-call flow matching internal/handlers/bridge.go exactly: the first call
 // returns what to sign (a deposit transaction, only if the payer's Gateway

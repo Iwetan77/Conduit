@@ -98,7 +98,20 @@ export function ArcSettlePanel({
         });
         setReceipt(result);
         setStep("success");
+        // Same-currency pays settle on-chain in this browser with no server
+        // step, so the intent would otherwise stay "created" forever. Report
+        // the tx so the server verifies it on Arc, marks the intent settled and
+        // fires the settlement.succeeded webhook — this is what flips a gateway
+        // checkout to "payment received". Best-effort for the payer's own UI
+        // (they've already paid), but it's the merchant's only settlement
+        // signal, so a failure is surfaced in the console rather than swallowed.
         if (intentIdRef.current) {
+          try {
+            const { recordDirectSettlement } = await import("@/lib/conduit-api");
+            await recordDirectSettlement(intentIdRef.current, result.txHash);
+          } catch (recErr) {
+            console.error("Failed to record settlement with Conduit:", recErr);
+          }
           const { emitCheckoutSettled } = await import("@/lib/checkout-events");
           emitCheckoutSettled(intentIdRef.current);
         }

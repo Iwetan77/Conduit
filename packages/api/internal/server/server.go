@@ -65,14 +65,14 @@ func New(cfg Config) http.Handler {
 
 	accountsH := &handlers.Accounts{Pool: cfg.Pool, PrivyVerifier: privyVerifier}
 	apiKeysH := &handlers.ApiKeys{Pool: cfg.Pool}
-	intentsH := &handlers.SettlementIntents{Pool: cfg.Pool, StableFX: stableFX, AppBaseURL: cfg.AppBaseURL, Webhooks: dispatcher}
-	currenciesH := &handlers.Currencies{}
 	// Server-side balance reads with a short cache. Keeps N browsers from
 	// each fanning out their own RPC calls and tripping Arc's rate limiter.
 	arcRPCForBalances := cfg.ArcRPC
 	if arcRPCForBalances == "" {
 		arcRPCForBalances = "https://rpc.testnet.arc.network"
 	}
+	intentsH := &handlers.SettlementIntents{Pool: cfg.Pool, StableFX: stableFX, AppBaseURL: cfg.AppBaseURL, Webhooks: dispatcher, ArcRPC: arcRPCForBalances}
+	currenciesH := &handlers.Currencies{}
 	balancesH := &handlers.Balances{ArcRPC: arcRPCForBalances}
 	// Server-side JSON-RPC relay to Arc. The browser points its RPC transport
 	// here so reads and the embedded wallet's broadcast don't hit Arc's
@@ -188,6 +188,12 @@ func New(cfg Config) http.Handler {
 		r.Post("/settlement_intents/{id}/quote", intentsH.Quote)
 		r.Post("/settlement_intents/{id}/prepare", intentsH.Prepare)
 		r.Post("/settlement_intents/{id}/confirm", intentsH.Confirm)
+		// Same-currency direct pays settle on-chain in the payer's browser and
+		// have no server step to mark them settled (unlike /confirm above and
+		// the bridge path). This is that step: verifies the tx on Arc, records
+		// the settlement, and fires the settlement.succeeded webhook. Same
+		// "payer has no API key, intent id is the capability" reasoning.
+		r.Post("/settlement_intents/{id}/record", intentsH.RecordDirectSettlement)
 
 		// A payer's own cross-currency history. Unauthenticated by API key for
 		// the same reason as the routes above -- a payer has none -- but gated

@@ -8,7 +8,7 @@ import { renderMarkdown } from "@/lib/markdown";
 // them actually readable as a website instead of only living in the repo.
 const DOCS_DIR = join(process.cwd(), "..", "..", "docs");
 
-const SLUGS = ["quickstart", "errors", "webhooks", "currencies", "fx-timing", "fx-capability", "state-diagrams", "payment-links"];
+const SLUGS = ["quickstart", "payment-gateway", "errors", "webhooks", "currencies", "fx-timing", "fx-capability", "state-diagrams", "payment-links"];
 
 export function generateStaticParams() {
   return SLUGS.map((slug) => ({ slug }));

@@ -2,6 +2,7 @@ import Link from "next/link";
 
 const GUIDES: { slug: string; title: string; description: string }[] = [
   { slug: "quickstart", title: "Quickstart", description: "Real curl commands to a settled payment, ~15-30s end to end." },
+  { slug: "payment-gateway", title: "Payment gateway", description: "Drop-in hosted checkout: accept any stablecoin, settle in one currency." },
   { slug: "errors", title: "Error codes", description: "Every code, HTTP status, and what to do about it." },
   { slug: "webhooks", title: "Webhook verification", description: "Node, Go, Python — all the same HMAC algorithm." },
   { slug: "currencies", title: "Currencies", description: "Generated from a live GET /v1/currencies call, not hand-written." },

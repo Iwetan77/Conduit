@@ -4,129 +4,143 @@
  *
  * The merchant's SERVER creates the charge (a settlement intent) with its
  * secret key and gets back a `hosted_url`. This script opens that hosted
- * checkout in a modal iframe and calls back when it settles — so the amount is
+ * checkout in a POPUP WINDOW and calls back when it settles — so the amount is
  * fixed server-side and the browser can never tamper with it. The public key
  * never has to touch this file; the security lives in who created the intent.
  *
- * Usage (in the merchant's page):
+ * Why a popup window and not an iframe: the checkout needs a real wallet —
+ * Google/Privy sign-in (OAuth), browser wallet extensions, and cross-chain
+ * signing. Browsers block all of those inside a cross-origin iframe (third-party
+ * cookies, popup OAuth, extension injection). A popup is a genuine top-level
+ * browsing context, so everything the payer needs actually works there.
+ *
+ * Usage (in the merchant's page). Prefer `createCharge` so the window opens
+ * synchronously inside the click — a window.open that happens AFTER an
+ * `await` is treated as an unsolicited popup and blocked:
+ *
  *   <script src="https://useconduit-app.vercel.app/conduit.js"></script>
  *   <script>
  *     Conduit.checkout({
- *       url: HOSTED_URL,           // the `hosted_url` your server got back
- *       onSuccess: function (r) {  // r.intent = "si_..."
+ *       createCharge: async function () {   // your server creates the charge
+ *         var r = await fetch("/api/checkout", { method: "POST" });
+ *         var d = await r.json();
+ *         return d.hosted_url;              // (or return the whole {hosted_url})
+ *       },
+ *       onSuccess: function (r) {           // r.intent = "si_..."
  *         window.location = "/thank-you?ref=" + r.intent;
  *       },
- *       onClose: function () {},   // buyer dismissed the popup
+ *       onClose: function () {},            // buyer closed the window unpaid
+ *       onError: function (e) {},           // charge creation failed
  *     });
  *   </script>
  *
- * The iframe and this script talk over window.postMessage, strictly scoped to
- * the hosted_url's own origin — a page embedding this can't spoof a "settled".
+ * A `url` (a hosted_url you already have) is still accepted instead of
+ * `createCharge`, but may be popup-blocked if you obtained it via an await
+ * before calling checkout.
+ *
+ * The popup and this script talk over window.postMessage, strictly scoped to
+ * the hosted_url's own origin — a page can't forge a "settled".
  */
 (function () {
   "use strict";
 
-  function el(tag, css) {
-    var e = document.createElement(tag);
-    if (css) e.style.cssText = css;
-    return e;
+  function popupFeatures() {
+    var w = 460, h = 760;
+    var dualLeft = window.screenLeft !== undefined ? window.screenLeft : (screen.left || 0);
+    var dualTop = window.screenTop !== undefined ? window.screenTop : (screen.top || 0);
+    var vw = window.innerWidth || document.documentElement.clientWidth || screen.width;
+    var vh = window.innerHeight || document.documentElement.clientHeight || screen.height;
+    var left = Math.max(0, vw / 2 - w / 2 + dualLeft);
+    var top = Math.max(0, vh / 2 - h / 2 + dualTop);
+    return "scrollbars=yes,resizable=yes,width=" + w + ",height=" + h + ",top=" + top + ",left=" + left;
   }
 
   function checkout(opts) {
     opts = opts || {};
-    var url = opts.url;
-    if (!url) {
-      throw new Error(
-        "Conduit.checkout: `url` is required — pass the hosted_url your server " +
-          "received from POST /v1/settlement_intents."
-      );
-    }
 
-    // Every message we trust must come from the checkout's own origin.
-    var origin;
-    try {
-      origin = new URL(url).origin;
-    } catch (e) {
-      throw new Error("Conduit.checkout: `url` is not a valid URL.");
-    }
-    var src = url + (url.indexOf("?") === -1 ? "?" : "&") + "embed=1";
+    // Open the window NOW, inside the user's click, before any async work — a
+    // window.open that runs after an await is blocked as an unsolicited popup.
+    // We don't have the URL yet (the server still has to create the charge), so
+    // open blank and navigate once we do.
+    var win = window.open("about:blank", "conduit_checkout", popupFeatures());
 
-    var overlay = el(
-      "div",
-      "position:fixed;inset:0;z-index:2147483647;background:rgba(2,6,4,.72);" +
-        "-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px);display:flex;" +
-        "align-items:center;justify-content:center;padding:16px;opacity:0;transition:opacity .18s ease;"
-    );
-    var frame = el(
-      "div",
-      "position:relative;width:100%;max-width:420px;height:92vh;max-height:760px;" +
-        "background:#050505;border:1px solid #1f291b;border-radius:16px;overflow:hidden;" +
-        "box-shadow:0 24px 80px rgba(0,0,0,.6);transform:translateY(8px);transition:transform .18s ease;"
-    );
-    var iframe = el("iframe", "width:100%;height:100%;border:0;display:block;background:#050505;");
-    iframe.setAttribute("allow", "clipboard-write; camera; publickey-credentials-get");
-    iframe.setAttribute("title", "Conduit Checkout");
-    iframe.src = src;
-
-    var close = el(
-      "button",
-      "position:absolute;top:10px;right:12px;z-index:2;width:30px;height:30px;border:0;" +
-        "border-radius:9px;background:rgba(255,255,255,.07);color:#cbd5c0;font-size:19px;" +
-        "line-height:1;cursor:pointer;"
-    );
-    close.setAttribute("aria-label", "Close checkout");
-    close.innerHTML = "&times;";
-
+    var origin = null;
     var settled = false;
-    var loaded = false;
+    var closeTimer = null;
 
-    function teardown() {
+    function fail(err) {
+      cleanup();
+      if (win && !win.closed) win.close();
+      if (typeof opts.onError === "function") opts.onError(err);
+      else throw err instanceof Error ? err : new Error(String(err));
+    }
+
+    function cleanup() {
       window.removeEventListener("message", onMessage);
-      document.removeEventListener("keydown", onKey);
-      overlay.style.opacity = "0";
-      setTimeout(function () {
-        if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
-      }, 180);
+      if (closeTimer) { clearInterval(closeTimer); closeTimer = null; }
     }
-    function dismiss() {
-      teardown();
-      if (!settled && typeof opts.onClose === "function") opts.onClose();
-    }
-    function onKey(e) {
-      if (e.key === "Escape") dismiss();
-    }
+
     function onMessage(e) {
-      if (e.origin !== origin) return;
+      if (!origin || e.origin !== origin) return;
       var d = e.data || {};
       if (d.type !== "conduit:checkout") return;
       if (d.status === "loaded") {
-        loaded = true;
         if (typeof opts.onLoad === "function") opts.onLoad({ intent: d.intent });
       } else if (d.status === "settled") {
         settled = true;
-        teardown();
+        cleanup();
+        if (win && !win.closed) win.close();
         if (typeof opts.onSuccess === "function") opts.onSuccess({ intent: d.intent });
       }
     }
 
-    close.addEventListener("click", dismiss);
-    overlay.addEventListener("click", function (e) {
-      if (e.target === overlay) dismiss();
-    });
-    document.addEventListener("keydown", onKey);
-    window.addEventListener("message", onMessage);
+    function navigate(rawUrl) {
+      var url = typeof rawUrl === "string" ? rawUrl : (rawUrl && rawUrl.hosted_url);
+      if (!url) { fail(new Error("Conduit.checkout: no hosted_url to open.")); return; }
+      try {
+        origin = new URL(url, window.location.href).origin;
+      } catch (e) {
+        fail(new Error("Conduit.checkout: `url` is not a valid URL."));
+        return;
+      }
+      var src = url + (url.indexOf("?") === -1 ? "?" : "&") + "embed=1";
+      if (win && !win.closed) {
+        win.location = src;
+      } else {
+        // Popup was blocked — fall back to navigating this tab to the full
+        // checkout. Payment still completes; the merchant just loses the
+        // in-page onSuccess callback (the checkout is a normal page from here).
+        window.location = src;
+        return;
+      }
 
-    frame.appendChild(iframe);
-    frame.appendChild(close);
-    overlay.appendChild(frame);
-    document.body.appendChild(overlay);
-    // next frame → animate in
-    requestAnimationFrame(function () {
-      overlay.style.opacity = "1";
-      frame.style.transform = "translateY(0)";
-    });
+      window.addEventListener("message", onMessage);
+      // Detect the buyer closing the window without paying.
+      closeTimer = setInterval(function () {
+        if (win && win.closed) {
+          cleanup();
+          if (!settled && typeof opts.onClose === "function") opts.onClose();
+        }
+      }, 500);
+    }
 
-    return { close: dismiss };
+    if (typeof opts.createCharge === "function") {
+      Promise.resolve()
+        .then(opts.createCharge)
+        .then(navigate)
+        .catch(fail);
+    } else if (opts.url) {
+      navigate(opts.url);
+    } else {
+      fail(new Error("Conduit.checkout: pass `createCharge` (recommended) or `url`."));
+    }
+
+    return {
+      close: function () {
+        cleanup();
+        if (win && !win.closed) win.close();
+      },
+    };
   }
 
   window.Conduit = { checkout: checkout };

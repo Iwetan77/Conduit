@@ -62,13 +62,13 @@ The response carries what the browser needs:
 Return `hosted_url` (and, if you want a QR, `id`) to your page. Never return your
 secret key.
 
-## 2a. Popup checkout (same device)
+## 2a. Drop-in checkout (same device)
 
-Drop the script in and Conduit opens the checkout in a **popup window** over your
-page. Callbacks fire when the buyer settles or closes it.
+Drop the script in and Conduit opens the checkout in a **new tab**. Callbacks
+fire back on your page when the buyer settles or closes it.
 
-Pass a `createCharge` function rather than a raw URL: `conduit.js` opens the
-window **synchronously inside the click** (before your server call resolves) and
+Pass a `createCharge` function rather than a raw URL: `conduit.js` opens the tab
+**synchronously inside the click** (before your server call resolves) and
 navigates it once the charge exists. This matters — a `window.open` that runs
 *after* an `await` is blocked by the browser as an unsolicited popup.
 
@@ -97,22 +97,28 @@ navigates it once the charge exists. This matters — a `window.open` that runs
 `Conduit.checkout(opts)` accepts:
 
 - `createCharge()` — async, returns the `hosted_url` (or `{ hosted_url }`).
-  **Recommended.** Opens the window in the click, so it's never popup-blocked.
+  **Recommended.** Opens the tab in the click, so it's never popup-blocked.
 - `url` — a `hosted_url` you already have. Accepted, but may be popup-blocked if
   you fetched it via an `await` before calling `checkout`.
 - `onSuccess(r)` — called once the payment settles; `r.intent` is the intent id.
-- `onClose()` — called if the buyer closes the window without paying.
+- `onClose()` — called if the buyer closes the tab without paying.
 - `onError(e)` — called if `createCharge` throws.
 - `onLoad(r)` — optional; the checkout finished loading.
 
-**Why a popup window, not an iframe:** the checkout needs a real wallet —
-Google/Privy sign-in, browser wallet extensions, and cross-chain signing.
-Browsers block every one of those inside a cross-origin iframe (third-party
-cookies, OAuth popups, extension injection). A popup is a genuine top-level
-context, so the wallet actually works. The popup and the script talk over
-`postMessage` scoped strictly to the checkout's own origin, so a page can't
-forge a `settled`. `onSuccess` is a UX convenience — treat the **webhook**
-(below) as the source of truth before you release goods.
+**Why a new tab, not an iframe or a small popup window:** the checkout needs a
+real wallet — Google/Privy sign-in, browser wallet extensions, and cross-chain
+signing. A cross-origin iframe blocks all of those (third-party cookies, OAuth
+popups, extension injection). A chrome-less popup window is nearly as bad:
+wallet extensions route their approval UI and OAuth redirects differently there,
+so Solflare/Phantom `connect()` hangs and the injected-wallet path renders
+blank. A plain tab is an ordinary top-level page, so every wallet path behaves
+exactly as it does when you open the hosted checkout directly.
+
+The tab and your page talk over `postMessage` scoped strictly to the checkout's
+own origin, so a page can't forge a `settled`. `onSuccess` is a UX convenience —
+treat the **webhook** (below) as the source of truth before you release goods.
+If the browser blocks the tab entirely, `conduit.js` falls back to navigating
+the current tab to the checkout, so the payment still completes.
 
 ## 2b. Scan to pay (buyer's phone)
 

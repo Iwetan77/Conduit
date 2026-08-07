@@ -4,15 +4,19 @@
  *
  * The merchant's SERVER creates the charge (a settlement intent) with its
  * secret key and gets back a `hosted_url`. This script opens that hosted
- * checkout in a POPUP WINDOW and calls back when it settles — so the amount is
+ * checkout in a NEW TAB and calls back when it settles — so the amount is
  * fixed server-side and the browser can never tamper with it. The public key
  * never has to touch this file; the security lives in who created the intent.
  *
- * Why a popup window and not an iframe: the checkout needs a real wallet —
- * Google/Privy sign-in (OAuth), browser wallet extensions, and cross-chain
- * signing. Browsers block all of those inside a cross-origin iframe (third-party
- * cookies, popup OAuth, extension injection). A popup is a genuine top-level
- * browsing context, so everything the payer needs actually works there.
+ * Why a new tab and not an iframe or a chrome-less popup: the checkout needs a
+ * real wallet — Google/Privy sign-in (OAuth), browser wallet extensions, and
+ * cross-chain signing. A cross-origin iframe blocks all of those (third-party
+ * cookies, OAuth popups, extension injection). A chrome-less popup window
+ * (window.open with a width/height features string) is nearly as bad: wallet
+ * extensions route their approval UI and OAuth redirects differently there, so
+ * Solflare/Phantom connect() promises hang forever and the injected-wallet path
+ * renders blank. A plain tab is an ordinary top-level page — identical to
+ * opening the hosted checkout directly — so every wallet path just works.
  *
  * Usage (in the merchant's page). Prefer `createCharge` so the window opens
  * synchronously inside the click — a window.open that happens AFTER an
@@ -44,25 +48,22 @@
 (function () {
   "use strict";
 
-  function popupFeatures() {
-    var w = 460, h = 760;
-    var dualLeft = window.screenLeft !== undefined ? window.screenLeft : (screen.left || 0);
-    var dualTop = window.screenTop !== undefined ? window.screenTop : (screen.top || 0);
-    var vw = window.innerWidth || document.documentElement.clientWidth || screen.width;
-    var vh = window.innerHeight || document.documentElement.clientHeight || screen.height;
-    var left = Math.max(0, vw / 2 - w / 2 + dualLeft);
-    var top = Math.max(0, vh / 2 - h / 2 + dualTop);
-    return "scrollbars=yes,resizable=yes,width=" + w + ",height=" + h + ",top=" + top + ",left=" + left;
-  }
-
   function checkout(opts) {
     opts = opts || {};
 
-    // Open the window NOW, inside the user's click, before any async work — a
+    // Open the tab NOW, inside the user's click, before any async work — a
     // window.open that runs after an await is blocked as an unsolicited popup.
     // We don't have the URL yet (the server still has to create the charge), so
     // open blank and navigate once we do.
-    var win = window.open("about:blank", "conduit_checkout", popupFeatures());
+    //
+    // Deliberately NO features string and target "_blank": that opens a real
+    // browser TAB rather than a chrome-less popup window. Wallet extensions
+    // (Solflare/Phantom/MetaMask) and OAuth redirects route their approval UI
+    // differently in a chrome-less popup — connect() promises never resolve and
+    // the injected-wallet path renders blank. A tab is an ordinary top-level
+    // page, identical to opening the hosted checkout directly, so every wallet
+    // path behaves exactly as it does there.
+    var win = window.open("about:blank", "_blank");
 
     var origin = null;
     var settled = false;

@@ -6,6 +6,7 @@ import (
 	"log"
 	"math/big"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -47,6 +48,29 @@ type createIntentRequest struct {
 	// (internal/bridge) before the existing quote/settle path -- see
 	// internal/bridge/README.md.
 	SourceChain string `json:"source_chain"`
+	// ReturnURL is where the hosted checkout sends the buyer once the payment
+	// settles -- the merchant's own "thank you" page. Required for the mobile
+	// redirect flow (wallet in-app browsers can't open a tab, so conduit.js
+	// navigates in place and the buyer must be sent back).
+	//
+	// Only honoured on this authenticated (sk_) path, never from the browser:
+	// a browser-supplied return URL would let anyone craft a checkout link that
+	// redirects a paying buyer to a phishing site.
+	ReturnURL string `json:"return_url"`
+}
+
+// validReturnURL keeps the stored redirect target to absolute http(s) URLs, so
+// a stored value can never be a javascript:/data: payload that the checkout
+// would then navigate to.
+func validReturnURL(raw string) bool {
+	if raw == "" {
+		return true // optional
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	return (u.Scheme == "https" || u.Scheme == "http") && u.Host != ""
 }
 
 type intentResponse struct {
@@ -85,6 +109,10 @@ func (h *SettlementIntents) Create(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, apierrors.E(apierrors.CodeInvalidRequest, "settle_address"))
 		return
 	}
+	if !validReturnURL(req.ReturnURL) {
+		writeErr(w, apierrors.E(apierrors.CodeInvalidRequest, "return_url"))
+		return
+	}
 	expiresIn := req.ExpiresIn
 	if expiresIn <= 0 {
 		expiresIn = 3600
@@ -108,10 +136,11 @@ func (h *SettlementIntents) Create(w http.ResponseWriter, r *http.Request) {
 
 	_, err := q.Exec(ctx,
 		`INSERT INTO settlement_intents
-		 (id, account_id, amount, settle_currency, settle_address, accept_currencies, status, reference, metadata, expires_at, livemode, source_chain)
-		 VALUES ($1,$2,$3,$4,$5,$6,'created',$7,$8,$9,$10,$11)`,
+		 (id, account_id, amount, settle_currency, settle_address, accept_currencies, status, reference, metadata, expires_at, livemode, source_chain, return_url)
+		 VALUES ($1,$2,$3,$4,$5,$6,'created',$7,$8,$9,$10,$11,$12)`,
 		id, principal.AccountID, req.Amount.String(), req.SettleCurrency, req.SettleAddress,
 		req.AcceptCurrencies, nullIfEmpty(req.Reference), metadataJSON, expiresAt, principal.Livemode, req.SourceChain,
+		nullIfEmpty(req.ReturnURL),
 	)
 	if err != nil {
 		writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
@@ -277,6 +306,10 @@ type publicIntentResponse struct {
 	DisplayName   string  `json:"display_name"`
 	LogoURL       *string `json:"logo_url,omitempty"`
 	SettleAddress string  `json:"settle_address"`
+	// ReturnURL: where to send the buyer after settling. Safe to expose --
+	// it was set by the merchant's own server with their secret key, and the
+	// checkout has to know it to complete the mobile redirect flow.
+	ReturnURL string `json:"return_url,omitempty"`
 }
 
 // GetPublic is GET /v1/settlement_intents/:id/public -- unauthenticated,
@@ -292,12 +325,12 @@ func (h *SettlementIntents) GetPublic(w http.ResponseWriter, r *http.Request) {
 	resp.ID = id
 	err := h.Pool.QueryRow(r.Context(),
 		`SELECT si.amount::text, si.status, si.settle_currency, si.source_chain, si.expires_at, si.settle_address,
-		        a.name, a.logo_url
+		        a.name, a.logo_url, COALESCE(si.return_url,'')
 		 FROM settlement_intents si JOIN accounts a ON a.id = si.account_id
 		 WHERE si.id = $1`,
 		id,
 	).Scan(&resp.Amount, &resp.Status, &resp.SettleCurrency, &resp.SourceChain, &resp.ExpiresAt, &resp.SettleAddress,
-		&resp.DisplayName, &resp.LogoURL)
+		&resp.DisplayName, &resp.LogoURL, &resp.ReturnURL)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			writeErr(w, apierrors.E(apierrors.CodeNotFound, "id"))

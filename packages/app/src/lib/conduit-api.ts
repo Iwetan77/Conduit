@@ -277,6 +277,11 @@ export interface PublicSettlementIntent {
   display_name: string;
   logo_url?: string;
   settle_address: string;
+  // Where to send the buyer once this settles. Set by the merchant's own
+  // server at charge creation (sk_ key), never by the browser. Drives the
+  // mobile redirect flow — wallet in-app browsers can't open a tab, so the
+  // checkout replaces the merchant's page and has to hand the buyer back.
+  return_url?: string;
 }
 
 export function getPublicSettlementIntent(id: string) {

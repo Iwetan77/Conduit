@@ -1,0 +1,12 @@
+-- Where the hosted checkout sends the buyer once the payment settles.
+--
+-- Needed for the mobile/in-app-browser checkout flow: wallet in-app browsers
+-- (MetaMask, Solflare) can't open a new tab, so conduit.js redirects the
+-- merchant's page to the checkout in place. The buyer then has to be sent back
+-- to the store, which is what this holds.
+--
+-- Set ONLY by the merchant's server at charge creation (sk_ key). It is
+-- deliberately not accepted from the browser: a browser-supplied return URL
+-- would let anyone craft a checkout link that redirects a paying buyer to a
+-- phishing site.
+ALTER TABLE settlement_intents ADD COLUMN return_url text;

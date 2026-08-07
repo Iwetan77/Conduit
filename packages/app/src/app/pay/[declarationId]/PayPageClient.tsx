@@ -49,17 +49,31 @@ function useRecipientTitle(intentId: string) {
 function EmbedBridge({ intentId }: { intentId: string }) {
   useEffect(() => {
     if (typeof window === "undefined") return;
-    if (new URLSearchParams(window.location.search).get("embed") !== "1") return;
-    // The launcher is window.opener when conduit.js opened us in a popup window
-    // (the real flow — a popup is a top-level context where Google/Privy
-    // sign-in, wallet extensions and cross-chain signing actually work), or
-    // window.parent in the legacy iframe embed. Post to whichever launched us.
+
+    // Two ways this checkout gets launched, and they finish differently:
+    //
+    //   Tab mode (desktop)   — conduit.js opened us in a new tab and is
+    //     listening; we postMessage "settled" and it closes us.
+    //   Redirect mode (mobile / wallet in-app browsers, which cannot open a
+    //     tab at all) — conduit.js replaced the merchant's page with us, so
+    //     there is nobody to message. We hand the buyer back to the merchant's
+    //     return_url instead.
+    const isEmbed = new URLSearchParams(window.location.search).get("embed") === "1";
     const target =
       window.opener || (window.parent && window.parent !== window ? window.parent : null);
-    if (!target) return;
+    const canPost = isEmbed && !!target;
 
-    const post = (status: string) =>
-      target.postMessage({ type: "conduit:checkout", status, intent: intentId }, "*");
+    const post = (status: string) => {
+      if (canPost) target!.postMessage({ type: "conduit:checkout", status, intent: intentId }, "*");
+    };
+
+    // The return_url is only known from the intent, so fetch it once up front —
+    // the settle path can fire from an in-page event with no intent in hand.
+    let returnUrl = "";
+    import("@/lib/conduit-api")
+      .then(({ getPublicSettlementIntent }) => getPublicSettlementIntent(intentId))
+      .then((i) => { returnUrl = i.return_url ?? ""; })
+      .catch(() => {});
 
     post("loaded");
     let done = false;
@@ -69,6 +83,15 @@ function EmbedBridge({ intentId }: { intentId: string }) {
       post("settled");
       clearInterval(timer);
       window.removeEventListener(CHECKOUT_SETTLED_EVENT, onInPage);
+      // Redirect mode only: in tab mode conduit.js closes this tab, and
+      // navigating here would race that. The merchant confirms the payment
+      // server-side (webhook / status) — these params are just a signal.
+      if (!canPost && returnUrl) {
+        const back = new URL(returnUrl);
+        back.searchParams.set("conduit_intent", intentId);
+        back.searchParams.set("conduit_status", "settled");
+        window.location.replace(back.toString());
+      }
     };
 
     // Instant path: direct and cross-currency pays settle in THIS browser, so
@@ -80,6 +103,10 @@ function EmbedBridge({ intentId }: { intentId: string }) {
 
     // Fallback + the ONLY signal for cross-chain (settled server-side): poll.
     const timer = setInterval(async () => {
+      // Someone who just opened a payment link directly has nobody to notify
+      // and nowhere to return to — the page renders its own receipt, so don't
+      // spend an API call every 2.5s on them.
+      if (!canPost && !returnUrl) return;
       try {
         const { getPublicSettlementIntent } = await import("@/lib/conduit-api");
         const fresh = await getPublicSettlementIntent(intentId);

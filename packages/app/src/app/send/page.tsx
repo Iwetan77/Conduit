@@ -18,7 +18,7 @@ import { ScanToPay } from "@/components/PayFlow/ScanToPay";
 import type { Currency } from "@conduit/sdk/lite";
 import { motion, AnimatePresence } from "framer-motion";
 import { useRequiredPayerAmount } from "@/lib/use-required-payer-amount";
-import { formatAmount } from "@/lib/format";
+import { formatAmount, tryParseAmount } from "@/lib/format";
 import type { BalanceMap } from "@/lib/use-balances";
 
 type Step = "input" | "confirm";
@@ -197,13 +197,16 @@ export default function SendPage() {
                     recipientCurrency={recipientCurrency}
                     recipientAmount={amount}
                     payerAmount={
-                      // Cross-currency has no pre-quote (Circle prices it at
-                      // pay time), so show nothing rather than a fabricated
-                      // 0.00 — the real rate appears before you sign.
+                      // Same-currency is known exactly. Cross-currency is left
+                      // undefined on purpose: RoutePreview now fetches a live
+                      // indicative rate for it (GET /v1/fx/rates) and shows
+                      // what you'd actually send, instead of the blank it used
+                      // to leave until the wallet prompt.
                       payerCurrency === recipientCurrency && required.data !== undefined
                         ? formatAmount(required.data, payerCurrency)
                         : undefined
                     }
+                    recipientAmountRaw={tryParseAmount(amount, recipientCurrency)}
                     isLoading={required.isLoading}
                   />
                 )}

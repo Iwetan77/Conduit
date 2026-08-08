@@ -284,6 +284,29 @@ export interface PublicSettlementIntent {
   return_url?: string;
 }
 
+export interface FxRate {
+  from: string;
+  to: string;
+  amount: string;
+  /** Minor units of `from` the payer would send. */
+  pay_amount: string;
+  rate: string;
+  provider: string;
+  expires_at?: number;
+  indicative: boolean;
+}
+
+// Indicative rate for a pair, with NO side effects — no intent, no trade, no
+// state. Lets any surface show "you'll receive ≈ X", and surface an unroutable
+// pair or a below-minimum amount, BEFORE the payer commits to a checkout.
+// The firm rate is still the one POST /settlement_intents/{id}/quote returns at
+// payment time.
+export function getFxRate(from: string, to: string, amountMinor: string, address?: string) {
+  const qs = new URLSearchParams({ from, to, amount: amountMinor });
+  if (address) qs.set("address", address);
+  return request<FxRate>(`/v1/fx/rates?${qs.toString()}`);
+}
+
 export function getPublicSettlementIntent(id: string) {
   return request<PublicSettlementIntent>(`/v1/settlement_intents/${id}/public`);
 }

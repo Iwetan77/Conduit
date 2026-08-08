@@ -16,6 +16,7 @@ import { SendConfirm } from "@/components/SendFlow/SendConfirm";
 import { PayerCurrencyPicker } from "@/components/SendFlow/PayerCurrencyPicker";
 import { WalletConnect } from "@/components/Shared/WalletConnect";
 import type { Currency } from "@conduit/sdk/lite";
+import { tryParseAmount } from "@/lib/format";
 
 type Step = "input" | "confirm";
 
@@ -59,6 +60,7 @@ export default function SendPage() {
                 payerCurrency={payerCurrency}
                 recipientCurrency={recipientCurrency}
                 recipientAmount={amount}
+                recipientAmountRaw={tryParseAmount(amount, recipientCurrency)}
               />
             )}
           </div>

@@ -133,6 +133,7 @@ export function SendConfirm({
               payerCurrency={payerCurrency}
               recipientCurrency={recipientCurrency}
               recipientAmount={amount}
+              recipientAmountRaw={parsedAmount}
             />
 
             <div className="flex gap-3">

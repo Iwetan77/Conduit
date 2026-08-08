@@ -58,6 +58,19 @@ export function parseAmount(value: string, currency: Currency): bigint {
   return fromHumanAmount(value, currencyDecimals(currency));
 }
 
+// parseAmount for values that are still being typed. Live previews run on every
+// keystroke, where "", "1." and "abc" are all normal intermediate states —
+// throwing on them would take the page down mid-entry. Returns undefined
+// instead, which callers treat as "nothing to preview yet".
+export function tryParseAmount(value: string, currency: Currency): bigint | undefined {
+  try {
+    const parsed = parseAmount(value, currency);
+    return parsed > 0n ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 // Shorten an address for display
 export function shortenAddress(address: string, chars = 4): string {
   return `${address.slice(0, chars + 2)}...${address.slice(-chars)}`;

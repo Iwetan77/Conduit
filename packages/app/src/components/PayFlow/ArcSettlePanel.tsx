@@ -203,6 +203,7 @@ export function ArcSettlePanel({
         payerCurrency={payerCurrency}
         recipientCurrency={settleToken}
         recipientAmount={amountHuman}
+        recipientAmountRaw={amountRaw}
       />
       {step === "error" && (
         <div className="bg-danger/10 border border-danger/30 p-3">

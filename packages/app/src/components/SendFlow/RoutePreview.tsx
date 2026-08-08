@@ -1,7 +1,10 @@
 "use client";
 
 import type { Currency } from "@conduit/sdk/lite";
+import { currencyDecimals } from "@conduit/sdk/lite";
 import { TokenBadge } from "@/components/Shared/TokenBadge";
+import { useFxRate } from "@/lib/use-fx-rate";
+import { formatAmountRaw } from "@/lib/format";
 
 interface RoutePreviewProps {
   payerCurrency: Currency;
@@ -9,6 +12,14 @@ interface RoutePreviewProps {
   recipientAmount: string;
   payerAmount?: string;
   isLoading?: boolean;
+  /**
+   * The recipient amount in minor units. When given, this component fetches a
+   * live indicative rate and shows what the payer will actually send — instead
+   * of the "≈ market rate" placeholder that left the real number invisible
+   * until the wallet prompt. Optional so callers without a raw amount (e.g. an
+   * open-amount link before anything is typed) keep the old behaviour.
+   */
+  recipientAmountRaw?: bigint;
 }
 
 export function RoutePreview({
@@ -17,8 +28,22 @@ export function RoutePreview({
   recipientAmount,
   payerAmount,
   isLoading,
+  recipientAmountRaw,
 }: RoutePreviewProps) {
   const isSameCurrency = payerCurrency === recipientCurrency;
+
+  // Only ask when it would tell the payer something they don't already know:
+  // same-currency is 1:1, and an explicit payerAmount means a firm quote has
+  // already replaced the estimate.
+  const quotable = !isSameCurrency && !payerAmount && recipientAmountRaw !== undefined;
+  const { data: fx, error: fxError, isLoading: fxLoading } = useFxRate(
+    quotable ? payerCurrency : undefined,
+    quotable ? recipientCurrency : undefined,
+    quotable ? recipientAmountRaw!.toString() : undefined
+  );
+  const estimated = fx
+    ? formatAmountRaw(BigInt(fx.pay_amount), currencyDecimals(payerCurrency))
+    : null;
 
   return (
     <div className="bg-surface border border-border p-4 space-y-3">
@@ -36,18 +61,20 @@ export function RoutePreview({
           <div className="flex items-center gap-2 min-w-0">
             <TokenBadge currency={payerCurrency} />
             <span className="font-mono text-ink truncate">
-              {isLoading ? (
+              {isLoading || fxLoading ? (
                 <span className="inline-block w-16 h-4 bg-border animate-pulse" />
               ) : payerAmount ? (
                 payerAmount
               ) : isSameCurrency ? (
                 recipientAmount
+              ) : estimated ? (
+                // The real number, before anything is signed. Still an estimate
+                // — the firm rate comes from the quote at payment time — so it
+                // is marked as one rather than shown as a promise.
+                <span className="whitespace-nowrap">≈ {estimated}</span>
+              ) : fxError ? (
+                <span className="text-danger text-xs whitespace-nowrap">unavailable</span>
               ) : (
-                // Cross-currency: the recipient amount is EXACT (it's what the
-                // sender typed), only the payer's side floats with the rate.
-                // "quoted at payment" read like a missing value; "≈ market
-                // rate" says the same thing but frames it as a live rate, not
-                // a blank field.
                 <span className="text-ink-dim text-xs whitespace-nowrap">≈ market rate</span>
               )}
             </span>
@@ -71,14 +98,34 @@ export function RoutePreview({
 
       {!isSameCurrency && (
         <div className="pt-2 border-t border-border space-y-1">
-          <div className="flex items-center gap-2 text-xs text-ink-dim">
-            <span className="w-1.5 h-1.5 bg-signal shrink-0" />
-            <span>
-              They receive exactly{" "}
-              <span className="text-ink">{recipientAmount}</span> — you pay the
-              live rate, shown for approval before you sign.
-            </span>
-          </div>
+          {/* Why this pair can't be paid, in the payer's words, at the moment
+              they're choosing — not as a failure after they've committed. */}
+          {fxError ? (
+            <div className="flex items-start gap-2 text-xs text-danger">
+              <span className="w-1.5 h-1.5 bg-danger shrink-0 mt-1.5" />
+              <span>{fxError.message}</span>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 text-xs text-ink-dim">
+              <span className="w-1.5 h-1.5 bg-signal shrink-0" />
+              <span>
+                They receive exactly{" "}
+                <span className="text-ink">{recipientAmount}</span>
+                {fx ? (
+                  <>
+                    {" "}
+                    at ≈{" "}
+                    <span className="text-ink">
+                      {fx.rate} {recipientCurrency}/{payerCurrency}
+                    </span>
+                    . Final rate is confirmed in your wallet before you sign.
+                  </>
+                ) : (
+                  <> — you pay the live rate, shown for approval before you sign.</>
+                )}
+              </span>
+            </div>
+          )}
           <p className="text-[11px] text-ink-dim/70 pl-3.5">
             Routed via Circle StableFX
           </p>

@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Conduit">
+  <!-- The Conduit mark: the signal-green disc with the conduit slot cut
+       straight through it. The slot is a real cut-out rather than a dark bar,
+       so the icon reads correctly on a light AND a dark browser tab strip —
+       a black bar would vanish against dark chrome, which is exactly where
+       most people will see it. -->
+  <mask id="slot">
+    <rect width="32" height="32" fill="#000"/>
+    <circle cx="16" cy="16" r="14" fill="#fff"/>
+    <!-- Slot runs from the disc's centre out past its right edge. Kept at
+         4.4px of a 32px canvas so it survives being scaled to 16px. -->
+    <rect x="15" y="13.8" width="18" height="4.4" fill="#000"/>
+  </mask>
+  <circle cx="16" cy="16" r="14" fill="#B2F55A" mask="url(#slot)"/>
+</svg>

@@ -8,17 +8,20 @@
 // settlement_intent is minted at pay time (POST /:id/pay) inside the shared
 // ArcSettlePanel, so there's no dead "Continue to pay" hop and no orphan
 // intent created just from opening the link.
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Currency } from "@conduit/sdk/lite";
 import {
   getPublicPaymentLink,
+  getPublicSettlementIntent,
   payPaymentLink,
   type PublicPaymentLink,
+  type PublicSettlementIntent,
 } from "@/lib/conduit-api";
 import { formatAmountRaw, shortenAddress } from "@/lib/format";
 import { isoToToken } from "@/lib/currencies";
 import { currencyDecimals } from "@conduit/sdk/lite";
 import { ArcSettlePanel } from "./ArcSettlePanel";
+import { CrossChainBridge } from "./CrossChainBridge";
 
 interface PaymentLinkPayProps {
   linkId: string;
@@ -39,6 +42,15 @@ export function PaymentLinkPay({ linkId }: PaymentLinkPayProps) {
   const [amount, setAmount] = useState("");
   const [payerReference, setPayerReference] = useState("");
   const [showAddress, setShowAddress] = useState(false);
+  // Cross-chain funding, same as the settlement-intent surface offers. The
+  // difference here is that a payment link has no settlement intent until pay
+  // time, so this mints one (POST /:id/pay) and then hands it to
+  // CrossChainBridge — which needs a real intent to bridge against.
+  const [bridgeIntent, setBridgeIntent] = useState<PublicSettlementIntent | null>(null);
+  const [bridgeBusy, setBridgeBusy] = useState(false);
+  const [bridgeError, setBridgeError] = useState("");
+  const bridgeIntentIdRef = useRef<string | null>(null);
+  const bridgeMintedForRef = useRef<string>("");
 
   // Every piece of per-link state resets when linkId changes. Without this,
   // opening a second payment link showed the FIRST link's merchant name and
@@ -50,6 +62,9 @@ export function PaymentLinkPay({ linkId }: PaymentLinkPayProps) {
     setAmount("");
     setPayerReference("");
     setShowAddress(false);
+    setBridgeIntent(null);
+    setBridgeError("");
+    bridgeIntentIdRef.current = null;
 
     getPublicPaymentLink(linkId)
       .then((l) => {
@@ -131,6 +146,35 @@ export function PaymentLinkPay({ linkId }: PaymentLinkPayProps) {
     return res.id;
   };
 
+  // Mint the intent, then hand it to CrossChainBridge. Validated on CLICK
+  // rather than by disabling the button: for a payer whose USDC is on Solana
+  // this is the ONLY path that works, so a greyed-out control with no
+  // explanation is a dead end rather than a hint.
+  const startCrossChain = async () => {
+    if (disabledReason) {
+      setBridgeError(disabledReason);
+      return;
+    }
+    setBridgeBusy(true);
+    setBridgeError("");
+    try {
+      // Cached so going back and returning doesn't mint a second intent — but
+      // keyed to what's actually on screen, so editing the amount or reference
+      // after minting can't bridge the stale one.
+      const key = `${enteredMinor}|${payerReference}`;
+      if (!bridgeIntentIdRef.current || bridgeMintedForRef.current !== key) {
+        bridgeIntentIdRef.current = await ensureIntentId();
+        bridgeMintedForRef.current = key;
+      }
+      setBridgeIntent(await getPublicSettlementIntent(bridgeIntentIdRef.current));
+    } catch (err) {
+      const { formatTxError } = await import("@/lib/tx-errors");
+      setBridgeError(formatTxError(err));
+    } finally {
+      setBridgeBusy(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-3">
@@ -156,6 +200,19 @@ export function PaymentLinkPay({ linkId }: PaymentLinkPayProps) {
 
       {link.description && <p className="text-ink-dim text-sm">{link.description}</p>}
 
+      {bridgeIntent ? (
+        <>
+          <CrossChainBridge intentId={bridgeIntent.id} intent={bridgeIntent} />
+          <button
+            type="button"
+            onClick={() => setBridgeIntent(null)}
+            className="text-ink-dim text-xs font-mono hover:text-ink"
+          >
+            ← Pay on Arc instead
+          </button>
+        </>
+      ) : (
+        <>
       {/* Amount, currency picker, route preview and Pay all on one screen.
           The amount box + reference are handed to ArcSettlePanel as children so
           they sit above the pay-with picker; the settlement intent is created
@@ -210,6 +267,28 @@ export function PaymentLinkPay({ linkId }: PaymentLinkPayProps) {
           />
         </div>
       </ArcSettlePanel>
+
+      {/* The one path that works for a payer holding USDC on Solana, Base or
+          any other supported chain — previously reachable from a settlement
+          intent but not from a merchant's payment link. */}
+      <button
+        type="button"
+        onClick={startCrossChain}
+        disabled={bridgeBusy}
+        className="group w-full flex flex-col items-center gap-1 py-3.5 px-4 border border-signal/40 bg-signal/5
+                   hover:bg-signal/10 hover:border-signal/60 transition-colors disabled:opacity-60"
+      >
+        <span className="flex items-center gap-2 text-signal font-mono text-sm">
+          <span aria-hidden className="text-base leading-none">⇄</span>
+          {bridgeBusy ? "Preparing…" : "Pay with USDC from another chain"}
+        </span>
+        <span className="text-ink-dim text-[11px] font-mono tracking-wide">
+          Solana · Base · Arbitrum · Avalanche · +8 more
+        </span>
+      </button>
+      {bridgeError && <p className="text-danger text-sm">{bridgeError}</p>}
+        </>
+      )}
     </div>
   );
 }

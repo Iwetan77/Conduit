@@ -6,6 +6,7 @@ import { WalletConnect } from "@/components/Shared/WalletConnect";
 import { CURRENCIES } from "@conduit/sdk/lite";
 import { getMyAccount, updateAccount, type Account, ConduitApiError } from "@/lib/conduit-api";
 import { SETTLE_CURRENCIES, currencyFlag } from "@/lib/currencies";
+import { PageHeader } from "@/components/Dashboard/PageHeader";
 
 // Phase 4: recipient identity. What a payer sees instead of a bare hex
 // address on every payment link/QR/`/pay` page -- edited here.
@@ -190,7 +191,7 @@ export default function SettingsPage() {
 
   return (
     <div className="max-w-md space-y-8">
-      <h1 className="font-display text-3xl font-bold">Settings</h1>
+      <PageHeader title="Settings" description="Your business identity and where payments settle." />
 
       <BusinessIdentity />
 

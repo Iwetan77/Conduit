@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { listBalanceTransactions, downloadBalanceTransactionsCsv, type BalanceTransaction, ConduitApiError } from "@/lib/conduit-api";
 import { formatDate, minorUnitsToNumber } from "@/lib/format";
+import { PageHeader } from "@/components/Dashboard/PageHeader";
 
 // Value only (no currency suffix) — this table has a dedicated Currency column.
 function money(amount: string, currency: string): string {
@@ -37,16 +38,19 @@ export default function ReconciliationPage() {
 
   return (
     <div className="max-w-3xl mx-auto">
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="font-display text-3xl font-bold">Reconciliation</h1>
-        <button
+      <PageHeader
+        title="Reconciliation"
+        description="Export settled payments for your books, in the currency you keep them in."
+        action={
+          <><button
           onClick={handleDownload}
           disabled={downloading}
           className="bg-signal text-signal-ink font-medium px-4 py-2 text-sm disabled:opacity-50"
         >
           {downloading ? "Preparing..." : "Download CSV"}
-        </button>
-      </div>
+        </button></>
+        }
+      />
 
       {error && <p className="text-danger text-sm mb-4">{error}</p>}
 

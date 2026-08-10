@@ -17,6 +17,7 @@ import { PayerCurrencyPicker } from "@/components/SendFlow/PayerCurrencyPicker";
 import { WalletConnect } from "@/components/Shared/WalletConnect";
 import type { Currency } from "@conduit/sdk/lite";
 import { tryParseAmount } from "@/lib/format";
+import { PageHeader } from "@/components/Dashboard/PageHeader";
 
 type Step = "input" | "confirm";
 
@@ -36,7 +37,7 @@ export default function SendPage() {
 
   return (
     <div className="max-w-lg mx-auto">
-      <h1 className="font-display text-3xl font-bold mb-6">Send</h1>
+      <PageHeader title="Send" description="Pay anyone in the currency they want, from whatever you hold." />
 
       {step === "input" && (
         <div className="space-y-6">

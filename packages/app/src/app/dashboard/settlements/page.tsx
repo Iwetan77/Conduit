@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { listSettlements, type Settlement, ConduitApiError } from "@/lib/conduit-api";
 import { formatDate, shortenAddress, formatMinorUnits, minorUnitsToNumber } from "@/lib/format";
+import { PageHeader } from "@/components/Dashboard/PageHeader";
 
 const EXPLORER = process.env.NEXT_PUBLIC_EXPLORER ?? "https://testnet.arcscan.app";
 
@@ -51,12 +52,22 @@ export default function SettlementsPage() {
 
   return (
     <div>
-      <div className="mb-8">
+      <PageHeader title="Settlements" description="Every payment that has landed, with the on-chain transaction behind it." />
+
+      {/* The headline figure, in its own panel. It used to sit bare on the grid
+          ABOVE the page title, so the first thing on screen was an unlabelled
+          number with no page context around it. */}
+      <div className="border border-border bg-surface p-6 mb-6">
         <p className="text-scale-1 font-mono text-ink-dim uppercase tracking-wider mb-3">
           {currencyFilter === "all" ? "Money settled" : `Settled · ${currencyFilter}`}
         </p>
         {settledTotals.length === 0 ? (
-          <p className="font-anton text-scale-6 text-ink leading-none">0</p>
+          <>
+            <p className="font-anton text-scale-6 text-ink leading-none">0</p>
+            <p className="text-scale-1 font-mono text-ink-dim mt-2">
+              Nothing settled yet — create a payment link to get started.
+            </p>
+          </>
         ) : (
           <div className="flex flex-wrap gap-x-10 gap-y-4">
             {settledTotals.map(([cur, t]) => (
@@ -71,10 +82,6 @@ export default function SettlementsPage() {
             ))}
           </div>
         )}
-      </div>
-
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="font-display text-3xl font-bold">Settlements</h1>
       </div>
 
       <div className="flex flex-col sm:flex-row gap-3 mb-4">

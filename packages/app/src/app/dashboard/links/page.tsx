@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { listPaymentLinks, voidPaymentLink, type PaymentLink, ConduitApiError } from "@/lib/conduit-api";
 import { formatDate } from "@/lib/format";
 import { useCopy } from "@/lib/use-copy";
+import { PageHeader } from "@/components/Dashboard/PageHeader";
 
 // Mirrors request-payment's own simplification: assumes 6 fractional digits
 // for display. The API stores real integer minor units regardless.
@@ -51,9 +52,7 @@ export default function LinksPage() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="font-display text-3xl font-bold">Links & invoices</h1>
-      </div>
+      <PageHeader title="Links & invoices" description="Payment links you've sent, and what's happened to each one." />
 
       {error && <p className="text-danger text-sm mb-4">{error}</p>}
       {links === null && !error && <p className="text-ink-dim text-sm">Loading...</p>}

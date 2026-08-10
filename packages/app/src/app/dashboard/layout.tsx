@@ -42,6 +42,42 @@ const NAV = [
   { href: "/dashboard/settings", label: "Settings" },
 ];
 
+// The same ordering, split into the three jobs a merchant actually switches
+// between. An unbroken list of eight links gives no sense of where you are in
+// the product; labelled groups make the sidebar readable at a glance.
+const NAV_GROUPS = [
+  { label: "Money in", items: NAV.slice(0, 4) },
+  { label: "Money out", items: NAV.slice(4, 5) },
+  { label: "Admin", items: NAV.slice(5) },
+];
+
+// Who you're signed in as. The dashboard never said, so a merchant running
+// more than one account had no way to tell which one they were about to create
+// a payment link under.
+function MerchantIdentity() {
+  const [name, setName] = useState<string>("");
+  useEffect(() => {
+    let cancelled = false;
+    import("@/lib/conduit-api")
+      .then(({ getMyAccount }) => getMyAccount())
+      .then((a) => { if (!cancelled) setName(a.name); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
+  return (
+    <div className="flex items-center gap-2.5 border border-border bg-surface px-3 py-2.5 mb-6">
+      <div className="w-7 h-7 shrink-0 bg-signal/15 border border-signal/30 flex items-center justify-center font-display font-bold text-signal text-sm">
+        {name ? name.charAt(0).toUpperCase() : " "}
+      </div>
+      <div className="min-w-0">
+        <p className="text-ink text-xs font-medium truncate">{name || "Loading..."}</p>
+        <p className="text-ink-dim text-[10px] font-mono uppercase tracking-wider">Merchant</p>
+      </div>
+    </div>
+  );
+}
+
 // Opens Privy's own login modal (configured with loginMethods: ['email',
 // 'google'] in the root Providers) rather than a custom in-page form --
 // this is what actually gives merchants a choice between Google (skips the
@@ -235,26 +271,46 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
 
       {/* Desktop sidebar — hidden below md, replaced by the hamburger bar below.
           The brand is the ⊙D logo mark, not the word "Conduit". */}
-      <aside className="hidden md:flex w-56 border-r border-border p-4 flex-col shrink-0">
-        <Link href="/" className="inline-block mb-8"><Logo size="sm" /></Link>
-        <nav className="flex flex-col gap-1">
-          {NAV.map((item) => (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={`px-3 py-2 text-sm ${
-                pathname?.startsWith(item.href)
-                  ? "bg-surface text-signal"
-                  : "text-ink-dim hover:text-ink"
-              }`}
-            >
-              {item.label}
-            </Link>
+      <aside className="hidden md:flex w-60 border-r border-border p-4 flex-col shrink-0">
+        <Link href="/" className="inline-block mb-6"><Logo size="sm" /></Link>
+        <MerchantIdentity />
+        <nav className="flex flex-col gap-6">
+          {NAV_GROUPS.map((group) => (
+            <div key={group.label} className="flex flex-col gap-0.5">
+              <p className="text-[10px] font-mono text-ink-dim/70 uppercase tracking-widest px-3 mb-1.5">
+                {group.label}
+              </p>
+              {group.items.map((item) => {
+                const active = pathname?.startsWith(item.href);
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    // The active item carries a solid signal bar on its leading
+                    // edge. A colour change alone was easy to miss against the
+                    // dark grid, so the current page never announced itself.
+                    className={`relative px-3 py-2 text-sm transition-colors ${
+                      active
+                        ? "bg-surface text-signal font-medium"
+                        : "text-ink-dim hover:text-ink hover:bg-surface/50"
+                    }`}
+                  >
+                    {active && (
+                      <span className="absolute left-0 top-1.5 bottom-1.5 w-0.5 bg-signal" />
+                    )}
+                    {item.label}
+                  </Link>
+                );
+              })}
+            </div>
           ))}
         </nav>
-        <button className="mt-auto text-xs text-ink-dim hover:text-ink text-left" onClick={signOut}>
-          Sign out
-        </button>
+        <div className="mt-auto pt-6">
+          <div className="h-px bg-border mb-3" />
+          <button className="text-xs text-ink-dim hover:text-ink text-left" onClick={signOut}>
+            Sign out
+          </button>
+        </div>
       </aside>
 
       {/* Mobile: a proper top bar with a hamburger, not a cramped horizontal

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { listAccounts, createSubAccount, type Account, ConduitApiError } from "@/lib/conduit-api";
 import { SETTLE_CURRENCIES as CURRENCIES, currencyFlag } from "@/lib/currencies";
+import { PageHeader } from "@/components/Dashboard/PageHeader";
 
 function DownloadableQR({ value, filename }: { value: string; filename: string }) {
   const svgRef = useRef<SVGSVGElement>(null);
@@ -81,15 +82,18 @@ export default function LocationsPage() {
 
   return (
     <div className="max-w-4xl">
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="font-display text-3xl font-bold">Storefronts</h1>
-        <button
+      <PageHeader
+        title="Storefronts"
+        description="A reusable QR per location, so takings are attributed to the right one."
+        action={
+          <><button
           onClick={() => setShowForm((s) => !s)}
           className="border border-border px-4 py-2 text-sm"
         >
           {showForm ? "Cancel" : "Add storefront"}
-        </button>
-      </div>
+        </button></>
+        }
+      />
 
       {showForm && (
         <form onSubmit={handleCreate} className="border border-border p-4 mb-6 space-y-3 max-w-md">

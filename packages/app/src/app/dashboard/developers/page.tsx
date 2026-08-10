@@ -7,6 +7,7 @@ import {
   ConduitApiError,
 } from "@/lib/conduit-api";
 import { formatDate } from "@/lib/format";
+import { PageHeader } from "@/components/Dashboard/PageHeader";
 
 export default function DevelopersPage() {
   const [keys, setKeys] = useState<ApiKeySummary[] | null>(null);
@@ -52,7 +53,7 @@ export default function DevelopersPage() {
 
   return (
     <div className="space-y-10 max-w-3xl mx-auto">
-      <h1 className="font-display text-3xl font-bold">Developers</h1>
+      <PageHeader title="Developers" description="API keys and webhooks for building Conduit into your own product." />
 
       <section>
         <h2 className="font-medium text-sm mb-3">API keys</h2>

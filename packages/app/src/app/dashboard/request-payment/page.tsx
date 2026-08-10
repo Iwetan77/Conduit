@@ -7,6 +7,7 @@ import { SETTLE_CURRENCIES as CURRENCIES, currencyFlag, isoToToken } from "@/lib
 import { currencyDecimals } from "@conduit/sdk/lite";
 import { shortenAddress } from "@/lib/format";
 import { useCopy } from "@/lib/use-copy";
+import { PageHeader } from "@/components/Dashboard/PageHeader";
 
 // Minor units in the settle token's REAL decimals — BRLA/ZARU/KRW1 are
 // 18-decimals tokens; a hardcoded 6 mis-prices those links by 10^12.
@@ -138,8 +139,11 @@ export default function RequestPaymentPage() {
 
   return (
     <div className="max-w-md mx-auto">
-      <h1 className="font-display text-3xl font-bold mb-6">Request payment</h1>
-      <form onSubmit={handleSubmit} className="space-y-4 border border-border p-6">
+      <PageHeader
+        title="Request payment"
+        description="Create a link or QR to send someone. They can pay in any routable stablecoin; you're paid in yours."
+      />
+      <form onSubmit={handleSubmit} className="space-y-4 border border-border bg-surface p-6">
         <div>
           <label className="text-scale-1 font-mono text-ink-dim uppercase tracking-wider block mb-2">Amount mode</label>
           <div className="flex gap-2">

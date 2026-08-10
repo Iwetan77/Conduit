@@ -1,15 +1,19 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Conduit">
-  <!-- The Conduit mark: the signal-green disc with the conduit slot cut
-       straight through it. The slot is a real cut-out rather than a dark bar,
-       so the icon reads correctly on a light AND a dark browser tab strip —
-       a black bar would vanish against dark chrome, which is exactly where
-       most people will see it. -->
-  <mask id="slot">
-    <rect width="32" height="32" fill="#000"/>
-    <circle cx="16" cy="16" r="14" fill="#fff"/>
-    <!-- Slot runs from the disc's centre out past its right edge. Kept at
-         4.4px of a 32px canvas so it survives being scaled to 16px. -->
-    <rect x="15" y="13.8" width="18" height="4.4" fill="#000"/>
-  </mask>
-  <circle cx="16" cy="16" r="14" fill="#B2F55A" mask="url(#slot)"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1726 1726" role="img" aria-label="Conduit">
+  <!-- The full Conduit mark, measured off CONDUIT-MAIN.png rather than
+       redrawn by eye: the signal-green disc, the white D beside it, and the
+       bar running through both. An earlier version drew only the disc and its
+       slot, which without the D read as a Pac-Man rather than the logo.
+
+       The mark is roughly 2:1, so it sits letterboxed on a solid dark tile.
+       The tile is deliberate: the D is white and the bar is a cut-out, so on a
+       light browser tab strip a transparent version would lose both. -->
+  <rect width="1726" height="1726" fill="#050505"/>
+  <g transform="translate(0 414)">
+    <circle cx="448" cy="449" r="448" fill="#B2F55A"/>
+    <!-- D: flat leading edge, semicircular trailing edge (r = half its height) -->
+    <path d="M948 26 H1303 A423 423 0 0 1 1303 872 H948 Z" fill="#FFFFFF"/>
+    <!-- The bar starts at the disc's centre and runs into the D, cut in the
+         tile colour so it reads as one slice across the whole mark. -->
+    <rect x="448" y="402" width="898" height="96" fill="#050505"/>
+  </g>
 </svg>

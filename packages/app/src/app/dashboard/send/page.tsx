@@ -35,7 +35,7 @@ export default function SendPage() {
   const canProceed = isAddress(recipient) && parseFloat(amount) > 0 && isConnected;
 
   return (
-    <div className="max-w-lg">
+    <div className="max-w-lg mx-auto">
       <h1 className="font-display text-3xl font-bold mb-6">Send</h1>
 
       {step === "input" && (

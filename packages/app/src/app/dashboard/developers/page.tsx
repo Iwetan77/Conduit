@@ -51,7 +51,7 @@ export default function DevelopersPage() {
   };
 
   return (
-    <div className="space-y-10 max-w-3xl">
+    <div className="space-y-10 max-w-3xl mx-auto">
       <h1 className="font-display text-3xl font-bold">Developers</h1>
 
       <section>

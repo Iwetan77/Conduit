@@ -307,7 +307,11 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
         )}
       </div>
 
-      <main className="flex-1 p-4 md:p-8 max-w-6xl overflow-x-hidden">{children}</main>
+      {/* mx-auto centres the capped content column in the space left of the
+          sidebar. Without it the column was pinned to the sidebar's edge, so on
+          a wide screen every page sat hard left with a large dead area to the
+          right — most obvious on the narrow forms, which now centre within it. */}
+      <main className="flex-1 p-4 md:p-8 max-w-6xl mx-auto w-full overflow-x-hidden">{children}</main>
     </div>
   );
 }

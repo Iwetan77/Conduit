@@ -96,7 +96,7 @@ export default function RequestPaymentPage() {
 
   if (result) {
     return (
-      <div className="max-w-md">
+      <div className="max-w-md mx-auto">
         <h1 className="font-display text-3xl font-bold mb-6">Payment link created</h1>
         <div className="border border-border p-6 flex flex-col items-center gap-4">
           <div style={{ background: "var(--bg)", padding: 12, border: "1px solid var(--border)" }}>
@@ -137,7 +137,7 @@ export default function RequestPaymentPage() {
   }
 
   return (
-    <div className="max-w-md">
+    <div className="max-w-md mx-auto">
       <h1 className="font-display text-3xl font-bold mb-6">Request payment</h1>
       <form onSubmit={handleSubmit} className="space-y-4 border border-border p-6">
         <div>

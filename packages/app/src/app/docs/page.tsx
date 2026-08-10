@@ -151,12 +151,6 @@ CCTP Domain:  26`}</code></pre>
           <a href="/docs/reference">SDK Reference</a> — full API surface, every method and parameter
         </li>
         <li>
-          <a href="/dashboard">
-            Open the dashboard
-          </a>{" "}
-          — settlements, request payment, locations, developers, reconciliation
-        </li>
-        <li>
           <Link href="/docs/guides/quickstart">API quickstart</Link> — the actual
           B2B settlement API this content predates; real curl to a settled payment
         </li>

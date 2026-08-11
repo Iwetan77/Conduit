@@ -2,7 +2,17 @@ import type { Currency } from "@conduit/sdk/lite";
 import { toHumanAmount, fromHumanAmount, currencyDecimals } from "@conduit/sdk/lite";
 import { isoToToken } from "./currencies";
 
-const SYMBOLS: Record<string, string> = { USDC: "$", EURC: "€", BRLA: "R$", AUDF: "A$", MXNB: "MX$", QCAD: "C$", GBPA: "£", ZARU: "R" };
+const SYMBOLS: Record<string, string> = { USDC: "$", EURC: "€", BRLA: "R$", AUDF: "A$", MXNB: "MX$", QCAD: "C$", GBPA: "£", ZARU: "R", KRW1: "₩" };
+
+// The label to print next to an amount. Every amount Conduit moves is an
+// on-chain token, so the label must be the token symbol the payer is actually
+// signing for — EURC, not EUR. The API speaks ISO on settle_currency because
+// that's the merchant's business-level setting, and printing it verbatim was
+// telling payers they were sending 5 EUR when the transfer was 5 EURC.
+// isoToToken passes an already-token symbol (pay_currency) through unchanged.
+export function tokenLabel(currency: string): string {
+  return isoToToken(currency);
+}
 
 // Decimals for either an on-chain token symbol (USDC, EURC…) OR a 3-letter ISO
 // fiat code (USD, EUR…). Settlement/reconciliation rows mix the two:
@@ -27,7 +37,7 @@ export function formatMinorUnits(amount: string | bigint, currency: string): str
   return `${Number(value).toLocaleString("en-US", {
     minimumFractionDigits: 2,
     maximumFractionDigits: Math.max(2, decimals),
-  })} ${currency}`;
+  })} ${tokenLabel(currency)}`;
 }
 
 // The same conversion as a Number (no currency suffix) — for summing rows into

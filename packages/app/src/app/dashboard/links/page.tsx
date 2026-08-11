@@ -2,16 +2,16 @@
 
 import { useEffect, useState } from "react";
 import { listPaymentLinks, voidPaymentLink, type PaymentLink, ConduitApiError } from "@/lib/conduit-api";
-import { formatDate } from "@/lib/format";
+import { formatDate, formatMinorUnits } from "@/lib/format";
 import { useCopy } from "@/lib/use-copy";
 import { PageHeader } from "@/components/Dashboard/PageHeader";
 
-// Mirrors request-payment's own simplification: assumes 6 fractional digits
-// for display. The API stores real integer minor units regardless.
+// Was a local /1e6 with the raw ISO code appended, which both hardcoded the
+// decimals and printed "EUR" for an amount denominated in EURC. The shared
+// formatter derives decimals from the currency and labels it with the token.
 function formatMinor(amount: string | undefined, currency: string): string {
   if (!amount) return "—";
-  const value = Number(amount) / 1_000_000;
-  return `${value.toLocaleString("en-US", { maximumFractionDigits: 2 })} ${currency}`;
+  return formatMinorUnits(amount, currency);
 }
 
 const STATUS_STYLE: Record<string, string> = {

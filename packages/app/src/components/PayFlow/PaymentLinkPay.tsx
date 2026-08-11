@@ -219,7 +219,6 @@ export function PaymentLinkPay({ linkId }: PaymentLinkPayProps) {
           only when the payer actually taps Pay. */}
       <ArcSettlePanel
         settleToken={settleToken}
-        settleCurrencyIso={link.settle_currency}
         settleAddress={link.settle_address}
         amountRaw={amountRaw}
         displayName={link.display_name}
@@ -232,7 +231,7 @@ export function PaymentLinkPay({ linkId }: PaymentLinkPayProps) {
           </p>
           {isFixed && link.amount ? (
             <p className="text-ink font-mono text-2xl">
-              {formatAmountRaw(BigInt(link.amount), decimals)} {link.settle_currency}
+              {formatAmountRaw(BigInt(link.amount), decimals)} {settleToken}
             </p>
           ) : (
             <div className="flex items-baseline gap-2">
@@ -243,7 +242,7 @@ export function PaymentLinkPay({ linkId }: PaymentLinkPayProps) {
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
               />
-              <span className="text-ink-dim font-mono shrink-0">{link.settle_currency}</span>
+              <span className="text-ink-dim font-mono shrink-0">{settleToken}</span>
             </div>
           )}
           {(link.min_amount || link.max_amount) && (

@@ -22,6 +22,7 @@ import {
   ConduitApiError,
   type PublicSettlementIntent,
 } from "@/lib/conduit-api";
+import { isoToToken } from "@/lib/currencies";
 import {
   buildEvmAdapter,
   ensureEvmChain,
@@ -242,7 +243,7 @@ export function CrossChainBridge({ intentId, intent }: CrossChainBridgeProps) {
       <div className="space-y-4">
         <p className="text-ink-dim text-sm">
           This payment settles on Arc, but you can pay with USDC you already hold on another chain.
-          Pick where your USDC is — Conduit bridges it and converts to {intent.settle_currency} for you.
+          Pick where your USDC is — Conduit bridges it and converts to {isoToToken(intent.settle_currency)} for you.
         </p>
         <button
           onClick={() => chooseSource("solana")}
@@ -372,7 +373,7 @@ export function CrossChainBridge({ intentId, intent }: CrossChainBridgeProps) {
           </div>
         )}
         <p className="text-ink-dim text-xs">
-          Your USDC moves to Arc, then converts to {intent.settle_currency} and settles to the recipient.
+          Your USDC moves to Arc, then converts to {isoToToken(intent.settle_currency)} and settles to the recipient.
         </p>
         <button
           onClick={handleSpend}
@@ -400,11 +401,11 @@ export function CrossChainBridge({ intentId, intent }: CrossChainBridgeProps) {
     return (
       <div className="space-y-6">
         <p className="text-ink-dim text-xs font-mono">
-          Your USDC is moving to Arc and converting to {intent.settle_currency}. You won&apos;t need to sign again.
+          Your USDC is moving to Arc and converting to {isoToToken(intent.settle_currency)}. You won&apos;t need to sign again.
         </p>
         <ol className="space-y-3 font-mono text-sm border border-border bg-surface p-4">
           <BridgeStep n={1} label="Bridging your USDC to Arc" done={step1Done && step2Done} active={step1Done && !step2Done} />
-          <BridgeStep n={2} label={`Converting to ${intent.settle_currency} & settling`} done={step2Done} active={step1Done && !step2Done} />
+          <BridgeStep n={2} label={`Converting to ${isoToToken(intent.settle_currency)} & settling`} done={step2Done} active={step1Done && !step2Done} />
         </ol>
         {phase === "settled" && (
           <div className="space-y-3">

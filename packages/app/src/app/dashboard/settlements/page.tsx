@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { listSettlements, type Settlement, ConduitApiError } from "@/lib/conduit-api";
-import { formatDate, shortenAddress, formatMinorUnits, minorUnitsToNumber } from "@/lib/format";
+import { formatDate, shortenAddress, formatMinorUnits, minorUnitsToNumber, tokenLabel } from "@/lib/format";
 import { PageHeader } from "@/components/Dashboard/PageHeader";
 
 const EXPLORER = process.env.NEXT_PUBLIC_EXPLORER ?? "https://testnet.arcscan.app";
@@ -73,7 +73,7 @@ export default function SettlementsPage() {
             {settledTotals.map(([cur, t]) => (
               <div key={cur}>
                 <p className="font-anton text-scale-5 text-ink leading-none">
-                  {fmtMoney(t.net)} <span className="text-scale-3 text-ink-dim">{cur}</span>
+                  {fmtMoney(t.net)} <span className="text-scale-3 text-ink-dim">{tokenLabel(cur)}</span>
                 </p>
                 <p className="text-scale-1 font-mono text-ink-dim mt-1">
                   net received · {t.count} settlement{t.count === 1 ? "" : "s"} · {fmtMoney(t.received)} gross
@@ -98,7 +98,7 @@ export default function SettlementsPage() {
         >
           <option value="all">All currencies</option>
           {currencies.map((c) => (
-            <option key={c} value={c}>{c}</option>
+            <option key={c} value={c}>{tokenLabel(c)}</option>
           ))}
         </select>
       </div>

@@ -87,7 +87,7 @@ export function SettlementIntentPay({ intentId }: SettlementIntentPayProps) {
         <p className="text-ink-dim text-xs uppercase tracking-wider font-mono">Requesting</p>
         <p className="text-ink font-mono text-2xl">
           {formatAmountRaw(BigInt(intent.amount), currencyDecimals(isoToToken(intent.settle_currency)))}{" "}
-          {intent.settle_currency}
+          {isoToToken(intent.settle_currency)}
         </p>
       </div>
 
@@ -108,7 +108,6 @@ export function SettlementIntentPay({ intentId }: SettlementIntentPayProps) {
         <>
           <ArcSettlePanel
             settleToken={isoToToken(intent.settle_currency) as Currency}
-            settleCurrencyIso={intent.settle_currency}
             settleAddress={intent.settle_address}
             amountRaw={BigInt(intent.amount)}
             displayName={intent.display_name}

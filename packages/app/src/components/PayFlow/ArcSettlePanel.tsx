@@ -30,8 +30,10 @@ import { WalletConnectCompact } from "@/components/Shared/WalletConnect";
 // at pay time (POST /:id/pay). It's called once and cached, so retrying after a
 // failed/expired quote never creates a second intent or re-marks the link paid.
 export interface ArcSettlePanelProps {
+  // The token actually transferred on Arc (EURC, USDC…). This is also what the
+  // Pay button prints: it used to print the merchant's ISO settle_currency
+  // instead, so a payer signing for 5 EURC was told they were paying "5 EUR".
   settleToken: Currency;
-  settleCurrencyIso: string;
   settleAddress: string;
   amountRaw: bigint;
   displayName: string;
@@ -47,7 +49,6 @@ export interface ArcSettlePanelProps {
 
 export function ArcSettlePanel({
   settleToken,
-  settleCurrencyIso,
   settleAddress,
   amountRaw,
   displayName,
@@ -216,7 +217,7 @@ export function ArcSettlePanel({
         className="w-full py-4 bg-signal text-signal-ink font-mono text-lg
                    hover:bg-signal/90 transition-colors disabled:opacity-50 disabled:hover:bg-signal"
       >
-        {disabledReason ?? `Pay ${amountHuman} ${settleCurrencyIso}`}
+        {disabledReason ?? `Pay ${amountHuman} ${settleToken}`}
       </button>
     </div>
   );

@@ -40,10 +40,13 @@ async function fetchPublicInfo(id: string): Promise<PublicInfo | null> {
 function formatMoney(minor: string | undefined, iso: string | undefined): string | null {
   if (!minor || !iso) return null;
   try {
-    const human = toHumanAmount(BigInt(minor), currencyDecimals(isoToToken(iso)));
+    const token = isoToToken(iso);
+    const human = toHumanAmount(BigInt(minor), currencyDecimals(token));
     const symbol = SYMBOLS[iso] ?? "";
     const pretty = Number(human).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    return `${symbol}${pretty} ${iso}`;
+    // Label with the token being transferred (EURC), not the merchant's ISO
+    // settle currency (EUR) — the payer signs for the former.
+    return `${symbol}${pretty} ${token}`;
   } catch {
     return null;
   }

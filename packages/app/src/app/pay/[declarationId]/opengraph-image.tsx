@@ -37,9 +37,10 @@ export default async function Image({ params }: { params: { declarationId: strin
   let amountLine = "Pay with any stablecoin";
   if (info?.amount && info?.settle_currency) {
     try {
-      const human = toHumanAmount(BigInt(info.amount), currencyDecimals(isoToToken(info.settle_currency)));
+      const token = isoToToken(info.settle_currency);
+      const human = toHumanAmount(BigInt(info.amount), currencyDecimals(token));
       const pretty = Number(human).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-      amountLine = `${SYMBOLS[info.settle_currency] ?? ""}${pretty} ${info.settle_currency}`;
+      amountLine = `${SYMBOLS[info.settle_currency] ?? ""}${pretty} ${token}`;
     } catch {
       /* fall back to the default line */
     }

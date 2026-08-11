@@ -24,6 +24,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/kzn-labs/conduit/api/internal/links"
 	"github.com/kzn-labs/conduit/api/internal/models"
 )
 
@@ -227,13 +228,9 @@ func (ix *Indexer) processLog(ctx context.Context, vLog types.Log) error {
 		return err
 	}
 
-	// A payment link backing this intent becomes 'paid' only here, on a real
-	// on-chain settlement — never at checkout start (see payment_links.go Pay()).
-	_, err = ix.pool.Exec(ctx,
-		`UPDATE payment_links SET status = 'paid', updated_at = now()
-		 WHERE id = (SELECT payment_link_id FROM settlement_intents WHERE declaration_id = $1)
-		   AND status NOT IN ('paid','settled','void')`,
-		declarationID,
-	)
+	// A payment link backing this intent closes only here, on a real on-chain
+	// settlement — never at checkout start (see payment_links.go Pay()) — and
+	// only if it was single-use. See internal/links for why.
+	_, err = ix.pool.Exec(ctx, links.SettleByDeclarationSQL, declarationID)
 	return err
 }

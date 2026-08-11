@@ -233,6 +233,8 @@ func New(cfg Config) http.Handler {
 			r.Get("/accounts/{id}", accountsH.Get)
 			r.Patch("/accounts/{id}", accountsH.Update)
 			r.Post("/accounts/sub", accountsH.CreateSub)
+			// The storefront's printed QR resolves to this link's hosted URL.
+			r.Post("/accounts/{id}/storefront_link", paymentLinksH.StorefrontLink)
 			r.Get("/api_keys", apiKeysH.List)
 
 			r.Post("/settlement_intents", intentsH.Create)

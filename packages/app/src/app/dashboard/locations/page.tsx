@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
-import { listAccounts, createSubAccount, type Account, ConduitApiError } from "@/lib/conduit-api";
+import { listAccounts, createSubAccount, getStorefrontLink, type Account, ConduitApiError } from "@/lib/conduit-api";
 import { SETTLE_CURRENCIES as CURRENCIES, currencyFlag } from "@/lib/currencies";
 import { PageHeader } from "@/components/Dashboard/PageHeader";
 
@@ -47,6 +47,53 @@ function DownloadableQR({ value, filename }: { value: string; filename: string }
         <QRCodeSVG ref={svgRef} value={value} size={120} bgColor="#050505" fgColor="#B2F55A" level="H" />
       </div>
       <button onClick={download} className="text-signal text-xs hover:underline">Download print-ready</button>
+    </div>
+  );
+}
+
+// One storefront, and the QR a customer actually scans at its till.
+//
+// The QR used to encode the storefront's raw settle_address. A phone camera
+// can't act on a bare "0x..." string at all, and any wallet that did parse it
+// would send a raw transfer — no amount, no conversion into the storefront's
+// settle currency, no cross-chain, and no settlement row attributing the sale
+// to this location, which is the entire reason storefronts exist. It now
+// encodes the hosted URL of the storefront's standing open-amount link, so
+// scanning opens Conduit's pay page: the customer types what they owe and can
+// pay in any supported stablecoin from any supported chain.
+function StorefrontCard({ account }: { account: Account }) {
+  const [link, setLink] = useState<{ hosted_url: string } | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let live = true;
+    getStorefrontLink(account.id)
+      .then((l) => live && setLink(l))
+      .catch(() => live && setFailed(true));
+    return () => { live = false; };
+  }, [account.id]);
+
+  const slug = account.name.replace(/\s+/g, "-");
+
+  return (
+    <div className="border border-border p-4 flex flex-col items-center gap-3">
+      <div className="text-center">
+        <p className="font-medium text-sm">{account.name}</p>
+        <p className="text-ink-dim text-xs">{account.settle_currency}</p>
+        <p className="text-ink-dim text-[10px] font-mono break-all">{account.settle_address}</p>
+      </div>
+      {link ? (
+        <>
+          <DownloadableQR value={link.hosted_url} filename={`${slug}-qr.png`} />
+          <p className="text-ink-dim text-[10px] font-mono break-all text-center">{link.hosted_url}</p>
+        </>
+      ) : failed ? (
+        // Never render a QR we couldn't resolve: a wrong code printed and stuck
+        // to a till is worse than a visibly missing one.
+        <p className="text-danger text-xs text-center">Couldn&apos;t load this storefront&apos;s QR — reload to retry.</p>
+      ) : (
+        <p className="text-ink-dim text-xs">Loading QR…</p>
+      )}
     </div>
   );
 }
@@ -133,14 +180,7 @@ export default function LocationsPage() {
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         {accounts?.map((a) => (
-          <div key={a.id} className="border border-border p-4 flex flex-col items-center gap-3">
-            <div className="text-center">
-              <p className="font-medium text-sm">{a.name}</p>
-              <p className="text-ink-dim text-xs">{a.settle_currency}</p>
-              <p className="text-ink-dim text-[10px] font-mono">{a.settle_address}</p>
-            </div>
-            <DownloadableQR value={a.settle_address} filename={`${a.name.replace(/\s+/g, "-")}-qr.png`} />
-          </div>
+          <StorefrontCard key={a.id} account={a} />
         ))}
       </div>
 

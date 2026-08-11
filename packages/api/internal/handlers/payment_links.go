@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"math/big"
 	"net/http"
@@ -478,6 +479,96 @@ func (h *PaymentLinks) toResponse(id, amountMode, amount, minAmount, maxAmount, 
 		HostedURL: h.AppBaseURL + "/pay/" + id,
 		QRPayload: id,
 	}
+}
+
+// StorefrontLink implements POST /v1/accounts/{id}/storefront_link: the
+// standing, reusable, open-amount link whose hosted URL is what a storefront's
+// printed QR encodes.
+//
+// Get-or-create, so the Storefronts page can call it for every card on every
+// load without minting duplicates, and so storefronts created before this
+// existed get one on first view rather than needing a backfill. The link is
+// deliberately derived from the account -- its settle_currency, settle_address
+// and name -- because that is what "attribute takings to this location" means:
+// a payment through this link settles to the storefront's own address in the
+// storefront's own currency, and lands in settlements tagged to its account.
+//
+// Open amount (not fixed) because a printed sticker at a till can't know the
+// sale total; the payer types what they owe, exactly like a UPI/PIX static QR.
+func (h *PaymentLinks) StorefrontLink(w http.ResponseWriter, r *http.Request) {
+	accountID := pathParam(r, "id")
+	principal, _ := auth.FromContext(r.Context())
+	ctx := r.Context()
+
+	// The caller may only reach their own account or one of its storefronts.
+	// Same containment rule Accounts.Get uses, so a leaked account id from
+	// another merchant can't provision or read a link here.
+	var name, settleCurrency, settleAddress string
+	var livemode bool
+	err := h.Pool.QueryRow(ctx,
+		`SELECT name, settle_currency, settle_address, livemode FROM accounts
+		 WHERE id = $1 AND (id = $2 OR parent_id = $2)`,
+		accountID, principal.AccountID,
+	).Scan(&name, &settleCurrency, &settleAddress, &livemode)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			writeErr(w, apierrors.E(apierrors.CodeNotFound, "id"))
+			return
+		}
+		writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
+		return
+	}
+
+	if existing, ok := h.findStorefrontLink(ctx, accountID); ok {
+		writeJSON(w, http.StatusOK, existing)
+		return
+	}
+
+	id := models.NewShortID("pl")
+	// ON CONFLICT DO NOTHING against the partial unique index: two tabs opening
+	// the Storefronts page at once both miss the SELECT above, and the loser
+	// simply re-reads the winner's row instead of erroring or double-inserting.
+	_, err = h.Pool.Exec(ctx,
+		`INSERT INTO payment_links
+		 (id, account_id, amount_mode, settle_currency, settle_address, accept_currencies,
+		  description, reuse_policy, status, livemode, is_storefront)
+		 VALUES ($1,$2,'open',$3,$4,'{}',$5,'multi_use','active',$6,true)
+		 ON CONFLICT DO NOTHING`,
+		id, accountID, settleCurrency, settleAddress, nullIfEmpty(name), livemode,
+	)
+	if err != nil {
+		writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
+		return
+	}
+
+	link, ok := h.findStorefrontLink(ctx, accountID)
+	if !ok {
+		writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
+		return
+	}
+	writeJSON(w, http.StatusOK, link)
+}
+
+// findStorefrontLink reads the account's live storefront link, if it has one.
+func (h *PaymentLinks) findStorefrontLink(ctx context.Context, accountID string) (linkResponse, bool) {
+	var id, amountMode, settleCurrency, settleAddress, description, merchantReference, reusePolicy, status string
+	var minAmount, maxAmount *string
+	var acceptCurrencies []string
+	var expiresAt *time.Time
+	var created time.Time
+	err := h.Pool.QueryRow(ctx,
+		`SELECT id, amount_mode, min_amount::text, max_amount::text, settle_currency, settle_address,
+		        accept_currencies, COALESCE(description,''), COALESCE(merchant_reference,''), reuse_policy,
+		        status, expires_at, created_at
+		 FROM payment_links WHERE account_id = $1 AND is_storefront AND status NOT IN ('void','expired')`,
+		accountID,
+	).Scan(&id, &amountMode, &minAmount, &maxAmount, &settleCurrency, &settleAddress, &acceptCurrencies,
+		&description, &merchantReference, &reusePolicy, &status, &expiresAt, &created)
+	if err != nil {
+		return linkResponse{}, false
+	}
+	return h.toResponse(id, amountMode, "", derefStr(minAmount), derefStr(maxAmount), settleCurrency,
+		settleAddress, acceptCurrencies, description, merchantReference, reusePolicy, status, expiresAt, created), true
 }
 
 func derefStr(s *string) string {

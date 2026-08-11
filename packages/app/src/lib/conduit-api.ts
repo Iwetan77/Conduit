@@ -131,6 +131,13 @@ export function listAccounts() {
   return request<{ data: Account[] }>("/v1/accounts");
 }
 
+// The standing open-amount link behind a storefront's printed QR. Get-or-create
+// on the server, so calling it for every card on every load is safe and
+// storefronts made before the feature existed get one on first view.
+export function getStorefrontLink(accountId: string) {
+  return request<PaymentLink>(`/v1/accounts/${accountId}/storefront_link`, { method: "POST" });
+}
+
 export interface PrivyAccount {
   id: string;
   name: string;

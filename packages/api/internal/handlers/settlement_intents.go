@@ -20,6 +20,7 @@ import (
 	"github.com/kzn-labs/conduit/api/internal/currency"
 	apierrors "github.com/kzn-labs/conduit/api/internal/errors"
 	"github.com/kzn-labs/conduit/api/internal/fx"
+	"github.com/kzn-labs/conduit/api/internal/links"
 	"github.com/kzn-labs/conduit/api/internal/models"
 	"github.com/kzn-labs/conduit/api/internal/webhooks"
 )
@@ -749,9 +750,7 @@ func (h *SettlementIntents) Confirm(w http.ResponseWriter, r *http.Request) {
 	// (if this intent came from one) genuinely paid. This is the transition that
 	// used to fire prematurely at checkout start; see payment_links.go Pay().
 	_, _ = h.Pool.Exec(r.Context(),
-		`UPDATE payment_links SET status = 'paid', updated_at = now()
-		 WHERE id = (SELECT payment_link_id FROM settlement_intents WHERE id = $1)
-		   AND status NOT IN ('paid','settled','void')`,
+		links.SettleByIntentSQL,
 		id)
 
 	// Record settlements + balance_transactions so GET /v1/balance_transactions
@@ -939,9 +938,7 @@ func (h *SettlementIntents) RecordDirectSettlement(w http.ResponseWriter, r *htt
 
 	_, _ = h.Pool.Exec(ctx, `UPDATE settlement_intents SET status = 'settled', updated_at = now() WHERE id = $1`, id)
 	_, _ = h.Pool.Exec(ctx,
-		`UPDATE payment_links SET status = 'paid', updated_at = now()
-		 WHERE id = (SELECT payment_link_id FROM settlement_intents WHERE id = $1)
-		   AND status NOT IN ('paid','settled','void')`,
+		links.SettleByIntentSQL,
 		id)
 
 	balanceTxID := models.NewID("btx")

@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.24;
+pragma solidity 0.8.24;
 
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 
 /// @title CurrencyRegistry
@@ -10,7 +11,7 @@ import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IER
 ///         `Currency = "USDC" | "EURC"` assumption everywhere else in the stack.
 /// @dev Registration reads the token's own `decimals()` and reverts if the caller's
 ///      claimed value disagrees — decimals can never be silently wrong here.
-contract CurrencyRegistry is Ownable {
+contract CurrencyRegistry is Ownable2Step {
     struct CurrencyInfo {
         address token;
         uint8 decimals;

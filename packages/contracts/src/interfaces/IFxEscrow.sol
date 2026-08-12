@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.24;
+pragma solidity 0.8.24;
 
 // Circle FxEscrow — verified ABI from Arc testnet explorer
 // Proxy:          0x867650F5eAe8df91445971f14d89fd84F0C9a9f8  (ERC-1967)

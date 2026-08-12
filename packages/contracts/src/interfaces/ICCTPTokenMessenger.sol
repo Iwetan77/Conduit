@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.24;
+pragma solidity 0.8.24;
 
 // Circle CCTP TokenMessengerV2 — 0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA
 // Arc Testnet Domain: 26

@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.24;
+pragma solidity 0.8.24;
 
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {IPermit2SignatureTransfer} from "./interfaces/IFxEscrow.sol";
@@ -43,7 +44,7 @@ interface IUniswapV2Router {
 ///   swapDirect — subsequent use: allowance already MaxUint256, just swap.
 ///
 /// Permit2 path (Circle FxEscrow): submitFXFunding — kept for institutional use.
-contract StableFXAdapter is Ownable {
+contract StableFXAdapter is Ownable2Step {
     using SafeERC20 for IERC20;
 
     // ── Constants ─────────────────────────────────────────────────────────────
@@ -155,7 +156,7 @@ contract StableFXAdapter is Ownable {
         IERC20(tokenIn).safeTransferFrom(msg.sender, address(this), amountInMax);
 
         // Approve the AMM router — internal to this contract, no user signature
-        IERC20(tokenIn).approve(router, amountInMax);
+        IERC20(tokenIn).forceApprove(router, amountInMax);
 
         // Execute exact-output swap; output goes directly to caller
         address[] memory path = new address[](2);
@@ -180,7 +181,7 @@ contract StableFXAdapter is Ownable {
         }
 
         // Zero out router allowance — defence-in-depth
-        IERC20(tokenIn).approve(router, 0);
+        IERC20(tokenIn).forceApprove(router, 0);
 
         emit SwapExecuted(tokenIn, tokenOut, msg.sender, actualIn, amountOut);
     }

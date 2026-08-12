@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.24;
+pragma solidity 0.8.24;
 
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {IConduitRouter} from "./interfaces/IConduitRouter.sol";
@@ -40,7 +41,7 @@ interface IUniswapV2RouterMinimal {
 ///
 /// @dev All amounts: 6-decimal ERC-20 units. Never 18-decimal native gas values.
 ///      Protocol params owned by 2-of-3 multisig (Ownable in v1).
-contract ConduitRouter is IConduitRouter, ReentrancyGuard, Ownable {
+contract ConduitRouter is IConduitRouter, ReentrancyGuard, Ownable2Step {
     using SafeERC20 for IERC20;
 
     // ── Constants ─────────────────────────────────────────────────────────────
@@ -269,7 +270,7 @@ contract ConduitRouter is IConduitRouter, ReentrancyGuard, Ownable {
         require(path[path.length - 1] == instruction.recipientToken, "path must end at recipientToken");
 
         IERC20(instruction.payerToken).safeTransferFrom(instruction.payer, address(this), amountInMax);
-        IERC20(instruction.payerToken).approve(ammRouter, amountInMax);
+        IERC20(instruction.payerToken).forceApprove(ammRouter, amountInMax);
 
         uint256[] memory amounts = IUniswapV2RouterMinimal(ammRouter).swapTokensForExactTokens(
             instruction.amount,
@@ -284,7 +285,7 @@ contract ConduitRouter is IConduitRouter, ReentrancyGuard, Ownable {
         if (leftover > 0) {
             IERC20(instruction.payerToken).safeTransfer(instruction.payer, leftover);
         }
-        IERC20(instruction.payerToken).approve(ammRouter, 0);
+        IERC20(instruction.payerToken).forceApprove(ammRouter, 0);
 
         receiptId = _mintReceipt(instruction);
 

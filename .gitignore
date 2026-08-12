@@ -51,3 +51,6 @@ packages/app/audit/
 
 # Internal error-code reference (not for the repo)
 errorcodes.md
+
+# Migration working notes — local planning record, not product docs.
+privy-removal.md

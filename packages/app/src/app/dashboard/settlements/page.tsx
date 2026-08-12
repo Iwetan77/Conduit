@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { listSettlements, type Settlement, ConduitApiError } from "@/lib/conduit-api";
-import { formatDate, shortenAddress, formatMinorUnits, minorUnitsToNumber, tokenLabel } from "@/lib/format";
+import { listSettlements, getMyAccount, type Settlement, ConduitApiError } from "@/lib/conduit-api";
+import { formatDate, shortenAddress, formatMinorUnits, tokenLabel } from "@/lib/format";
 import { PageHeader } from "@/components/Dashboard/PageHeader";
+import { useSettledTotal, type CurrencyTotal } from "@/lib/use-settled-total";
 
 const EXPLORER = process.env.NEXT_PUBLIC_EXPLORER ?? "https://testnet.arcscan.app";
 
@@ -32,21 +33,32 @@ export default function SettlementsPage() {
     });
   }, [settlements, currencyFilter, search]);
 
-  // Money settled, not just a row count. Grouped by settle currency (rows can
-  // mix EUR/USD/…), each total converted from raw minor units to its currency's
-  // real precision — the same conversion the table cells were missing.
-  const settledTotals = useMemo(() => {
-    const byCurrency = new Map<string, { received: number; net: number; count: number }>();
+  // Per-currency subtotals, summed in integer minor units so they stay exact.
+  // These are the input to the roll-up, not the headline itself.
+  const perCurrency: CurrencyTotal[] = useMemo(() => {
+    const byCurrency = new Map<string, CurrencyTotal>();
     for (const s of filtered) {
       const cur = s.settle_currency;
-      const entry = byCurrency.get(cur) ?? { received: 0, net: 0, count: 0 };
-      entry.received += minorUnitsToNumber(s.settle_amount, cur);
-      entry.net += minorUnitsToNumber((BigInt(s.settle_amount) - BigInt(s.fee)).toString(), cur);
+      const entry = byCurrency.get(cur) ?? { currency: cur, netMinor: 0n, grossMinor: 0n, count: 0 };
+      entry.grossMinor += BigInt(s.settle_amount);
+      entry.netMinor += BigInt(s.settle_amount) - BigInt(s.fee);
       entry.count += 1;
       byCurrency.set(cur, entry);
     }
-    return Array.from(byCurrency.entries());
+    return Array.from(byCurrency.values());
   }, [filtered]);
+
+  // What one number should be denominated in: the merchant's own settle
+  // currency, chosen in Settings. Filtering to a single currency answers a
+  // different question ("how much of THIS did I take"), so that view reports
+  // that currency exactly, with no conversion.
+  const [settleCurrency, setSettleCurrency] = useState<string | undefined>();
+  useEffect(() => {
+    getMyAccount().then((a) => setSettleCurrency(a.settle_currency)).catch(() => {});
+  }, []);
+
+  const displayCurrency = currencyFilter === "all" ? settleCurrency : currencyFilter;
+  const total = useSettledTotal(perCurrency, displayCurrency);
 
   const fmtMoney = (n: number) => n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -59,9 +71,9 @@ export default function SettlementsPage() {
           number with no page context around it. */}
       <div className="border border-border bg-surface p-6 mb-6">
         <p className="text-scale-1 font-mono text-ink-dim uppercase tracking-wider mb-3">
-          {currencyFilter === "all" ? "Money settled" : `Settled · ${currencyFilter}`}
+          {currencyFilter === "all" ? "Money settled" : `Settled · ${tokenLabel(currencyFilter)}`}
         </p>
-        {settledTotals.length === 0 ? (
+        {perCurrency.length === 0 ? (
           <>
             <p className="font-anton text-scale-6 text-ink leading-none">0</p>
             <p className="text-scale-1 font-mono text-ink-dim mt-2">
@@ -69,18 +81,39 @@ export default function SettlementsPage() {
             </p>
           </>
         ) : (
-          <div className="flex flex-wrap gap-x-10 gap-y-4">
-            {settledTotals.map(([cur, t]) => (
-              <div key={cur}>
-                <p className="font-anton text-scale-5 text-ink leading-none">
-                  {fmtMoney(t.net)} <span className="text-scale-3 text-ink-dim">{tokenLabel(cur)}</span>
-                </p>
-                <p className="text-scale-1 font-mono text-ink-dim mt-1">
-                  net received · {t.count} settlement{t.count === 1 ? "" : "s"} · {fmtMoney(t.received)} gross
-                </p>
-              </div>
-            ))}
-          </div>
+          <>
+            {/* One number, in the merchant's own currency. Takings in other
+                currencies are rolled in at today's rate — marked with ≈ so the
+                figure is never mistaken for an exact historical total. */}
+            <p className="font-anton text-scale-5 text-ink leading-none">
+              {total.approximate && <span className="text-ink-dim">≈ </span>}
+              {total.loading && total.net === 0 ? "…" : fmtMoney(total.net)}{" "}
+              <span className="text-scale-3 text-ink-dim">
+                {displayCurrency ? tokenLabel(displayCurrency) : ""}
+              </span>
+            </p>
+            <p className="text-scale-1 font-mono text-ink-dim mt-1">
+              net received · {total.count} settlement{total.count === 1 ? "" : "s"} ·{" "}
+              {fmtMoney(total.gross)} gross
+              {total.approximate && " · converted at today's rate"}
+            </p>
+
+            {/* Money we hold but can't express in the display currency, because
+                the pair has no FX route. Shown rather than dropped: a total that
+                quietly omits real takings is worse than one that admits a gap. */}
+            {total.unconverted.length > 0 && (
+              <p className="text-scale-1 font-mono text-ink-dim mt-3">
+                plus{" "}
+                {total.unconverted.map((u, i) => (
+                  <span key={u.currency}>
+                    {i > 0 && ", "}
+                    {formatMinorUnits(u.netMinor.toString(), u.currency)}
+                  </span>
+                ))}{" "}
+                — no rate available to convert
+              </p>
+            )}
+          </>
         )}
       </div>
 

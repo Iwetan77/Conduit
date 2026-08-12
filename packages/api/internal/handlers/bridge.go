@@ -24,6 +24,7 @@ import (
 	"github.com/kzn-labs/conduit/api/internal/currency"
 	apierrors "github.com/kzn-labs/conduit/api/internal/errors"
 	"github.com/kzn-labs/conduit/api/internal/fx"
+	"github.com/kzn-labs/conduit/api/internal/links"
 	"github.com/kzn-labs/conduit/api/internal/models"
 	"github.com/kzn-labs/conduit/api/internal/webhooks"
 )
@@ -352,7 +353,7 @@ func (h *Bridge) settleBridgedIntent(ctx context.Context, intentID string) error
 				balTxID, accountID, settlementID, amountStr,
 			)
 		}
-		h.emitWebhook(ctx, intentID, "settlement.succeeded", map[string]any{"intent_id": intentID, "tx_hash": txHash, "status": "settled"})
+		h.emitWebhook(ctx, intentID, "settlement.succeeded", links.SettledPayload(ctx, h.Pool, intentID, txHash))
 		return nil
 	}
 
@@ -427,7 +428,7 @@ func (h *Bridge) settleBridgedIntent(ctx context.Context, intentID string) error
 		)
 	}
 
-	h.emitWebhook(ctx, intentID, "settlement.succeeded", map[string]any{"intent_id": intentID, "tx_hash": makerTxHash, "status": "settled"})
+	h.emitWebhook(ctx, intentID, "settlement.succeeded", links.SettledPayload(ctx, h.Pool, intentID, makerTxHash))
 	return nil
 }
 

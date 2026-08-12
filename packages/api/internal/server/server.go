@@ -358,6 +358,10 @@ func StartBackgroundWorkers(ctx context.Context, pool *pgxpool.Pool, arcRPC, rou
 			log.Printf("indexer: init: %v — indexer disabled", err)
 			return
 		}
+		// Without this the indexer would record an on-chain settlement and tell
+		// the merchant nothing, while the same payment routed through the
+		// confirm/record handlers fires settlement.succeeded.
+		ix.Webhooks = dispatcher
 		if err := ix.Run(ctx); err != nil && ctx.Err() == nil {
 			log.Printf("indexer: Run exited: %v", err)
 		}

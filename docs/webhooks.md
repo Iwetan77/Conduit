@@ -98,3 +98,41 @@ failures) is persisted with response code and a truncated response body —
 in the handler code today. The other four are defined in the schema/spec but nothing
 calls `Enqueue` for them yet — don't rely on `settlement_intent.created` firing until this
 is closed out.
+
+## `settlement.succeeded` payload
+
+```json
+{
+  "type": "settlement.succeeded",
+  "created": 1786500000,
+  "data": {
+    "intent_id": "si_9x2LmQ",
+    "tx_hash": "0x…",
+    "status": "settled",
+    "amount": "110990000",
+    "settle_currency": "EUR",
+    "payment_link_id": "pl_7Qk2mF",
+    "merchant_reference": "table-14/bill-8871",
+    "payer_reference": "diner-ref-1"
+  }
+}
+```
+
+| Field | Notes |
+| --- | --- |
+| `intent_id`, `tx_hash`, `status` | Always present. |
+| `amount` | Integer **minor units**, as a string. Never a float. |
+| `settle_currency` | ISO code (`EUR`), matching `settle_currency` everywhere else in the API. The token that actually moved is its stablecoin (`EURC`). |
+| `payment_link_id` | Present only when the payment came from a payment link. |
+| `merchant_reference` | Your own reference — the link's `merchant_reference`, copied onto the intent when it was paid. |
+| `payer_reference` | The payer's reference, if they supplied one. |
+
+`payment_link_id` and `merchant_reference` are what let a system match an event
+back to what it was owed. A direct send has neither, and those keys are then
+**absent rather than empty** — check for presence, not for `""`.
+
+The last four fields are enrichment: if the lookup behind them fails, the event
+is still delivered with the first three. A thin event beats a dropped one, so
+treat `intent_id` as the only identifier guaranteed to be there.
+
+Fields are added to payloads over time; ignore ones you don't recognise.

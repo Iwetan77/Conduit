@@ -782,9 +782,8 @@ func (h *SettlementIntents) Confirm(w http.ResponseWriter, r *http.Request) {
 	)
 
 	if h.Webhooks != nil {
-		_ = h.Webhooks.Enqueue(r.Context(), accountID, "settlement.succeeded", map[string]any{
-			"intent_id": id, "tx_hash": makerTxHash, "status": "settled",
-		})
+		_ = h.Webhooks.Enqueue(r.Context(), accountID, "settlement.succeeded",
+			links.SettledPayload(r.Context(), h.Pool, id, makerTxHash))
 	}
 
 	writeJSON(w, http.StatusOK, confirmResponse{Status: "settled", TxHash: makerTxHash})
@@ -949,9 +948,8 @@ func (h *SettlementIntents) RecordDirectSettlement(w http.ResponseWriter, r *htt
 	)
 
 	if h.Webhooks != nil {
-		_ = h.Webhooks.Enqueue(ctx, accountID, "settlement.succeeded", map[string]any{
-			"intent_id": id, "tx_hash": txHash, "status": "settled",
-		})
+		_ = h.Webhooks.Enqueue(ctx, accountID, "settlement.succeeded",
+			links.SettledPayload(ctx, h.Pool, id, txHash))
 	}
 
 	writeJSON(w, http.StatusOK, confirmResponse{Status: "settled", TxHash: txHash})

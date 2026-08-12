@@ -1,10 +1,13 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
+
+	"github.com/kzn-labs/conduit/api/internal/links"
 )
 
 // TestStorefrontAPIKey: a storefront's own credential can be minted, actually
@@ -101,5 +104,73 @@ func TestStorefrontAPIKeyTenancy(t *testing.T) {
 	resp = doJSON(t, srv.URL, "POST", "/v1/accounts/"+other.ID+"/api_keys", key, ``, "")
 	if resp.status != http.StatusNotFound {
 		t.Fatalf("cross-tenant key mint: expected 404, got %d body=%s", resp.status, resp.body)
+	}
+}
+
+// TestSettledWebhookPayloadIdentifiesTheBill: settlement.succeeded must be
+// mappable back to the bill that was printed.
+//
+// The payload used to carry only intent_id, and a till has never seen that id:
+// it creates a payment link when the bill prints, and the intent is minted
+// later, when the diner opens checkout. So a webhook could not be matched to a
+// table without a second API call, which made polling the only workable
+// integration. payment_link_id and merchant_reference close that; amount and
+// settle_currency let the till assert the money that arrived is the money it
+// asked for, rather than assuming it.
+func TestSettledWebhookPayloadIdentifiesTheBill(t *testing.T) {
+	srv, key, pool := newLinkTestServer(t, 15511)
+	ctx := context.Background()
+
+	resp := doJSON(t, srv.URL, "POST", "/v1/payment_links", key,
+		`{"amount_mode":"fixed","amount":11099,"settle_currency":"EUR","settle_address":"0x00000000000000000000000000000000000000EE","reuse_policy":"single_use","merchant_reference":"table-14/bill-8871"}`, "")
+	if resp.status != http.StatusCreated {
+		t.Fatalf("create bill link: status=%d body=%s", resp.status, resp.body)
+	}
+	var link struct {
+		ID string `json:"id"`
+	}
+	json.Unmarshal([]byte(resp.body), &link)
+
+	resp = doJSON(t, srv.URL, "POST", "/v1/payment_links/"+link.ID+"/pay", "",
+		`{"payer_reference":"diner-ref-1"}`, "")
+	if resp.status != http.StatusCreated {
+		t.Fatalf("pay: status=%d body=%s", resp.status, resp.body)
+	}
+	var intent struct {
+		ID string `json:"id"`
+	}
+	json.Unmarshal([]byte(resp.body), &intent)
+
+	// The exact payload every settlement path now sends.
+	payload := links.SettledPayload(ctx, pool, intent.ID, "0xdeadbeef")
+
+	if payload["payment_link_id"] != link.ID {
+		t.Errorf("payment_link_id = %v, want %s", payload["payment_link_id"], link.ID)
+	}
+	if payload["merchant_reference"] != "table-14/bill-8871" {
+		t.Errorf("merchant_reference = %v, want the bill number", payload["merchant_reference"])
+	}
+	if payload["payer_reference"] != "diner-ref-1" {
+		t.Errorf("payer_reference = %v", payload["payer_reference"])
+	}
+	if payload["amount"] != "11099" {
+		t.Errorf("amount = %v, want the bill total in minor units", payload["amount"])
+	}
+	if payload["settle_currency"] != "EUR" {
+		t.Errorf("settle_currency = %v", payload["settle_currency"])
+	}
+	// Core fields must survive alongside the new ones.
+	if payload["intent_id"] != intent.ID || payload["status"] != "settled" || payload["tx_hash"] != "0xdeadbeef" {
+		t.Errorf("core fields altered: %#v", payload)
+	}
+
+	// A settlement with no link behind it (a direct send) must still produce a
+	// valid payload rather than failing enrichment.
+	bare := links.SettledPayload(ctx, pool, "si_does_not_exist", "0xabc")
+	if bare["intent_id"] != "si_does_not_exist" || bare["status"] != "settled" {
+		t.Errorf("unenrichable payload lost its core fields: %#v", bare)
+	}
+	if _, ok := bare["payment_link_id"]; ok {
+		t.Error("payment_link_id should be absent, not empty, when there is no link")
 	}
 }

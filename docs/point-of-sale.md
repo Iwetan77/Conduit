@@ -100,25 +100,50 @@ receipt.
 
 ## 4. Know when it's paid
 
-Poll the link until it closes. For a till this is simpler and more robust than
-a webhook — the terminal already has a "waiting for payment" screen open, and
-polling needs no public endpoint on the restaurant's network.
+> **`viewed` is not `paid`.** A link moves `active` → `viewed` → `paid`.
+> `viewed` means somebody *scanned the QR* — nothing more. Anyone can scan a
+> receipt and walk out. Only `paid` means money landed, and only `paid` should
+> ever open the cash drawer.
+
+### Webhooks (preferred)
+
+`settlement.succeeded` carries everything a till needs to close a bill:
+
+```json
+{
+  "intent_id": "si_9x2LmQ",
+  "tx_hash": "0x…",
+  "status": "settled",
+  "amount": "110990000",
+  "settle_currency": "EUR",
+  "payment_link_id": "pl_7Qk2mF",
+  "merchant_reference": "table-14/bill-8871"
+}
+```
+
+Match on `merchant_reference` (your bill number) or `payment_link_id`. Don't
+match on `intent_id` — the intent is created when the diner opens checkout, so
+it's an id your till has never seen.
+
+**Check the amount before closing the bill.** `amount` is in integer minor units
+and should equal what you asked for. Compare integers; never parse it to a
+float.
+
+Verify the signature — see [Webhook verification](/docs/guides/webhooks). An
+unverified webhook endpoint is a way to tell your tills that unpaid bills were
+paid.
+
+### Polling (fallback)
+
+Reasonable when the restaurant's network has no public inbound endpoint:
 
 ```bash
 curl https://api.example.com/v1/payment_links/pl_7Qk2mF \
   -H "Authorization: Bearer sk_test_<storefront key>"
 ```
 
-`status` moves `active` → `viewed` (customer opened it) → `paid` (money actually
-landed). Only `paid` means paid. `viewed` means someone scanned it, which is not
-the same thing and must never open the cash drawer.
-
-Every couple of seconds is plenty; a settlement is not instant.
-
-**Webhooks**: `settlement.succeeded` also fires, but its payload currently
-carries `intent_id` and not the `payment_link_id` or your
-`merchant_reference` — so a till can't map it back to a bill without an extra
-lookup. Poll for now.
+Every couple of seconds is plenty; settlement is not instant. Act on
+`status == "paid"` and nothing else.
 
 ## 5. Reconcile
 

@@ -26,6 +26,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/kzn-labs/conduit/api/internal/links"
 	"github.com/kzn-labs/conduit/api/internal/models"
+	"github.com/kzn-labs/conduit/api/internal/webhooks"
 )
 
 // PaymentSettled(bytes32 indexed receiptId, address indexed payer, address indexed recipient,
@@ -54,6 +55,14 @@ type Indexer struct {
 	// ReconcileWindow is how many trailing blocks the 15s poller re-scans, as
 	// insurance against a dropped WS subscription silently missing events.
 	ReconcileWindow uint64
+
+	// Webhooks, when set, emits settlement.succeeded for settlements this
+	// indexer discovers on-chain. Optional so the indexer still runs headless
+	// in tests, but in production it must be wired: without it a same-currency
+	// router payment updates the database and tells the merchant nothing, while
+	// the identical payment through the confirm/record handlers notifies them.
+	// Two paths to the same event should not disagree about whether it happened.
+	Webhooks *webhooks.Dispatcher
 }
 
 func New(pool *pgxpool.Pool, client *ethclient.Client, routerAddress common.Address) (*Indexer, error) {
@@ -231,6 +240,35 @@ func (ix *Indexer) processLog(ctx context.Context, vLog types.Log) error {
 	// A payment link backing this intent closes only here, on a real on-chain
 	// settlement — never at checkout start (see payment_links.go Pay()) — and
 	// only if it was single-use. See internal/links for why.
-	_, err = ix.pool.Exec(ctx, links.SettleByDeclarationSQL, declarationID)
-	return err
+	if _, err = ix.pool.Exec(ctx, links.SettleByDeclarationSQL, declarationID); err != nil {
+		return err
+	}
+
+	ix.emitSettled(ctx, declarationID, vLog.TxHash.Hex())
+	return nil
+}
+
+// emitSettled notifies the merchant that this settlement landed.
+//
+// Reached only after the settlements INSERT actually affected a row, so the
+// dedupe on (tx_hash, log_index) that makes reprocessing safe also makes this
+// fire exactly once per settlement — the live subscription and the 15s
+// reconciler routinely see the same log twice.
+//
+// Best-effort by design: a webhook that fails to enqueue must not roll back or
+// retry the on-chain bookkeeping above, which is already durable.
+func (ix *Indexer) emitSettled(ctx context.Context, declarationID, txHash string) {
+	if ix.Webhooks == nil {
+		return
+	}
+	var accountID, intentID string
+	if err := ix.pool.QueryRow(ctx,
+		`SELECT account_id, id FROM settlement_intents WHERE declaration_id = $1`,
+		declarationID,
+	).Scan(&accountID, &intentID); err != nil {
+		log.Printf("indexer: resolve intent for %s: %v — settlement.succeeded not sent", declarationID, err)
+		return
+	}
+	_ = ix.Webhooks.Enqueue(ctx, accountID, "settlement.succeeded",
+		links.SettledPayloadByDeclaration(ctx, ix.pool, declarationID, intentID, txHash))
 }

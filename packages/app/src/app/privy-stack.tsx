@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { QueryClient } from "@tanstack/react-query";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { PrivyProvider, useLoginWithOAuth, usePrivy } from "@privy-io/react-auth";
@@ -13,6 +13,7 @@ import { useDisconnect } from "wagmi";
 import { wagmiConfigParams, arcTestnet } from "@/lib/wagmi";
 import {
   GOOGLE_LOGIN_ALREADY,
+  PrivyGateContext,
   GOOGLE_LOGIN_EVENT,
   GOOGLE_LOGIN_FAILED,
   GOOGLE_LOGIN_FLAG,
@@ -41,25 +42,35 @@ const privyWagmiConfig = createPrivyWagmiConfig(wagmiConfigParams);
 // the connected state directly (connector, accounts, chainId), skipping the
 // handshake entirely.
 //
-// The embedded wallet wins whenever the user has one.
+// You sign with whatever you signed IN with.
 //
-// This used to prefer an EXTERNAL wallet, on the reasoning that someone who
-// deliberately connected MetaMask should pay from it. The reasoning was wrong,
-// because "connected" isn't deliberate: a browser extension auto-connects on
-// page load. So signing in with Google gave you your Conduit wallet on a phone
-// and MetaMask on a laptop that happened to have the extension installed --
-// same account, same login, two different addresses, and the laptop one empty.
-// The result was a user staring at a 0.00 balance for funds they were holding.
+// Signed in with Google (or email) -> your Privy embedded wallet.
+// Connected MetaMask/WalletConnect instead -> that wallet.
 //
-// Someone who has no embedded wallet -- a payer who connected a real wallet
-// instead of signing in -- still gets that wallet, because it's the only one
-// in the list. Nothing about that path changes.
+// `user` is the whole test. loginMethods is ["email", "google"], so an
+// authenticated Privy user always got there through Google or email; an
+// external wallet is never a Privy login here, it's a wagmi connection. So a
+// non-null user means "signed in", and a null one means "connected a wallet".
 //
-// The trade-off this accepts: a Privy-signed-in user cannot currently choose to
-// pay from an external wallet on Arc. That needs an explicit wallet switcher,
-// which is a feature; being silently handed the wrong wallet is a bug.
-const pickWalletForWagmi = ({ wallets }: { wallets: ConnectedWallet[]; user: User | null }) =>
-  wallets.find((w) => w.walletClientType === "privy") ?? wallets[0];
+// Two earlier versions of this both got it wrong in one direction each. It
+// first preferred an EXTERNAL wallet, reasoning that someone who deliberately
+// connected MetaMask should pay from it -- but "connected" isn't deliberate,
+// because an extension auto-connects on page load. Signing in with Google then
+// gave you your Conduit wallet on a phone and MetaMask on a laptop that merely
+// had the extension installed: same login, two addresses, the laptop one empty,
+// and a 0.00 balance shown for funds you were holding. The fix for that
+// over-corrected to "always prefer embedded", which would hijack a genuine
+// MetaMask connection from someone who never signed in with Google at all.
+//
+// Keying off how the session was established is right where both were wrong,
+// and it needs no wallet switcher: the choice was already made at sign-in.
+const pickWalletForWagmi = ({ wallets, user }: { wallets: ConnectedWallet[]; user: User | null }) => {
+  const embedded = wallets.find((w) => w.walletClientType === "privy");
+  const external = wallets.find((w) => w.walletClientType !== "privy");
+  // The fallbacks matter during sign-in, when the wallet list can briefly hold
+  // only the other kind — better a connected account for a moment than none.
+  return user ? (embedded ?? wallets[0]) : (external ?? wallets[0]);
+};
 
 // The heavy half of the provider stack (~700 kB of @privy-io/*), loaded
 // lazily by providers.tsx only when something actually needs Privy: a
@@ -104,11 +115,25 @@ export default function PrivyStack({
           <HandleSignOut />
           <EnsureEmbeddedWallet />
           <SyncSessionToken />
-          {children}
+          <PublishWalletSettled>{children}</PublishWalletSettled>
         </PrivyWagmiProvider>
       </QueryClientProvider>
     </PrivyProvider>
   );
+}
+
+// Tells the rest of the app when useAccount()'s address is final.
+//
+// providers.tsx mounts this stack with walletSettled:false, because until
+// Privy has booted, the connected account is whatever a browser extension
+// auto-connected — not necessarily the wallet this user signed in with.
+// Re-providing the gate from INSIDE the stack is what lets a component outside
+// it (the nav, the connect chip) read a value only usePrivy() can supply.
+function PublishWalletSettled({ children }: { children: React.ReactNode }) {
+  const outer = useContext(PrivyGateContext);
+  const { ready } = usePrivy();
+  const value = useMemo(() => ({ ...outer, walletSettled: ready }), [outer, ready]);
+  return <PrivyGateContext.Provider value={value}>{children}</PrivyGateContext.Provider>;
 }
 
 // The Google button (WalletConnect.tsx) may have been clicked BEFORE this

@@ -158,8 +158,9 @@ export function Nav({ minimal = false }: { minimal?: boolean } = {}) {
   const { switchChain } = useSwitchChain();
   const [mounted, setMounted] = useState(false);
   useEffect(() => { setMounted(true); }, []);
+  const { walletSettled } = usePrivyGate();
 
-  const isWrongNetwork = mounted && isConnected && chainId !== arcTestnet.id;
+  const isWrongNetwork = mounted && walletSettled && isConnected && chainId !== arcTestnet.id;
 
   return (
     <header className="fixed top-0 left-0 right-0 z-50 border-b border-border bg-bg">
@@ -188,7 +189,15 @@ export function Nav({ minimal = false }: { minimal?: boolean } = {}) {
         </nav>
 
         <div className="flex-1 flex items-center justify-end">
-          {!mounted ? null : isWrongNetwork ? (
+          {/* walletSettled: until Privy has booted, useAccount() reports
+              whichever wallet an extension auto-connected, which is not
+              necessarily the one this user signed in with. Showing it anyway
+              flashed a MetaMask address — copyable, with a balance beside it —
+              before swapping to the real one a second later. A placeholder of
+              the same size holds the layout without asserting anything. */}
+          {!mounted ? null : !walletSettled ? (
+            <div className="h-9 w-32" aria-hidden />
+          ) : isWrongNetwork ? (
             <button
               onClick={() => switchChain({ chainId: arcTestnet.id })}
               className="px-4 py-2 text-scale-2 font-mono bg-danger/10

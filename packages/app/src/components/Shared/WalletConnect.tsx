@@ -202,10 +202,15 @@ export function WalletConnect() {
   const [mounted, setMounted] = useState(false);
   const { address, isConnected } = useAccount();
   const { connect, connectors, isPending } = useConnect();
-  const { mounted: privyMounted } = usePrivyGate();
+  const { mounted: privyMounted, walletSettled } = usePrivyGate();
 
   useEffect(() => { setMounted(true); }, []);
   if (!mounted) return null;
+
+  // Same reason as the nav: before Privy has booted, `address` may be whatever
+  // wallet an extension auto-connected rather than the one this user signed in
+  // with, and showing it invites acting on the wrong account.
+  if (!walletSettled) return null;
 
   if (isConnected && address) {
     return <ConnectedChip address={address} />;
@@ -242,10 +247,11 @@ export function WalletConnectCompact() {
   const [mounted, setMounted] = useState(false);
   const { address, isConnected } = useAccount();
   const { connect, connectors, isPending } = useConnect();
-  const { mounted: privyMounted } = usePrivyGate();
+  const { mounted: privyMounted, walletSettled } = usePrivyGate();
 
   useEffect(() => { setMounted(true); }, []);
   if (!mounted) return null;
+  if (!walletSettled) return null;
 
   if (isConnected && address) {
     return <ConnectedChip address={address} compact />;

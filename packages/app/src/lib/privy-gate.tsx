@@ -25,11 +25,24 @@ export interface PrivyGate {
   mounted: boolean;
   // Ask providers.tsx to mount the Privy stack (idempotent).
   requestMount: () => void;
+  // True when useAccount()'s address can be trusted as final.
+  //
+  // A browser extension auto-connects on page load, while Privy boots
+  // asynchronously and only then hands wagmi the embedded wallet. For roughly a
+  // second, useAccount() therefore reports whichever wallet won the race —
+  // which is how signing in with Google briefly showed a MetaMask address
+  // before swapping to the Conduit one. Anything that DISPLAYS an address (and
+  // offers to copy it) or reads a balance must wait for this, or it shows the
+  // user an account that isn't theirs and invites them to send funds to it.
+  //
+  // Always true when the Privy stack isn't mounted: no Privy, no race.
+  walletSettled: boolean;
 }
 
 export const PrivyGateContext = createContext<PrivyGate>({
   mounted: false,
   requestMount: () => {},
+  walletSettled: true,
 });
 
 export function usePrivyGate(): PrivyGate {

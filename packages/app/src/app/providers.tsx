@@ -53,7 +53,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
 
   if (!privyOn) {
     return (
-      <PrivyGateContext.Provider value={{ mounted: false, requestMount }}>
+      <PrivyGateContext.Provider value={{ mounted: false, requestMount, walletSettled: true }}>
         <WagmiProvider config={wagmiConfig}>
           <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
         </WagmiProvider>
@@ -62,7 +62,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <PrivyGateContext.Provider value={{ mounted: true, requestMount }}>
+    <PrivyGateContext.Provider value={{ mounted: true, requestMount, walletSettled: false }}>
       <PrivyStack appId={PRIVY_APP_ID} queryClient={queryClient}>
         {children}
       </PrivyStack>

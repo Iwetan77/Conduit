@@ -41,6 +41,8 @@ func main() {
 		ArcRelayerKey:        os.Getenv("ARC_RELAYER_KEY"),
 		PrivyAppID:           os.Getenv("PRIVY_APP_ID"),
 		PrivyVerificationKey: os.Getenv("PRIVY_VERIFICATION_KEY"),
+		CircleAPIKey:         loadCircleKey(),
+		CircleBaseURL:        os.Getenv("CIRCLE_BASE_URL"),
 	}
 	handler := server.New(cfg)
 
@@ -99,4 +101,25 @@ func findMigrationsDir() string {
 	}
 	_, thisFile, _, _ := runtime.Caller(0)
 	return filepath.Join(filepath.Dir(thisFile), "..", "..", "migrations")
+}
+
+// loadCircleKey mirrors loadStableFXKey: env var first, then packages/api/.env,
+// so `go run ./cmd/api` works without exporting anything. Unlike StableFX this
+// never fatals — Circle Wallets are opt-in, and a deployment without the key
+// simply doesn't serve those routes.
+func loadCircleKey() string {
+	if v := os.Getenv("CIRCLE_API_KEY"); v != "" {
+		return v
+	}
+	_, thisFile, _, _ := runtime.Caller(0)
+	data, err := os.ReadFile(filepath.Join(filepath.Dir(thisFile), "..", "..", ".env"))
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.HasPrefix(line, "CIRCLE_API_KEY=") {
+			return strings.TrimSpace(strings.TrimPrefix(line, "CIRCLE_API_KEY="))
+		}
+	}
+	return ""
 }

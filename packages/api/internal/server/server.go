@@ -20,6 +20,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/kzn-labs/conduit/api/internal/auth"
 	bridgepkg "github.com/kzn-labs/conduit/api/internal/bridge"
+	"github.com/kzn-labs/conduit/api/internal/circle"
 	"github.com/kzn-labs/conduit/api/internal/fx"
 	"github.com/kzn-labs/conduit/api/internal/handlers"
 	"github.com/kzn-labs/conduit/api/internal/idempotency"
@@ -48,6 +49,12 @@ type Config struct {
 	// (same opt-in pattern as the bridge feature above).
 	PrivyAppID           string
 	PrivyVerificationKey string // ES256 public key, PEM
+
+	// Circle Wallets. Optional on the same opt-in pattern: with no API key
+	// the /auth/circle routes report "not configured" rather than failing
+	// every call, so a deployment without it behaves exactly as before.
+	CircleAPIKey  string
+	CircleBaseURL string
 }
 
 func New(cfg Config) http.Handler {
@@ -65,6 +72,10 @@ func New(cfg Config) http.Handler {
 
 	accountsH := &handlers.Accounts{Pool: cfg.Pool, PrivyVerifier: privyVerifier}
 	apiKeysH := &handlers.ApiKeys{Pool: cfg.Pool}
+	circleAuthH := &handlers.CircleAuth{
+		Client:      circle.New(cfg.CircleBaseURL, cfg.CircleAPIKey),
+		Blockchains: []string{"ARC-TESTNET"},
+	}
 	// Server-side balance reads with a short cache. Keeps N browsers from
 	// each fanning out their own RPC calls and tripping Arc's rate limiter.
 	arcRPCForBalances := cfg.ArcRPC
@@ -163,6 +174,15 @@ func New(cfg Config) http.Handler {
 		// privy_user_id. Registered only when Privy is configured.
 		if privyVerifier != nil {
 			r.Post("/accounts/privy", accountsH.CreateFromPrivy)
+
+			// Circle Wallets: the browser cannot hold the Circle API key, so
+			// device tokens and challenge ids are minted here. Unauthenticated
+			// for the same reason /accounts/privy is -- the identity being
+			// established is the point of the call.
+			r.Post("/auth/circle/device", circleAuthH.StartLogin)
+			r.Post("/auth/circle/initialize", circleAuthH.Initialize)
+			r.Get("/auth/circle/wallets", circleAuthH.Wallets)
+			r.Post("/auth/circle/sign_typed_data", circleAuthH.SignTypedData)
 		}
 
 		// Public, minimal intent details for the payer surface (/pay/[id]) --

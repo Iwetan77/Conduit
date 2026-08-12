@@ -9,7 +9,7 @@ import {
   WagmiProvider as PrivyWagmiProvider,
   createConfig as createPrivyWagmiConfig,
 } from "@privy-io/wagmi";
-import { useDisconnect } from "wagmi";
+import { useAccount, useDisconnect } from "wagmi";
 import { wagmiConfigParams, arcTestnet } from "@/lib/wagmi";
 import {
   GOOGLE_LOGIN_ALREADY,
@@ -131,8 +131,29 @@ export default function PrivyStack({
 // it (the nav, the connect chip) read a value only usePrivy() can supply.
 function PublishWalletSettled({ children }: { children: React.ReactNode }) {
   const outer = useContext(PrivyGateContext);
-  const { ready } = usePrivy();
-  const value = useMemo(() => ({ ...outer, walletSettled: ready }), [outer, ready]);
+  const { ready, authenticated, user } = usePrivy();
+  const { address } = useAccount();
+
+  // Gating on Privy's `ready` was not enough, and the address still flashed.
+  // `ready` only means Privy finished initialising -- at that moment the
+  // embedded wallet has not yet been synced into wagmi, so useAccount() is
+  // still reporting whatever the browser extension auto-connected. The swap
+  // lands a beat later, which is exactly the flash it was meant to prevent.
+  //
+  // So don't time it, TEST it: for a signed-in user the address is final only
+  // once it actually equals their embedded wallet. No timeout fallback, because
+  // the only thing a timeout could do here is give up and display the wrong
+  // account -- the failure this exists to prevent.
+  const expected = user?.wallet?.address;
+  const settled = !ready
+    ? false
+    : !authenticated
+      ? true // connected a wallet rather than signing in; nothing to wait for
+      : !expected
+        ? true // signed in but has no embedded wallet at all
+        : !!address && address.toLowerCase() === expected.toLowerCase();
+
+  const value = useMemo(() => ({ ...outer, walletSettled: settled }), [outer, settled]);
   return <PrivyGateContext.Provider value={value}>{children}</PrivyGateContext.Provider>;
 }
 

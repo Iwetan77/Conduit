@@ -761,18 +761,19 @@ func (h *SettlementIntents) Confirm(w http.ResponseWriter, r *http.Request) {
 	// carry a real fee figure but Confirm doesn't have it in scope at this
 	// point (would need threading it through from Quote via fx_trades) --
 	// noted in whereistopped.md, not fixed this session.
-	var settleAmount, settleCurrency, payCurrency, payAmount, rate string
+	var settleAmount, settleCurrency, payCurrency, payAmount, rate, fxPayerAddress string
 	h.Pool.QueryRow(r.Context(),
-		`SELECT si.amount::text, si.settle_currency, ft.pay_currency, ft.pay_amount::text, COALESCE(ft.rate::text,'')
+		`SELECT si.amount::text, si.settle_currency, ft.pay_currency, ft.pay_amount::text,
+		        COALESCE(ft.rate::text,''), COALESCE(ft.pay_address,'')
 		 FROM settlement_intents si JOIN fx_trades ft ON ft.id = $1 WHERE si.id = $2`,
 		tradeID, id,
-	).Scan(&settleAmount, &settleCurrency, &payCurrency, &payAmount, &rate)
+	).Scan(&settleAmount, &settleCurrency, &payCurrency, &payAmount, &rate, &fxPayerAddress)
 
 	settlementRowID := models.NewID("stl")
 	h.Pool.Exec(r.Context(),
-		`INSERT INTO settlements (id, intent_id, fx_trade_id, tx_hash, receipt_id, pay_currency, pay_amount, settle_amount, rate_applied, fee, block_number, log_index, settled_at)
-		 VALUES ($1,$2,$3,$4,$4,$5,$6,$7,NULLIF($8,'')::numeric,0,0,0,now())`,
-		settlementRowID, id, tradeID, makerTxHash, payCurrency, payAmount, settleAmount, rate,
+		`INSERT INTO settlements (id, intent_id, fx_trade_id, tx_hash, receipt_id, pay_currency, pay_amount, settle_amount, rate_applied, fee, block_number, log_index, settled_at, payer_address)
+		 VALUES ($1,$2,$3,$4,$4,$5,$6,$7,NULLIF($8,'')::numeric,0,0,0,now(),NULLIF($9,''))`,
+		settlementRowID, id, tradeID, makerTxHash, payCurrency, payAmount, settleAmount, rate, fxPayerAddress,
 	)
 	balanceTxID := models.NewID("btx")
 	h.Pool.Exec(r.Context(),
@@ -895,6 +896,9 @@ func (h *SettlementIntents) RecordDirectSettlement(w http.ResponseWriter, r *htt
 	settleAddr := common.HexToAddress(settleAddress)
 	var paidAmount *big.Int
 	var matchedLogIndex uint
+	// Topics[1] of the matched Transfer is who sent it: the payer, straight
+	// from the chain, not something a caller can assert.
+	var payerAddress string
 	for _, lg := range receipt.Logs {
 		if lg.Address != tokenAddr || len(lg.Topics) != 3 || lg.Topics[0] != erc20TransferTopic {
 			continue
@@ -907,6 +911,7 @@ func (h *SettlementIntents) RecordDirectSettlement(w http.ResponseWriter, r *htt
 		if value.Cmp(amount) >= 0 {
 			paidAmount = value
 			matchedLogIndex = lg.Index
+			payerAddress = common.BytesToAddress(lg.Topics[1].Bytes()).Hex()
 			break
 		}
 	}
@@ -920,11 +925,11 @@ func (h *SettlementIntents) RecordDirectSettlement(w http.ResponseWriter, r *htt
 	// skip the balance_transaction + webhook so neither ever fires twice.
 	settlementID := models.NewID("stl")
 	tag, err := h.Pool.Exec(ctx,
-		`INSERT INTO settlements (id, intent_id, tx_hash, receipt_id, pay_currency, pay_amount, settle_amount, rate_applied, fee, block_number, log_index, settled_at)
-		 VALUES ($1,$2,$3,$3,$4,$5,$6,1,0,$7,$8,now())
+		`INSERT INTO settlements (id, intent_id, tx_hash, receipt_id, pay_currency, pay_amount, settle_amount, rate_applied, fee, block_number, log_index, settled_at, payer_address)
+		 VALUES ($1,$2,$3,$3,$4,$5,$6,1,0,$7,$8,now(),NULLIF($9,''))
 		 ON CONFLICT (tx_hash, log_index) DO NOTHING`,
 		settlementID, id, txHash, settleInfo.Symbol, paidAmount.String(), amountStr,
-		receipt.BlockNumber.Uint64(), matchedLogIndex,
+		receipt.BlockNumber.Uint64(), matchedLogIndex, payerAddress,
 	)
 	if err != nil {
 		writeErr(w, apierrors.E(apierrors.CodeInternal, ""))

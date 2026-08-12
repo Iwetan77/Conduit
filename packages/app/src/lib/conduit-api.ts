@@ -445,6 +445,9 @@ export interface Settlement {
   intent_id: string;
   reference?: string;
   settle_address: string;
+  /** Who paid. Absent for cross-chain: the address moving funds on Arc there
+   *  is Conduit's relayer, not the payer. */
+  payer_address?: string;
   pay_currency: string;
   pay_amount: string;
   settle_currency: string;

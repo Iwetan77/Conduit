@@ -28,7 +28,7 @@ export default function SettlementsPage() {
   const filtered = useMemo(() => {
     return (settlements ?? []).filter((s) => {
       if (currencyFilter !== "all" && s.settle_currency !== currencyFilter) return false;
-      if (search && !`${s.reference ?? ""} ${s.settle_address}`.toLowerCase().includes(search.toLowerCase())) return false;
+      if (search && !`${s.reference ?? ""} ${s.payer_address ?? ""} ${s.settle_address}`.toLowerCase().includes(search.toLowerCase())) return false;
       return true;
     });
   }, [settlements, currencyFilter, search]);
@@ -169,7 +169,12 @@ export default function SettlementsPage() {
                   <tr key={s.id} className="border-b border-border last:border-0 hover:bg-surface/50">
                     <td className="px-4 py-3 whitespace-nowrap font-mono text-ink-dim">{formatDate(new Date(s.settled_at).getTime() / 1000)}</td>
                     <td className="px-4 py-3 font-mono">{s.reference || "—"}</td>
-                    <td className="px-4 py-3 font-mono text-xs">{shortenAddress(s.settle_address)}</td>
+                    {/* Was settle_address — the merchant's OWN receiving
+                        address, so this column showed the same value on every
+                        row and named the wrong party entirely. */}
+                    <td className="px-4 py-3 font-mono text-xs">
+                      {s.payer_address ? shortenAddress(s.payer_address) : <span className="text-ink-dim">—</span>}
+                    </td>
                     <td className="px-4 py-3 whitespace-nowrap font-mono text-right">{formatMinorUnits(s.pay_amount, s.pay_currency)}</td>
                     <td className="px-4 py-3 whitespace-nowrap font-mono text-right">{formatMinorUnits(s.settle_amount, s.settle_currency)}</td>
                     <td className="px-4 py-3 font-mono text-right">{s.rate_applied ?? "—"}</td>

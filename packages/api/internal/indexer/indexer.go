@@ -203,6 +203,10 @@ func (ix *Indexer) processLog(ctx context.Context, vLog types.Log) error {
 		return fmt.Errorf("unexpected topic count %d", len(vLog.Topics))
 	}
 	receiptID := vLog.Topics[1].Hex()
+	// Topics[2] is the indexed `payer` — who the money came from. Recorded so
+	// the dashboard can name a counterparty instead of echoing the merchant's
+	// own settle address back at them.
+	payer := common.BytesToAddress(vLog.Topics[2].Bytes()).Hex()
 
 	var ev paymentSettledEvent
 	if err := ix.eventABI.UnpackIntoInterface(&ev, "PaymentSettled", vLog.Data); err != nil {
@@ -215,12 +219,12 @@ func (ix *Indexer) processLog(ctx context.Context, vLog types.Log) error {
 	// subscription and the reconciler re-scanning the same block twice.
 	settlementID := models.NewID("stl")
 	tag, err := ix.pool.Exec(ctx,
-		`INSERT INTO settlements (id, intent_id, tx_hash, receipt_id, pay_currency, pay_amount, settle_amount, block_number, log_index, settled_at)
-		 SELECT $1, si.id, $2, $3, si.settle_currency, $4, $5, $6, $7, now()
+		`INSERT INTO settlements (id, intent_id, tx_hash, receipt_id, pay_currency, pay_amount, settle_amount, block_number, log_index, settled_at, payer_address)
+		 SELECT $1, si.id, $2, $3, si.settle_currency, $4, $5, $6, $7, now(), $9
 		 FROM settlement_intents si WHERE si.declaration_id = $8
 		 ON CONFLICT (tx_hash, log_index) DO NOTHING`,
 		settlementID, vLog.TxHash.Hex(), receiptID, ev.PayerAmount.String(), ev.RecipientAmount.String(),
-		vLog.BlockNumber, vLog.Index, declarationID,
+		vLog.BlockNumber, vLog.Index, declarationID, payer,
 	)
 	if err != nil {
 		return fmt.Errorf("insert settlement: %w", err)

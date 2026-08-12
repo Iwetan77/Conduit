@@ -1,0 +1,20 @@
+-- Who paid.
+--
+-- Nothing recorded this, so the dashboard's "Counterparty" column showed
+-- settle_address instead -- the merchant's OWN receiving address, identical on
+-- every row. The one column that should say who a payment came from was the
+-- only one that couldn't.
+--
+-- The address is knowable on every path that isn't a bridge:
+--   * StableFX      -- fx_trades.pay_address, the address whose signature
+--                      Circle verifies the trade against
+--   * direct pay    -- the `from` of the ERC-20 Transfer the receipt is
+--                      verified against
+--   * on-chain      -- PaymentSettled's indexed payer topic
+--
+-- Nullable because cross-chain is a real exception rather than an oversight:
+-- the account that moves USDC on Arc for a bridged payment is Conduit's own
+-- relayer, so recording it would name the wrong party with full confidence.
+-- The payer's source-chain wallet is on another chain entirely and is not an
+-- Arc address. NULL says "we don't know", which is true and honest.
+ALTER TABLE settlements ADD COLUMN payer_address TEXT;

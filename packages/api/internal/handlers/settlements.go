@@ -16,10 +16,13 @@ import (
 type Settlements struct{ Pool *pgxpool.Pool }
 
 type settlementResponse struct {
-	ID             string  `json:"id"`
-	IntentID       string  `json:"intent_id"`
-	Reference      string  `json:"reference,omitempty"`
-	SettleAddress  string  `json:"settle_address"`
+	ID            string `json:"id"`
+	IntentID      string `json:"intent_id"`
+	Reference     string `json:"reference,omitempty"`
+	SettleAddress string `json:"settle_address"`
+	// Who paid. Absent for cross-chain, where the account that moves funds on
+	// Arc is Conduit's relayer rather than the payer -- see migration 0013.
+	PayerAddress   *string `json:"payer_address,omitempty"`
 	PayCurrency    string  `json:"pay_currency"`
 	PayAmount      string  `json:"pay_amount"`
 	SettleCurrency string  `json:"settle_currency"`
@@ -33,16 +36,17 @@ type settlementResponse struct {
 const settlementSelect = `
 	SELECT s.id, s.intent_id, COALESCE(si.reference,''), si.settle_address,
 	       s.pay_currency, s.pay_amount::text, si.settle_currency, s.settle_amount::text,
-	       s.rate_applied::text, s.fee::text, s.tx_hash, s.settled_at::text
+	       s.rate_applied::text, s.fee::text, s.tx_hash, s.settled_at::text, s.payer_address
 	FROM settlements s
 	JOIN settlement_intents si ON si.id = s.intent_id`
 
 func scanSettlement(row interface{ Scan(...any) error }) (settlementResponse, error) {
 	var s settlementResponse
-	var rateApplied *string
+	var rateApplied, payerAddress *string
 	err := row.Scan(&s.ID, &s.IntentID, &s.Reference, &s.SettleAddress, &s.PayCurrency, &s.PayAmount,
-		&s.SettleCurrency, &s.SettleAmount, &rateApplied, &s.Fee, &s.TxHash, &s.SettledAt)
+		&s.SettleCurrency, &s.SettleAmount, &rateApplied, &s.Fee, &s.TxHash, &s.SettledAt, &payerAddress)
 	s.RateApplied = rateApplied
+	s.PayerAddress = payerAddress
 	return s, err
 }
 

@@ -101,6 +101,19 @@ body {
   to { opacity: 1; }
 }
 
+/* Payment toasts slide up from the corner. Respects reduced-motion: a
+   notification arriving is the information, the movement is not. */
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.toast-in {
+  animation: toast-in 180ms ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .toast-in { animation: none; }
+}
+
 /* Scrollbar */
 ::-webkit-scrollbar {
   width: 4px;

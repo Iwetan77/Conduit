@@ -8,6 +8,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { clearSessionToken, createAccountFromPrivy, setSessionToken } from "@/lib/conduit-api";
 import { SETTLE_CURRENCIES, settleCurrencyLabel } from "@/lib/currencies";
 import { Logo } from "@/components/Shared/Logo";
+import { PaymentToasts } from "@/components/Dashboard/PaymentToasts";
 
 // Signature moment: the major gridlines draw in once, here specifically —
 // the dashboard is the main surface, not every page. Reuses the single
@@ -368,6 +369,9 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
           a wide screen every page sat hard left with a large dead area to the
           right — most obvious on the narrow forms, which now centre within it. */}
       <main className="flex-1 p-4 md:p-8 max-w-6xl mx-auto w-full overflow-x-hidden">{children}</main>
+      {/* Lives in the shell, not on a page: a payment landing is worth seeing
+          whichever dashboard screen the merchant happens to be on. */}
+      <PaymentToasts />
     </div>
   );
 }

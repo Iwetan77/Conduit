@@ -220,7 +220,16 @@ export default function CircleSpikePage() {
     const res = await fetch(`${API_BASE}${path}`, { ...init, headers });
     const text = await res.text();
     const json = text ? JSON.parse(text) : {};
-    if (!res.ok) throw new Error(json?.error?.message ?? `HTTP ${res.status}`);
+    // `param` carries the cause on a 500: the API renders CodeInternal as the
+    // registry's "An internal error occurred." and puts what actually went
+    // wrong in `param`. Reading only `message` turned every upstream Circle
+    // failure into the same six words with nothing to act on.
+    if (!res.ok) {
+      const e = json?.error as { message?: string; param?: string } | undefined;
+      throw new Error(
+        [e?.message ?? `HTTP ${res.status}`, e?.param].filter(Boolean).join(" — ")
+      );
+    }
     return json;
   };
 

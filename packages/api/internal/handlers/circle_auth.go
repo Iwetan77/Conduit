@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"strings"
 
@@ -26,6 +27,19 @@ type CircleAuth struct {
 	// Blockchains the wallet is created on. Arc is where Conduit settles;
 	// anything else would produce a wallet that can't pay.
 	Blockchains []string
+}
+
+// upstream renders a failed Circle call.
+//
+// E(CodeInternal, …) puts the detail in `param` and serves the registry's
+// "An internal error occurred." as the message, so a client that reads
+// `message` — every client — sees nothing about the cause. Nothing logged it
+// either, which left a failing Circle call with no observable cause anywhere:
+// not in the response, not in the API log. Log it here so the server always
+// knows what Circle actually said.
+func (h *CircleAuth) upstream(w http.ResponseWriter, op string, err error) {
+	log.Printf("circle: %s failed: %v", op, err)
+	writeErr(w, apierrors.E(apierrors.CodeInternal, err.Error()))
 }
 
 func (h *CircleAuth) available(w http.ResponseWriter) bool {
@@ -58,7 +72,7 @@ func (h *CircleAuth) StartLogin(w http.ResponseWriter, r *http.Request) {
 
 	session, err := h.Client.StartSocialLogin(r.Context(), req.DeviceID)
 	if err != nil {
-		writeErr(w, apierrors.E(apierrors.CodeInternal, err.Error()))
+		h.upstream(w, "device token", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{
@@ -81,7 +95,7 @@ func (h *CircleAuth) Initialize(w http.ResponseWriter, r *http.Request) {
 	}
 	challengeID, err := h.Client.InitializeUser(r.Context(), token, h.Blockchains)
 	if err != nil {
-		writeErr(w, apierrors.E(apierrors.CodeInternal, err.Error()))
+		h.upstream(w, "initialize user", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"challenge_id": challengeID})
@@ -99,7 +113,7 @@ func (h *CircleAuth) Wallets(w http.ResponseWriter, r *http.Request) {
 	}
 	wallets, err := h.Client.ListWallets(r.Context(), token)
 	if err != nil {
-		writeErr(w, apierrors.E(apierrors.CodeInternal, err.Error()))
+		h.upstream(w, "list wallets", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": wallets})
@@ -133,7 +147,7 @@ func (h *CircleAuth) SignTypedData(w http.ResponseWriter, r *http.Request) {
 	// through a Go map would reorder keys and change the hash.
 	challengeID, err := h.Client.SignTypedDataChallenge(r.Context(), token, req.WalletID, string(req.Data))
 	if err != nil {
-		writeErr(w, apierrors.E(apierrors.CodeInternal, err.Error()))
+		h.upstream(w, "sign typed data", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"challenge_id": challengeID})

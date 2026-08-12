@@ -128,7 +128,13 @@ func New(cfg Config) http.Handler {
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   allowedOrigins,
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-		AllowedHeaders:   []string{"Authorization", "Content-Type", "Idempotency-Key", "Conduit-Account"},
+		// X-Circle-User-Token is how the browser presents Circle's session on
+		// the /auth/circle/* routes. Leaving it off this list does not produce
+		// a 403 anywhere visible: the preflight answers 200 with no CORS
+		// headers, and the browser refuses to send the real request at all.
+		// The caller sees only "Failed to fetch", with nothing in the API log
+		// because the request never arrived.
+		AllowedHeaders:   []string{"Authorization", "Content-Type", "Idempotency-Key", "Conduit-Account", "X-Circle-User-Token"},
 		AllowCredentials: false,
 		MaxAge:           300,
 	}))

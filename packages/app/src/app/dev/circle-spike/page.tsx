@@ -112,6 +112,18 @@ export default function CircleSpikePage() {
     reject: (e: Error) => void;
   } | null>(null);
 
+  // Mark the step that was in flight as failed. Shared by both entry paths so
+  // a failure is always attributed to the step that actually raised it.
+  const failRunningStep = (err: unknown) => {
+    const msg = err instanceof Error ? err.message : String(err);
+    setSteps((prev) => {
+      const i = prev.findIndex((s) => s.status === "running");
+      if (i === -1) return prev;
+      return prev.map((s, idx) => (idx === i ? { ...s, status: "fail", detail: msg } : s));
+    });
+    setVerdict(`Stopped: ${msg}`);
+  };
+
   const note = (line: string) =>
     setDiag((prev) => (prev.includes(line) ? prev : [...prev, line]));
 
@@ -342,9 +354,10 @@ export default function CircleSpikePage() {
         );
         await finish(session);
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        set(1, "fail", msg);
-        setVerdict(`Stopped: ${msg}`);
+        // Blame whichever step was actually running, not step 2. Hardcoding
+        // step 2 here reported a step 3 network failure as a failed Google
+        // sign-in -- on a run whose own log showed the login had completed.
+        failRunningStep(err);
       } finally {
         setBusy(false);
       }
@@ -355,7 +368,16 @@ export default function CircleSpikePage() {
   const api = async (path: string, init?: RequestInit & { userToken?: string }) => {
     const headers: Record<string, string> = { "content-type": "application/json" };
     if (init?.userToken) headers["X-Circle-User-Token"] = init.userToken;
-    const res = await fetch(`${API_BASE}${path}`, { ...init, headers });
+    // "Failed to fetch" is what the browser says for a blocked CORS preflight
+    // and for a dead server alike, with nothing in the API log either way
+    // because the request never arrives. Name both so the next one is one
+    // check, not an investigation.
+    const res = await fetch(`${API_BASE}${path}`, { ...init, headers }).catch(() => {
+      throw new Error(
+        `could not reach ${API_BASE}${path} — the API is down, or CORS refused the request` +
+          (init?.userToken ? " (this call sends X-Circle-User-Token)" : "")
+      );
+    });
     const text = await res.text();
     const json = text ? JSON.parse(text) : {};
     // `param` carries the cause on a 500: the API renders CodeInternal as the
@@ -521,13 +543,7 @@ export default function CircleSpikePage() {
 
       await finish(session);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      setSteps((prev) => {
-        const i = prev.findIndex((s) => s.status === "running");
-        if (i === -1) return prev;
-        return prev.map((s, idx) => (idx === i ? { ...s, status: "fail", detail: msg } : s));
-      });
-      setVerdict(`Stopped: ${msg}`);
+      failRunningStep(err);
     } finally {
       setBusy(false);
     }

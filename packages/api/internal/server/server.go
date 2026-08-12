@@ -174,16 +174,23 @@ func New(cfg Config) http.Handler {
 		// privy_user_id. Registered only when Privy is configured.
 		if privyVerifier != nil {
 			r.Post("/accounts/privy", accountsH.CreateFromPrivy)
-
-			// Circle Wallets: the browser cannot hold the Circle API key, so
-			// device tokens and challenge ids are minted here. Unauthenticated
-			// for the same reason /accounts/privy is -- the identity being
-			// established is the point of the call.
-			r.Post("/auth/circle/device", circleAuthH.StartLogin)
-			r.Post("/auth/circle/initialize", circleAuthH.Initialize)
-			r.Get("/auth/circle/wallets", circleAuthH.Wallets)
-			r.Post("/auth/circle/sign_typed_data", circleAuthH.SignTypedData)
 		}
+
+		// Circle Wallets: the browser cannot hold the Circle API key, so device
+		// tokens and challenge ids are minted here. Unauthenticated for the same
+		// reason /accounts/privy is -- the identity being established is the
+		// point of the call.
+		//
+		// Registered unconditionally, NOT gated on a key being present. These
+		// were briefly nested in the Privy block above, which meant the
+		// replacement for Privy only existed when Privy was configured -- they
+		// 404'd on any deployment that had moved off it, which is every
+		// deployment this is being built for. The handler reports "not
+		// configured" on its own when there is no Circle key.
+		r.Post("/auth/circle/device", circleAuthH.StartLogin)
+		r.Post("/auth/circle/initialize", circleAuthH.Initialize)
+		r.Get("/auth/circle/wallets", circleAuthH.Wallets)
+		r.Post("/auth/circle/sign_typed_data", circleAuthH.SignTypedData)
 
 		// Public, minimal intent details for the payer surface (/pay/[id]) --
 		// a payer landing on a bare payment link has no API key. Deliberately

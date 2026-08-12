@@ -63,6 +63,8 @@ func main() {
 		BridgeStaleAfter:     staleAfter,
 		PrivyAppID:           os.Getenv("PRIVY_APP_ID"),
 		PrivyVerificationKey: os.Getenv("PRIVY_VERIFICATION_KEY"),
+		CircleAPIKey:         loadCircleKey(),
+		CircleBaseURL:        os.Getenv("CIRCLE_BASE_URL"),
 	}
 	handler := server.New(cfg)
 
@@ -107,5 +109,26 @@ func loadStableFXKey() string {
 		}
 	}
 	log.Fatalf("STABLEFX_API_KEY not found in %s", envPath)
+	return ""
+}
+
+// loadCircleKey mirrors loadStableFXKey: env var first, then packages/api/.env,
+// so the devserver picks up Circle Wallets without anything exported. Never
+// fatal -- Circle is opt-in, and without a key those routes simply report
+// "not configured" instead of the server refusing to start.
+func loadCircleKey() string {
+	if v := os.Getenv("CIRCLE_API_KEY"); v != "" {
+		return v
+	}
+	_, thisFile, _, _ := runtime.Caller(0)
+	data, err := os.ReadFile(filepath.Join(filepath.Dir(thisFile), "..", "..", ".env"))
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.HasPrefix(line, "CIRCLE_API_KEY=") {
+			return strings.TrimSpace(strings.TrimPrefix(line, "CIRCLE_API_KEY="))
+		}
+	}
 	return ""
 }

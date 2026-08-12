@@ -422,12 +422,40 @@ export default function CircleSpikePage() {
     }
 
     // 4 — the wallet itself.
-    set(3, "running");
-    const wallets = await api("/v1/auth/circle/wallets", { userToken: session.userToken });
-    const wallet =
-      (wallets.data ?? []).find((w: { blockchain?: string }) => w.blockchain === "ARC-TESTNET") ??
-      (wallets.data ?? [])[0];
-    if (!wallet?.address) throw new Error("no wallet returned");
+    //
+    // Poll, don't read once. The challenge completing means Circle ACCEPTED
+    // the creation, not that the wallet exists: it is provisioned
+    // asynchronously, so an immediate GET legitimately returns zero wallets.
+    // Reading once turned that normal gap into "no wallet returned" on a run
+    // where the wallet was on its way.
+    set(3, "running", "waiting for Circle to provision it…");
+    type CircleWallet = { id?: string; address?: string; blockchain?: string };
+    const deadline = Date.now() + 60_000;
+    let wallet: CircleWallet | undefined;
+    let attempts = 0;
+    for (;;) {
+      attempts++;
+      const wallets = await api("/v1/auth/circle/wallets", { userToken: session.userToken });
+      const list = (wallets.data ?? []) as CircleWallet[];
+      // Prefer Arc — that is where Conduit settles — but take anything rather
+      // than report nothing: a wallet on the wrong chain is a different and
+      // much more useful failure than an absent one.
+      wallet = list.find((w) => w.blockchain === "ARC-TESTNET") ?? list[0];
+      if (wallet?.address) {
+        if (attempts > 1) note(`wallet appeared after ${attempts} polls`);
+        if (list.length > 1) note(`chains returned: ${list.map((w) => w.blockchain).join(",")}`);
+        break;
+      }
+      if (Date.now() > deadline) {
+        throw new Error(
+          `Circle returned no wallets after ${attempts} polls over 60s. The create-wallet ` +
+            `challenge succeeded, so this is provisioning or a chain Circle did not accept ` +
+            `(asked for ARC-TESTNET).`
+        );
+      }
+      set(3, "running", `waiting for Circle to provision it… (poll ${attempts})`);
+      await new Promise((r) => setTimeout(r, 2000));
+    }
     set(3, "pass", `${wallet.address} (${wallet.blockchain})`);
 
     // 5 — sign a real StableFX-shaped payload.

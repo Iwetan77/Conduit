@@ -25,9 +25,16 @@ const API_BASE = process.env.NEXT_PUBLIC_CONDUIT_API_URL ?? "http://localhost:80
 const APP_ID = process.env.NEXT_PUBLIC_CIRCLE_APP_ID ?? "";
 const GOOGLE_CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID ?? "";
 
-// Circle identifies the browser, not the human. Persisted so a repeat login
-// from this machine is recognised as the same device.
-const DEVICE_ID_KEY = "conduit_circle_device_id";
+// The device id is NOT ours to invent.
+//
+// This page used to mint a crypto.randomUUID() and keep it in localStorage,
+// which read as reasonable and was wrong: Circle only accepts a device it
+// registered itself. A made-up id verifies the Google token fine and is then
+// refused at the final step with 155140 "Provided device ID is not found in
+// the system" -- the failure lands one step away from its cause, which is why
+// it looked like the login was broken. sdk.getDeviceId() asks Circle's own
+// iframe for the id; it lives under pw-auth.circle.com's origin, so it is
+// already stable per browser and needs no storage from us.
 // Google performs a full-page redirect, so the spike must come back to ITSELF.
 // Pointing this at the origin sent the browser to the landing page, where the
 // run's state no longer existed and steps 3-6 simply never happened.
@@ -69,15 +76,6 @@ const RESUME_AT_LOAD: { deviceToken: string; deviceEncryptionKey: string } | nul
     return null;
   }
 })();
-
-function deviceId(): string {
-  let id = localStorage.getItem(DEVICE_ID_KEY);
-  if (!id) {
-    id = crypto.randomUUID();
-    localStorage.setItem(DEVICE_ID_KEY, id);
-  }
-  return id;
-}
 
 type Status = "pending" | "running" | "pass" | "fail";
 interface Step {
@@ -453,14 +451,21 @@ export default function CircleSpikePage() {
         throw new Error("NEXT_PUBLIC_CIRCLE_APP_ID / NEXT_PUBLIC_GOOGLE_CLIENT_ID not set");
       }
 
-      // 1 — device token. Minted server-side; the API key never reaches here.
-      set(0, "running");
-      const device = deviceId();
+      // 1 — the device, then its token.
+      //
+      // Order matters and is not interchangeable: Circle issues the device id
+      // from its own iframe, and the token is minted FOR that id. Asking our
+      // API first, with an id Circle has never seen, is what produced 155140.
+      // The token itself is minted server-side; the API key never reaches here.
+      set(0, "running", "asking Circle for a device id…");
+      const sdk = await makeSdk({ appSettings: { appId: APP_ID } }, () => {});
+      watchIframe();
+      const device = await sdk.getDeviceId();
       const dev = await api("/v1/auth/circle/device", {
         method: "POST",
         body: JSON.stringify({ device_id: device }),
       });
-      set(0, "pass", `device ${device.slice(0, 8)}…`);
+      set(0, "pass", `device ${device.slice(0, 8)}… (from Circle)`);
 
       // 2 — Google sign-in through Circle's SDK.
       set(1, "running", "waiting for Google…");

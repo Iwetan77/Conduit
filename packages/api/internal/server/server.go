@@ -236,6 +236,10 @@ func New(cfg Config) http.Handler {
 			// The storefront's printed QR resolves to this link's hosted URL.
 			r.Post("/accounts/{id}/storefront_link", paymentLinksH.StorefrontLink)
 			r.Get("/api_keys", apiKeysH.List)
+			// A storefront's own credential, for wiring a POS to it. The secret
+			// is in the create response and nowhere else.
+			r.Post("/accounts/{id}/api_keys", apiKeysH.Create)
+			r.Post("/api_keys/{id}/revoke", apiKeysH.Revoke)
 
 			r.Post("/settlement_intents", intentsH.Create)
 			r.Get("/settlement_intents", intentsH.List)

@@ -2,9 +2,17 @@
 
 import { useEffect, useRef, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
-import { listAccounts, createSubAccount, getStorefrontLink, type Account, ConduitApiError } from "@/lib/conduit-api";
+import {
+  listAccounts,
+  createSubAccount,
+  getStorefrontLink,
+  createAccountApiKey,
+  type Account,
+  ConduitApiError,
+} from "@/lib/conduit-api";
 import { SETTLE_CURRENCIES as CURRENCIES, currencyFlag } from "@/lib/currencies";
 import { tokenLabel } from "@/lib/format";
+import { useCopy } from "@/lib/use-copy";
 import { PageHeader } from "@/components/Dashboard/PageHeader";
 
 function DownloadableQR({ value, filename }: { value: string; filename: string }) {
@@ -101,6 +109,65 @@ function StorefrontCard({ account }: { account: Account }) {
       ) : (
         <p className="text-ink-dim text-xs">Loading QR…</p>
       )}
+      <StorefrontKey accountId={account.id} />
+    </div>
+  );
+}
+
+// The storefront's own credential, for wiring a till to it.
+//
+// The static QR above serves a counter where the customer types the amount. A
+// restaurant can't work that way: the total is only known when the bill is
+// printed, so its point-of-sale has to mint a link per bill and print THAT as
+// the QR on the receipt. Doing so needs a key belonging to this storefront —
+// the parent's key would put the takings on the parent's books — which is why
+// this lives on the storefront card rather than in Developers.
+function StorefrontKey({ accountId }: { accountId: string }) {
+  const [secret, setSecret] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const { copied, copy } = useCopy();
+
+  const mint = async () => {
+    setError("");
+    setBusy(true);
+    try {
+      const k = await createAccountApiKey(accountId);
+      setSecret(k.key);
+    } catch (err) {
+      setError(err instanceof ConduitApiError ? err.message : "Couldn't create a key");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (secret) {
+    return (
+      <div className="w-full border border-signal/30 bg-signal/10 p-3 space-y-2">
+        <p className="text-signal text-[10px] font-mono uppercase tracking-wider">
+          Copy this now — it is not shown again
+        </p>
+        <p className="text-ink text-[10px] font-mono break-all">{secret}</p>
+        <button
+          onClick={() => copy(secret, accountId)}
+          className={`text-[10px] font-mono ${copied === accountId ? "text-signal" : "text-ink-dim hover:text-ink"}`}
+        >
+          {copied === accountId ? "Copied" : "Copy key"}
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="w-full text-center">
+      <button
+        onClick={mint}
+        disabled={busy}
+        className="text-ink-dim text-[10px] font-mono hover:text-ink disabled:opacity-50"
+      >
+        {busy ? "Creating…" : "Create API key for a till"}
+      </button>
+      {error && <p className="text-danger text-[10px] mt-1">{error}</p>}
     </div>
   );
 }
@@ -113,6 +180,7 @@ export default function LocationsPage() {
   const [settleAddress, setSettleAddress] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [newKey, setNewKey] = useState<{ name: string; key: string } | null>(null);
 
   const refresh = () => { listAccounts().then((r) => setAccounts(r.data ?? [])).catch(() => {}); };
   useEffect(refresh, []);
@@ -122,7 +190,12 @@ export default function LocationsPage() {
     setError("");
     setBusy(true);
     try {
-      await createSubAccount({ name, settle_currency: settleCurrency, settle_address: settleAddress });
+      // CreateSub returns the storefront's secret key exactly once. This used
+      // to discard the whole response, which left every storefront holding a
+      // live credential nobody could ever read — the reason a till couldn't be
+      // wired to one. Surface it; it can also be re-minted from the card.
+      const created = await createSubAccount({ name, settle_currency: settleCurrency, settle_address: settleAddress });
+      if (created.api_key?.key) setNewKey({ name, key: created.api_key.key });
       setShowForm(false);
       setName("");
       setSettleAddress("");
@@ -181,6 +254,22 @@ export default function LocationsPage() {
             {busy ? "Creating..." : "Create storefront"}
           </button>
         </form>
+      )}
+
+      {newKey && (
+        <div className="border border-signal/30 bg-signal/10 p-4 mb-6 space-y-2">
+          <p className="text-signal text-xs font-mono uppercase tracking-wider">
+            {newKey.name} — secret key. Copy it now, it is not shown again.
+          </p>
+          <p className="text-ink text-xs font-mono break-all">{newKey.key}</p>
+          <p className="text-ink-dim text-xs">
+            Use this from the storefront&apos;s till to create a payment link per bill. Lost keys
+            can&apos;t be recovered, but you can mint a new one from the card below.
+          </p>
+          <button onClick={() => setNewKey(null)} className="text-ink-dim text-xs hover:text-ink">
+            Dismiss
+          </button>
+        </div>
       )}
 
       {accounts === null && <p className="text-ink-dim text-sm">Loading...</p>}

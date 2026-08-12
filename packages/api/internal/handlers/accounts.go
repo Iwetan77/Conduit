@@ -346,8 +346,21 @@ func (h *Accounts) List(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"data": results})
 }
 
-// ── API keys (list only — the full secret is only ever returned once, at
-//    creation time inside Accounts.Create; this never re-exposes it) ──────────
+// ── API keys ────────────────────────────────────────────────────────────────
+//
+// A key's full secret is returned exactly once, at the moment it is created,
+// and stored only as a hash. List never re-exposes it.
+//
+// Create exists because that "exactly once" was a dead end for storefronts: a
+// storefront gets its own sk_ key at CreateSub, and a restaurant wiring its
+// point-of-sale to Conduit needs that key to mint a per-bill payment link. If
+// the one response carrying it is missed, the storefront's credential is real,
+// live, and permanently unreachable. Minting a fresh one is the only way back.
+//
+// Rotation is deliberately two steps -- create the new key, deploy it, then
+// revoke the old one -- rather than one atomic "rotate" that invalidates the
+// running key immediately. A till mid-service must not lose its credential the
+// instant someone clicks a button in a dashboard.
 
 type ApiKeys struct{ Pool *pgxpool.Pool }
 
@@ -360,6 +373,90 @@ type apiKeyResponse struct {
 	RevokedAt *string `json:"revoked_at,omitempty"`
 }
 
+// Create implements POST /v1/accounts/{id}/api_keys: mint a new sk_ key for
+// the caller's own account or one of its storefronts. The secret is in this
+// response and nowhere else, ever again.
+func (h *ApiKeys) Create(w http.ResponseWriter, r *http.Request) {
+	accountID := pathParam(r, "id")
+	principal, _ := auth.FromContext(r.Context())
+	ctx := r.Context()
+
+	// Same containment rule as Accounts.Get: your own account, or a storefront
+	// beneath it. Never another merchant's, and never a sibling's.
+	var livemode bool
+	err := h.Pool.QueryRow(ctx,
+		`SELECT livemode FROM accounts WHERE id = $1 AND (id = $2 OR parent_id = $2)`,
+		accountID, principal.AccountID,
+	).Scan(&livemode)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			writeErr(w, apierrors.E(apierrors.CodeNotFound, "id"))
+			return
+		}
+		writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
+		return
+	}
+
+	fullKey, prefix, suffix, hash, err := auth.GenerateKey(auth.KeyTypeSecret, livemode)
+	if err != nil {
+		writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
+		return
+	}
+	keyID := models.NewID("key")
+	if _, err := h.Pool.Exec(ctx,
+		`INSERT INTO api_keys (id, account_id, key_hash, prefix, suffix, type, livemode) VALUES ($1,$2,$3,$4,$5,'sk',$6)`,
+		keyID, accountID, hash, prefix, suffix, livemode,
+	); err != nil {
+		writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"id":         keyID,
+		"account_id": accountID,
+		"key":        fullKey,
+		"prefix":     prefix,
+		"suffix":     suffix,
+		"livemode":   livemode,
+	})
+}
+
+// Revoke implements POST /v1/api_keys/{id}/revoke -- the second half of a
+// rotation, run once the replacement key is deployed. Scoped to keys belonging
+// to the caller's account or its storefronts, and idempotent: revoking an
+// already-revoked key is a no-op success, not an error.
+func (h *ApiKeys) Revoke(w http.ResponseWriter, r *http.Request) {
+	keyID := pathParam(r, "id")
+	principal, _ := auth.FromContext(r.Context())
+
+	tag, err := h.Pool.Exec(r.Context(),
+		`UPDATE api_keys SET revoked_at = now()
+		 WHERE id = $1 AND revoked_at IS NULL
+		   AND account_id IN (SELECT id FROM accounts WHERE id = $2 OR parent_id = $2)`,
+		keyID, principal.AccountID,
+	)
+	if err != nil {
+		writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
+		return
+	}
+	if tag.RowsAffected() == 0 {
+		// Either it doesn't exist, isn't ours, or was already revoked. Confirm
+		// the first two are not the case before reporting success.
+		var exists bool
+		if err := h.Pool.QueryRow(r.Context(),
+			`SELECT true FROM api_keys WHERE id = $1
+			   AND account_id IN (SELECT id FROM accounts WHERE id = $2 OR parent_id = $2)`,
+			keyID, principal.AccountID,
+		).Scan(&exists); err != nil {
+			writeErr(w, apierrors.E(apierrors.CodeNotFound, "id"))
+			return
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"id": keyID, "status": "revoked"})
+}
+
+// List returns key metadata for the caller's own account -- prefix and last
+// four only, never the secret.
 func (h *ApiKeys) List(w http.ResponseWriter, r *http.Request) {
 	principal, _ := auth.FromContext(r.Context())
 	rows, err := h.Pool.Query(r.Context(),

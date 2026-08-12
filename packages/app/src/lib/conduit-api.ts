@@ -113,6 +113,20 @@ export function listApiKeys() {
   return request<{ data: ApiKeySummary[] }>("/v1/api_keys");
 }
 
+// Mint a secret key for one of your storefronts, so its point-of-sale can
+// create a payment link per bill against that storefront's own books. The
+// secret is in this response and is never retrievable again.
+export function createAccountApiKey(accountId: string) {
+  return request<{ id: string; account_id: string; key: string; prefix: string; suffix: string }>(
+    `/v1/accounts/${accountId}/api_keys`,
+    { method: "POST" }
+  );
+}
+
+export function revokeApiKey(keyId: string) {
+  return request<{ id: string; status: string }>(`/v1/api_keys/${keyId}/revoke`, { method: "POST" });
+}
+
 export function createSubAccount(body: { name: string; settle_currency: string; settle_address: string }) {
   return request<AccountWithKey>("/v1/accounts/sub", { method: "POST", body });
 }

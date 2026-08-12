@@ -174,3 +174,73 @@ func TestSettledWebhookPayloadIdentifiesTheBill(t *testing.T) {
 		t.Error("payment_link_id should be absent, not empty, when there is no link")
 	}
 }
+
+// TestLinkGetIncludesSettlements: polling a link tells a till not just THAT it
+// was paid but WHAT was received, in one call.
+//
+// Without this, `status: "paid"` was the whole answer, and verifying the amount
+// billed against the amount received — the check that actually protects a
+// restaurant — needed a second request the till had no obvious way to make.
+func TestLinkGetIncludesSettlements(t *testing.T) {
+	srv, key, pool := newLinkTestServer(t, 15512)
+	ctx := context.Background()
+
+	resp := doJSON(t, srv.URL, "POST", "/v1/payment_links", key,
+		`{"amount_mode":"fixed","amount":11099,"settle_currency":"EUR","settle_address":"0x00000000000000000000000000000000000000FF","reuse_policy":"single_use","merchant_reference":"table-9/bill-3"}`, "")
+	var link struct {
+		ID string `json:"id"`
+	}
+	json.Unmarshal([]byte(resp.body), &link)
+
+	// Unpaid: the key is absent, not an empty list pretending to be an answer.
+	resp = doJSON(t, srv.URL, "GET", "/v1/payment_links/"+link.ID, key, ``, "")
+	if strings.Contains(resp.body, "settlements") {
+		t.Errorf("unpaid link should omit settlements; body=%s", resp.body)
+	}
+
+	resp = doJSON(t, srv.URL, "POST", "/v1/payment_links/"+link.ID+"/pay", "", `{}`, "")
+	var intent struct {
+		ID string `json:"id"`
+	}
+	json.Unmarshal([]byte(resp.body), &intent)
+
+	// A settlement lands, exactly as the confirm handler and indexer record it.
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO settlements (id, intent_id, tx_hash, receipt_id, pay_currency, pay_amount,
+		                          settle_amount, fee, block_number, log_index, settled_at)
+		 VALUES ('stl_test1', $1, '0xfeed', '0xreceipt', 'USDC', 12345, 11099, 0, 1, 0, now())`,
+		intent.ID,
+	); err != nil {
+		t.Fatalf("record settlement: %v", err)
+	}
+
+	resp = doJSON(t, srv.URL, "GET", "/v1/payment_links/"+link.ID, key, ``, "")
+	if resp.status != http.StatusOK {
+		t.Fatalf("get link: status=%d body=%s", resp.status, resp.body)
+	}
+	var got struct {
+		Settlements []struct {
+			IntentID       string `json:"intent_id"`
+			TxHash         string `json:"tx_hash"`
+			PayCurrency    string `json:"pay_currency"`
+			PayAmount      string `json:"pay_amount"`
+			SettleAmount   string `json:"settle_amount"`
+			SettleCurrency string `json:"settle_currency"`
+		} `json:"settlements"`
+	}
+	json.Unmarshal([]byte(resp.body), &got)
+	if len(got.Settlements) != 1 {
+		t.Fatalf("expected 1 settlement, got %d; body=%s", len(got.Settlements), resp.body)
+	}
+	s := got.Settlements[0]
+	// The whole point: the till can compare this against the bill it printed.
+	if s.SettleAmount != "11099" || s.SettleCurrency != "EUR" {
+		t.Errorf("settle_amount/currency = %s/%s, want 11099/EUR", s.SettleAmount, s.SettleCurrency)
+	}
+	if s.PayAmount != "12345" || s.PayCurrency != "USDC" {
+		t.Errorf("pay side = %s %s, want 12345 USDC", s.PayAmount, s.PayCurrency)
+	}
+	if s.IntentID != intent.ID || s.TxHash != "0xfeed" {
+		t.Errorf("wrong settlement echoed back: %#v", s)
+	}
+}

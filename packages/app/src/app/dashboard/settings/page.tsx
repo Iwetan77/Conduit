@@ -5,7 +5,7 @@ import { useAccount } from "wagmi";
 import { WalletConnect } from "@/components/Shared/WalletConnect";
 import { CURRENCIES } from "@conduit/sdk/lite";
 import { getMyAccount, updateAccount, type Account, ConduitApiError } from "@/lib/conduit-api";
-import { SETTLE_CURRENCIES, currencyFlag } from "@/lib/currencies";
+import { SETTLE_CURRENCIES, settleCurrencyLabel } from "@/lib/currencies";
 import { PageHeader } from "@/components/Dashboard/PageHeader";
 
 // Phase 4: recipient identity. What a payer sees instead of a bare hex
@@ -94,7 +94,7 @@ function BusinessIdentity() {
                 onChange={(e) => setSettleCurrency(e.target.value)}
               >
                 {SETTLE_CURRENCIES.map((c) => (
-                  <option key={c} value={c}>{currencyFlag(c)} {c}</option>
+                  <option key={c} value={c}>{settleCurrencyLabel(c)}</option>
                 ))}
               </select>
             </div>
@@ -133,21 +133,7 @@ const PREF_REGISTRY_ABI = [
 ] as const;
 
 export default function SettingsPage() {
-  const { address, isConnected, connector } = useAccount();
-  // The address money actually settles to, which is a property of the ACCOUNT
-  // and identical on every device. The connected wallet below is not: signing
-  // in with Google on a laptop that has MetaMask installed makes MetaMask the
-  // active wallet (see pickWalletForWagmi in privy-stack.tsx), while the same
-  // login on a phone falls back to the Privy embedded wallet. That difference
-  // matters here and nowhere else on this page, because the registry keys the
-  // preference by msg.sender: signing from the wrong wallet writes a
-  // preference for an address no payment will ever arrive at.
-  const [accountSettleAddress, setAccountSettleAddress] = useState("");
-  useEffect(() => {
-    getMyAccount().then((a) => setAccountSettleAddress(a.settle_address)).catch(() => {});
-  }, []);
-  const wrongWallet =
-    !!address && !!accountSettleAddress && address.toLowerCase() !== accountSettleAddress.toLowerCase();
+  const { isConnected, connector } = useAccount();
   const [tokenSymbol, setTokenSymbol] = useState<keyof typeof CURRENCIES>("EURC");
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("");
@@ -223,25 +209,6 @@ export default function SettingsPage() {
           <WalletConnect />
         ) : (
           <>
-            <div>
-              <p className="text-[10px] font-mono text-ink-dim uppercase tracking-wider">
-                Signing wallet
-              </p>
-              <p className="text-xs text-ink-dim font-mono break-all">{address}</p>
-            </div>
-            {wrongWallet && (
-              <div className="border border-danger/30 bg-danger/10 p-3 space-y-1">
-                <p className="text-danger text-xs font-medium">
-                  This is not the wallet payments settle to.
-                </p>
-                <p className="text-ink-dim text-xs">
-                  The preference is recorded against whichever wallet signs it, so setting it here
-                  would apply to a wallet no payment arrives at. Your settle address is{" "}
-                  <span className="font-mono break-all">{accountSettleAddress}</span> — switch to it,
-                  or change your settle address above to this wallet.
-                </p>
-              </div>
-            )}
             <select
               className="w-full bg-surface border border-border px-3 py-2 text-sm focus:border-signal focus:outline-none"
               value={tokenSymbol}
@@ -254,7 +221,7 @@ export default function SettingsPage() {
             <div className="flex gap-2">
               <button
                 onClick={handleSetPreference}
-                disabled={busy || wrongWallet}
+                disabled={busy}
                 className="flex-1 bg-signal text-signal-ink font-medium py-2 text-sm disabled:opacity-50"
               >
                 {busy ? "Submitting..." : "Set preference"}

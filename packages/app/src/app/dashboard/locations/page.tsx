@@ -10,7 +10,7 @@ import {
   type Account,
   ConduitApiError,
 } from "@/lib/conduit-api";
-import { SETTLE_CURRENCIES as CURRENCIES, currencyFlag } from "@/lib/currencies";
+import { SETTLE_CURRENCIES as CURRENCIES, settleCurrencyLabel } from "@/lib/currencies";
 import { tokenLabel } from "@/lib/format";
 import { useCopy } from "@/lib/use-copy";
 import { PageHeader } from "@/components/Dashboard/PageHeader";
@@ -236,7 +236,7 @@ export default function LocationsPage() {
             value={settleCurrency}
             onChange={(e) => setSettleCurrency(e.target.value)}
           >
-            {CURRENCIES.map((c) => <option key={c} value={c}>{currencyFlag(c)} {c}</option>)}
+            {CURRENCIES.map((c) => <option key={c} value={c}>{settleCurrencyLabel(c)}</option>)}
           </select>
           <input
             className="w-full bg-surface border border-border px-3 py-2 text-sm font-mono focus:border-signal focus:outline-none"

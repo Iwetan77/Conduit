@@ -6,7 +6,7 @@ import { usePathname } from "next/navigation";
 import { usePrivy, useLogin, useCreateWallet } from "@privy-io/react-auth";
 import { useQueryClient } from "@tanstack/react-query";
 import { clearSessionToken, createAccountFromPrivy, setSessionToken } from "@/lib/conduit-api";
-import { SETTLE_CURRENCIES, currencyFlag } from "@/lib/currencies";
+import { SETTLE_CURRENCIES, settleCurrencyLabel } from "@/lib/currencies";
 import { Logo } from "@/components/Shared/Logo";
 
 // Signature moment: the major gridlines draw in once, here specifically —
@@ -194,7 +194,7 @@ function AccountGate({ onReady }: { onReady: () => void }) {
             onChange={(e) => setSettleCurrency(e.target.value)}
           >
             {SETTLE_CURRENCIES.map((c) => (
-              <option key={c} value={c}>{currencyFlag(c)} {c}</option>
+              <option key={c} value={c}>{settleCurrencyLabel(c)}</option>
             ))}
           </select>
           <button

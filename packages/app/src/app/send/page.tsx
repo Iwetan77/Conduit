@@ -183,10 +183,15 @@ export default function SendPage() {
                   </div>
                 )}
 
-                {!crossCurrency && insufficient && required.data !== undefined && payerBalance !== undefined && (
+                {/* Applies to every pair now, not just same-currency. A payer
+                    short on EURC for a USDC payment used to sail past this and
+                    fail at the wallet prompt, after an intent had been created.
+                    formatAmount already appends the currency — naming it again
+                    printed "~$50.00 USDC USDC". */}
+                {insufficient && required.data !== undefined && payerBalance !== undefined && (
                   <p className="text-danger text-sm font-mono">
                     Insufficient {payerCurrency}: this payment needs ~
-                    {formatAmount(required.data, payerCurrency)} {payerCurrency}, you have{" "}
+                    {formatAmount(required.data, payerCurrency)}, you have{" "}
                     {formatAmount(payerBalance, payerCurrency)}.
                   </p>
                 )}

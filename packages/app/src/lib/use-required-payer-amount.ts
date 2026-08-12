@@ -3,33 +3,52 @@
 import { useQuery } from "@tanstack/react-query";
 import type { Currency } from "@conduit/sdk/lite";
 import { parseAmount } from "@/lib/format";
+import { getFxRate } from "@/lib/conduit-api";
 
 // How much of `payerCurrency` this send will cost, in the payer token's minor
-// units. Same-currency is exact (1:1) and can be checked up front.
+// units — the figure the balance guard compares against what the wallet holds.
 //
-// Cross-currency is quoted by Circle StableFX at pay time, against a
-// settlement intent that doesn't exist yet — so there is nothing to check
-// here and the balance guard simply doesn't apply. (The old AMM estimate was
-// removed: no USDC/EURC pool exists on Arc testnet, so it only ever errored
-// while implying an on-chain swap route existed.)
+// Same-currency is exact and needs no network call.
+//
+// Cross-currency used to return 0n, on the grounds that only Circle StableFX
+// could price it and only at pay time, against an intent that doesn't exist
+// yet. That left the balance guard switched off for every cross-currency send:
+// someone holding 19 EURC could start a payment needing 50 EURC and only find
+// out when the wallet rejected the signature, after the intent had been
+// created. GET /v1/fx/rates now prices exactly this — its `pay_amount` IS the
+// answer, for the requested destination amount — so the guard applies to every
+// pair, not just the ones where the arithmetic was trivial.
+//
+// The firm quote at pay time is still authoritative; this is a pre-flight check
+// against the same provider, and a rate that drifts between the two is handled
+// by the quote, not here.
 export function useRequiredPayerAmount(
   payerCurrency: Currency,
   recipientCurrency: Currency,
   amount: string
 ) {
-  const validAmount = parseFloat(amount || "0") > 0;
+  const sameCurrency = payerCurrency === recipientCurrency;
+  let recipientMinor: bigint | undefined;
+  try {
+    recipientMinor = amount ? parseAmount(amount, recipientCurrency) : undefined;
+  } catch {
+    recipientMinor = undefined; // mid-typing ("1.", "abc") — nothing to price yet
+  }
+  const validAmount = recipientMinor !== undefined && recipientMinor > 0n;
 
   return useQuery({
     queryKey: ["required-payer-amount", payerCurrency, recipientCurrency, amount],
     enabled: validAmount,
     staleTime: 15_000,
-    retry: 2,
+    // Same-currency can't fail. Cross-currency failures here are answers, not
+    // faults — "this pair has no route", "this amount is below the minimum" —
+    // and retrying them only delays telling the payer.
+    retry: sameCurrency ? 2 : false,
     retryDelay: (attempt: number) => 300 * 2 ** attempt,
     queryFn: async (): Promise<bigint> => {
-      // Cross-currency: no pre-quote available, so report no requirement
-      // rather than a wrong one. The real cost is shown at quote time.
-      if (payerCurrency !== recipientCurrency) return 0n;
-      return parseAmount(amount, recipientCurrency);
+      if (sameCurrency) return recipientMinor!;
+      const rate = await getFxRate(payerCurrency, recipientCurrency, recipientMinor!.toString());
+      return BigInt(rate.pay_amount);
     },
   });
 }

@@ -41,10 +41,25 @@ const privyWagmiConfig = createPrivyWagmiConfig(wagmiConfigParams);
 // the connected state directly (connector, accounts, chainId), skipping the
 // handshake entirely.
 //
-// An external wallet wins when present: someone who deliberately connected
-// MetaMask should pay from it, not from an embedded wallet they never chose.
+// The embedded wallet wins whenever the user has one.
+//
+// This used to prefer an EXTERNAL wallet, on the reasoning that someone who
+// deliberately connected MetaMask should pay from it. The reasoning was wrong,
+// because "connected" isn't deliberate: a browser extension auto-connects on
+// page load. So signing in with Google gave you your Conduit wallet on a phone
+// and MetaMask on a laptop that happened to have the extension installed --
+// same account, same login, two different addresses, and the laptop one empty.
+// The result was a user staring at a 0.00 balance for funds they were holding.
+//
+// Someone who has no embedded wallet -- a payer who connected a real wallet
+// instead of signing in -- still gets that wallet, because it's the only one
+// in the list. Nothing about that path changes.
+//
+// The trade-off this accepts: a Privy-signed-in user cannot currently choose to
+// pay from an external wallet on Arc. That needs an explicit wallet switcher,
+// which is a feature; being silently handed the wrong wallet is a bug.
 const pickWalletForWagmi = ({ wallets }: { wallets: ConnectedWallet[]; user: User | null }) =>
-  wallets.find((w) => w.walletClientType !== "privy") ?? wallets[0];
+  wallets.find((w) => w.walletClientType === "privy") ?? wallets[0];
 
 // The heavy half of the provider stack (~700 kB of @privy-io/*), loaded
 // lazily by providers.tsx only when something actually needs Privy: a

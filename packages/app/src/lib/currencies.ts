@@ -38,3 +38,13 @@ const ISO_TO_TOKEN: Record<string, string> = {
 export function isoToToken(iso: string): string {
   return ISO_TO_TOKEN[iso] ?? iso; // already-a-token-symbol passes through
 }
+
+// The label for a settle-currency <option>.
+//
+// These pickers choose which STABLECOIN a merchant is paid in — there is no
+// bank leg anywhere in Conduit — so listing "EUR" named a thing the product
+// doesn't handle. The value stays the ISO code the API expects; only the label
+// changes, so nothing about what gets submitted moves.
+export function settleCurrencyLabel(iso: string): string {
+  return `${currencyFlag(iso)} ${isoToToken(iso)}`.trim();
+}

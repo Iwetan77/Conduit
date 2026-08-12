@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { createPaymentLink, getMyAccount, type PaymentLink, type AmountMode, type ReusePolicy, ConduitApiError } from "@/lib/conduit-api";
-import { SETTLE_CURRENCIES as CURRENCIES, currencyFlag, isoToToken } from "@/lib/currencies";
+import { SETTLE_CURRENCIES as CURRENCIES, isoToToken, settleCurrencyLabel } from "@/lib/currencies";
 import { currencyDecimals } from "@conduit/sdk/lite";
 import { shortenAddress } from "@/lib/format";
 import { useCopy } from "@/lib/use-copy";
@@ -186,7 +186,7 @@ export default function RequestPaymentPage() {
               onChange={(e) => setSettleCurrency(e.target.value)}
             >
               {CURRENCIES.map((c) => (
-                <option key={c} value={c}>{currencyFlag(c)} {c}</option>
+                <option key={c} value={c}>{settleCurrencyLabel(c)}</option>
               ))}
             </select>
           </div>
@@ -329,7 +329,7 @@ export default function RequestPaymentPage() {
                     : "border-border text-ink-dim"
                 }`}
               >
-                {c}
+                {isoToToken(c)}
               </button>
             ))}
           </div>

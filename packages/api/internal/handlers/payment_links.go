@@ -56,6 +56,27 @@ type linkResponse struct {
 	Created           time.Time  `json:"created"`
 	HostedURL         string     `json:"hosted_url"`
 	QRPayload         string     `json:"qr_payload"`
+	// Present on GET /:id once money has landed. A till polling this endpoint
+	// would otherwise learn only that status flipped to 'paid' and have to make
+	// a second call to find out what was actually received -- so the check that
+	// matters most (is this the amount I billed?) was the one that took extra
+	// work. Never populated on create or list.
+	Settlements []linkSettlement `json:"settlements,omitempty"`
+}
+
+// linkSettlement is one payment received against a link. A single_use link has
+// at most one; a multi_use link (a storefront's standing QR) accumulates them,
+// which is why this is a list and not a single object.
+type linkSettlement struct {
+	ID             string    `json:"id"`
+	IntentID       string    `json:"intent_id"`
+	TxHash         string    `json:"tx_hash"`
+	PayCurrency    string    `json:"pay_currency"`
+	PayAmount      string    `json:"pay_amount"`
+	SettleAmount   string    `json:"settle_amount"`
+	SettleCurrency string    `json:"settle_currency"`
+	Fee            string    `json:"fee"`
+	SettledAt      time.Time `json:"settled_at"`
 }
 
 // bigStrDB renders b for a nullable DB param (nil -> SQL NULL).
@@ -225,8 +246,42 @@ func (h *PaymentLinks) Get(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
 		return
 	}
-	writeJSON(w, http.StatusOK, h.toResponse(id, amountMode, derefStr(amount), derefStr(minAmount), derefStr(maxAmount),
-		settleCurrency, settleAddress, acceptCurrencies, description, merchantReference, reusePolicy, status, expiresAt, created))
+	resp := h.toResponse(id, amountMode, derefStr(amount), derefStr(minAmount), derefStr(maxAmount),
+		settleCurrency, settleAddress, acceptCurrencies, description, merchantReference, reusePolicy, status, expiresAt, created)
+	resp.Settlements = h.settlementsFor(r.Context(), id)
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// settlementsFor lists the payments received against a link, newest first.
+//
+// Best-effort: a link that can't load its settlements still returns the link.
+// Losing the detail is a degraded answer; failing the whole request would take
+// a till's payment-status poll down with it.
+func (h *PaymentLinks) settlementsFor(ctx context.Context, linkID string) []linkSettlement {
+	rows, err := h.Pool.Query(ctx,
+		`SELECT s.id, s.intent_id, s.tx_hash, s.pay_currency, s.pay_amount::text,
+		        s.settle_amount::text, si.settle_currency, s.fee::text, s.settled_at
+		 FROM settlements s
+		 JOIN settlement_intents si ON si.id = s.intent_id
+		 WHERE si.payment_link_id = $1
+		 ORDER BY s.settled_at DESC`,
+		linkID,
+	)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+
+	var out []linkSettlement
+	for rows.Next() {
+		var s linkSettlement
+		if err := rows.Scan(&s.ID, &s.IntentID, &s.TxHash, &s.PayCurrency, &s.PayAmount,
+			&s.SettleAmount, &s.SettleCurrency, &s.Fee, &s.SettledAt); err != nil {
+			return out
+		}
+		out = append(out, s)
+	}
+	return out
 }
 
 // Void implements POST /:id/void. draft/active/viewed links can be voided;

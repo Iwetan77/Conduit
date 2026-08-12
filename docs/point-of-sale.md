@@ -142,6 +142,33 @@ curl https://api.example.com/v1/payment_links/pl_7Qk2mF \
   -H "Authorization: Bearer sk_test_<storefront key>"
 ```
 
+Once money has landed the response carries what was received, so the same
+single call that tells you it's paid also lets you check the amount:
+
+```json
+{
+  "id": "pl_7Qk2mF",
+  "status": "paid",
+  "settlements": [
+    {
+      "intent_id": "si_9x2LmQ",
+      "tx_hash": "0x…",
+      "pay_currency": "USDC",
+      "pay_amount": "123450000",
+      "settle_amount": "110990000",
+      "settle_currency": "EUR",
+      "fee": "0",
+      "settled_at": "2026-08-12T10:14:02Z"
+    }
+  ]
+}
+```
+
+`settlements` is absent until something settles, and is a **list** because a
+multi-use link (a storefront's standing QR) accumulates payments. For a bill,
+expect exactly one. Compare `settle_amount` against what you billed — as
+integers.
+
 Every couple of seconds is plenty; settlement is not instant. Act on
 `status == "paid"` and nothing else.
 

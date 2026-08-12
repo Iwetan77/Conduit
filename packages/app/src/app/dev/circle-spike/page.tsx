@@ -107,6 +107,88 @@ export default function CircleSpikePage() {
   const sdkRef = useRef<unknown>(null);
   const resumedRef = useRef(false);
 
+  const note = (line: string) =>
+    setDiag((prev) => (prev.includes(line) ? prev : [...prev, line]));
+
+  // Watch Circle's iframe handshake.
+  //
+  // onLoginComplete only ever fires from a postMessage: the SDK appends a
+  // hidden iframe at pw-auth.circle.com/social/verify-token, that frame posts
+  // `onFrameReady`, the SDK posts the id_token and device token back into it,
+  // and the frame answers `onSocialLoginVerified`. Break any link in that chain
+  // and NOTHING is reported -- the SDK's own 10s guard calls this.onComplete,
+  // which is the *challenge* callback and is undefined during login, so the
+  // failure is swallowed whole. That silence is what we have been staring at.
+  //
+  // Two known ways it breaks, which this tells apart:
+  //   - the frame never loads or never answers (blocked origin, network), so
+  //     no message with this origin ever arrives;
+  //   - `this.iframe` is undefined, because W3SSdk is a singleton whose
+  //     constructor, on a SECOND construction, runs setup on a throwaway object
+  //     that skipped createElement and then returns the first instance. The
+  //     resulting TypeError surfaces only as an unhandled rejection.
+  useEffect(() => {
+    const onMsg = (e: MessageEvent) => {
+      if (e.origin !== "https://pw-auth.circle.com") return;
+      const keys = Object.keys((e.data ?? {}) as Record<string, unknown>).join(",");
+      note(`iframe → page: ${keys || "(empty)"}`);
+    };
+    const onRej = (e: PromiseRejectionEvent) =>
+      note(`unhandled rejection: ${String(e.reason?.message ?? e.reason)}`);
+    window.addEventListener("message", onMsg);
+    window.addEventListener("unhandledrejection", onRej);
+    return () => {
+      window.removeEventListener("message", onMsg);
+      window.removeEventListener("unhandledrejection", onRej);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Build the SDK without ever constructing a second one in a page load.
+  //
+  // W3SSdk keeps a static singleton. Its constructor, when one already exists,
+  // runs setupInstance on the NEW object -- which skipped `this.iframe =
+  // createElement` -- and then returns the old instance. So the setup path
+  // (including the whole social-login hash check) executes against an object
+  // whose iframe is undefined, and `this.iframe.src = …` throws inside an async
+  // method nobody awaits. The callback you passed is attached to the throwaway;
+  // the instance you get back still has the old one. Everything after that is
+  // silence. updateConfigs is the supported way to re-point the live instance.
+  const makeSdk = async (
+    configs: ConstructorParameters<typeof import("@circle-fin/w3s-pw-web-sdk").W3SSdk>[0],
+    cb: (err: unknown, result: unknown) => void
+  ) => {
+    const { W3SSdk } = await import("@circle-fin/w3s-pw-web-sdk");
+    const existing = sdkRef.current as
+      | import("@circle-fin/w3s-pw-web-sdk").W3SSdk
+      | null;
+    if (existing) {
+      note("reusing the existing W3SSdk (a second construction would break it)");
+      existing.updateConfigs(configs, cb);
+      return existing;
+    }
+    const sdk = new W3SSdk(configs, cb);
+    sdkRef.current = sdk;
+    return sdk;
+  };
+
+  // Did the SDK actually get an iframe into the document, and did it load?
+  const watchIframe = () => {
+    let tries = 0;
+    const t = setInterval(() => {
+      const f = document.getElementById("sdkIframe") as HTMLIFrameElement | null;
+      if (f) {
+        clearInterval(t);
+        note(`sdk iframe appended: ${f.src}`);
+        f.addEventListener("load", () => note("sdk iframe: loaded"));
+        f.addEventListener("error", () => note("sdk iframe: FAILED to load"));
+      } else if (++tries > 20) {
+        clearInterval(t);
+        note("sdk iframe: never appended — the SDK never reached verifyTokenViaService");
+      }
+    }, 250);
+  };
+
   const set = (i: number, status: Status, detail?: string) =>
     setSteps((prev) => prev.map((s, idx) => (idx === i ? { ...s, status, detail } : s)));
 
@@ -136,7 +218,10 @@ export default function CircleSpikePage() {
       `sessionStorage survived redirect: ${sessionStorage.length > 0 ? `yes (${sessionStorage.length} keys)` : "NO — empty"}`,
       `SDK socialLoginProvider: ${provider || "(unset)"}`,
     ];
-    setDiag(notes);
+    // Merge, don't replace: StrictMode runs this effect twice, and a plain
+    // replace on the second pass would erase the handshake lines the listeners
+    // had already appended -- losing exactly the evidence they exist to collect.
+    setDiag((prev) => [...notes, ...prev.filter((p) => !notes.includes(p))]);
 
     // Came back from Google but nothing was waiting to resume: the run that
     // started the sign-in is gone and its device token with it, so there is
@@ -161,10 +246,9 @@ export default function CircleSpikePage() {
       set(1, "running", "completing sign-in…");
       try {
         const { deviceToken, deviceEncryptionKey } = RESUME_AT_LOAD;
-        const { W3SSdk } = await import("@circle-fin/w3s-pw-web-sdk");
         const session = await new Promise<{ userToken: string; encryptionKey: string }>(
           (resolve, reject) => {
-            const sdk = new W3SSdk(
+            void makeSdk(
               {
                 appSettings: { appId: APP_ID },
                 loginConfigs: {
@@ -185,8 +269,8 @@ export default function CircleSpikePage() {
                 }
                 resolve({ userToken: r.userToken, encryptionKey: r.encryptionKey });
               }
-            );
-            sdkRef.current = sdk;
+            ).catch(reject);
+            watchIframe();
             // The SDK consumes the hash in its constructor and calls back
             // asynchronously. If it never does, the page would sit on step 2
             // forever looking like a hang -- so fail loudly with the state that
@@ -324,10 +408,9 @@ export default function CircleSpikePage() {
 
       // 2 — Google sign-in through Circle's SDK.
       set(1, "running", "waiting for Google…");
-      const { W3SSdk } = await import("@circle-fin/w3s-pw-web-sdk");
       const session = await new Promise<{ userToken: string; encryptionKey: string }>(
         (resolve, reject) => {
-          const sdk = new W3SSdk(
+          void makeSdk(
             {
               appSettings: { appId: APP_ID },
               loginConfigs: {
@@ -354,23 +437,23 @@ export default function CircleSpikePage() {
               }
               resolve({ userToken: r.userToken, encryptionKey: r.encryptionKey });
             }
-          );
-          sdkRef.current = sdk;
-          // Stash before leaving: the redirect discards everything in memory.
-          sessionStorage.setItem(
-            RESUME_KEY,
-            JSON.stringify({
-              deviceToken: dev.device_token,
-              deviceEncryptionKey: dev.device_encryption_key,
-            })
-          );
-          // performLogin takes SocialLoginProvider, which the package imports
-          // but never re-exports — it is unreachable from the package root, so
-          // it cannot be named here. It is a STRING enum whose GOOGLE member is
-          // literally "Google", so the value passed is exactly what the enum
-          // holds; only the compile-time name is missing.
-          void (sdk as unknown as { performLogin: (p: string) => Promise<void> })
-            .performLogin("Google");
+          ).then((sdk) => {
+            // Stash before leaving: the redirect discards everything in memory.
+            sessionStorage.setItem(
+              RESUME_KEY,
+              JSON.stringify({
+                deviceToken: dev.device_token,
+                deviceEncryptionKey: dev.device_encryption_key,
+              })
+            );
+            // performLogin takes SocialLoginProvider, which the package imports
+            // but never re-exports — it is unreachable from the package root, so
+            // it cannot be named here. It is a STRING enum whose GOOGLE member is
+            // literally "Google", so the value passed is exactly what the enum
+            // holds; only the compile-time name is missing.
+            void (sdk as unknown as { performLogin: (p: string) => Promise<void> })
+              .performLogin("Google");
+          }, reject);
         }
       );
       set(1, "pass");

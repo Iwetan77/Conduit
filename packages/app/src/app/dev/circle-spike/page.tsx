@@ -98,10 +98,21 @@ export default function CircleSpikePage() {
   useEffect(() => {
     const stashed = sessionStorage.getItem(RESUME_KEY);
     const provider = localStorage.getItem("socialLoginProvider");
+    // Show what Google actually sent back. Long opaque values are truncated --
+    // an id_token is a credential, and this is the one place tempted to print
+    // one. The KEYS are what identify the failure: `error` means Google
+    // refused, `state`/`nonce` alone means it answered something else entirely.
+    const hashDetail = CALLBACK_AT_LOAD
+      ? Array.from(new URLSearchParams(CALLBACK_AT_LOAD).entries())
+          .map(([k, v]) => `${k}=${v.length > 24 ? v.slice(0, 24) + "…" : v}`)
+          .join("  ")
+      : "(none)";
     const notes = [
       `callback hash at load: ${CALLBACK_AT_LOAD ? `present (${CALLBACK_AT_LOAD.length} chars)` : "ABSENT"}`,
+      `hash contents: ${hashDetail}`,
       `has id_token: ${CALLBACK_AT_LOAD.includes("id_token") ? "yes" : "no"}`,
       `pending run to resume: ${stashed ? "yes" : "no"}`,
+      `sessionStorage survived redirect: ${sessionStorage.length > 0 ? `yes (${sessionStorage.length} keys)` : "NO — empty"}`,
       `SDK socialLoginProvider: ${provider || "(unset)"}`,
     ];
     setDiag(notes);
@@ -138,6 +149,7 @@ export default function CircleSpikePage() {
                   google: {
                     clientId: GOOGLE_CLIENT_ID,
                     redirectUri: window.location.origin + SPIKE_PATH,
+                    selectAccountPrompt: true,
                   },
                 },
               },
@@ -291,6 +303,13 @@ export default function CircleSpikePage() {
                 google: {
                   clientId: GOOGLE_CLIENT_ID,
                   redirectUri: window.location.origin + SPIKE_PATH,
+                  // MUST be true. The SDK builds the Google URL as
+                  //   prompt=${selectAccountPrompt ? 'select_account' : 'none'}
+                  // so omitting it asks Google to authenticate with NO user
+                  // interaction at all. Google cannot, and bounces straight
+                  // back with error=interaction_required — which looks exactly
+                  // like the page reloading itself for no reason.
+                  selectAccountPrompt: true,
                 },
               },
             },

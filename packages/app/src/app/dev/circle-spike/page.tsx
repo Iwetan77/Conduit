@@ -49,6 +49,27 @@ const CALLBACK_AT_LOAD =
     : window.location.hash && window.location.hash.length > 1
       ? window.location.hash.slice(1)
       : "";
+
+// The stash is read and cleared HERE, at module scope, for the same reason as
+// the hash above: it is a one-shot value and the effect that consumes it is not
+// run once. React StrictMode (on by default in Next dev) mounts every component
+// twice, so an effect that did `getItem` then `removeItem` would succeed on the
+// first pass and then, on the second, find nothing and report "no run waiting
+// to resume" -- overwriting the diagnostics of the run it had just started.
+// That is exactly what made a working redirect look like a dead end. Module
+// scope runs once per page load, which is precisely the lifetime this value has.
+const RESUME_AT_LOAD: { deviceToken: string; deviceEncryptionKey: string } | null = (() => {
+  if (typeof window === "undefined") return null;
+  const raw = sessionStorage.getItem(RESUME_KEY);
+  if (!raw) return null;
+  sessionStorage.removeItem(RESUME_KEY); // never loop on a failed resume
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+})();
+
 function deviceId(): string {
   let id = localStorage.getItem(DEVICE_ID_KEY);
   if (!id) {
@@ -84,6 +105,7 @@ export default function CircleSpikePage() {
   // reports its own cause instead of being described second-hand.
   const [diag, setDiag] = useState<string[]>([]);
   const sdkRef = useRef<unknown>(null);
+  const resumedRef = useRef(false);
 
   const set = (i: number, status: Status, detail?: string) =>
     setSteps((prev) => prev.map((s, idx) => (idx === i ? { ...s, status, detail } : s)));
@@ -96,7 +118,6 @@ export default function CircleSpikePage() {
   // the SDK with the SAME device token is what lets its onLoginComplete fire
   // for the callback now in the URL; from there the flow re-enters at step 3.
   useEffect(() => {
-    const stashed = sessionStorage.getItem(RESUME_KEY);
     const provider = localStorage.getItem("socialLoginProvider");
     // Show what Google actually sent back. Long opaque values are truncated --
     // an id_token is a credential, and this is the one place tempted to print
@@ -111,7 +132,7 @@ export default function CircleSpikePage() {
       `callback hash at load: ${CALLBACK_AT_LOAD ? `present (${CALLBACK_AT_LOAD.length} chars)` : "ABSENT"}`,
       `hash contents: ${hashDetail}`,
       `has id_token: ${CALLBACK_AT_LOAD.includes("id_token") ? "yes" : "no"}`,
-      `pending run to resume: ${stashed ? "yes" : "no"}`,
+      `pending run to resume: ${RESUME_AT_LOAD ? "yes" : "no"}`,
       `sessionStorage survived redirect: ${sessionStorage.length > 0 ? `yes (${sessionStorage.length} keys)` : "NO — empty"}`,
       `SDK socialLoginProvider: ${provider || "(unset)"}`,
     ];
@@ -120,7 +141,7 @@ export default function CircleSpikePage() {
     // Came back from Google but nothing was waiting to resume: the run that
     // started the sign-in is gone and its device token with it, so there is
     // nothing to continue and starting over silently would just loop.
-    if (!stashed) {
+    if (!RESUME_AT_LOAD) {
       if (CALLBACK_AT_LOAD.includes("id_token")) {
         setVerdict(
           "Google came back with a token, but this page had no run waiting for it. " +
@@ -129,14 +150,17 @@ export default function CircleSpikePage() {
       }
       return;
     }
-    sessionStorage.removeItem(RESUME_KEY); // one shot: never loop on a failure
+    // StrictMode's second mount must not build a second SDK over the same
+    // one-shot callback hash: the first instance has already consumed it.
+    if (resumedRef.current) return;
+    resumedRef.current = true;
 
     (async () => {
       setBusy(true);
       set(0, "pass", "restored after redirect");
       set(1, "running", "completing sign-in…");
       try {
-        const { deviceToken, deviceEncryptionKey } = JSON.parse(stashed);
+        const { deviceToken, deviceEncryptionKey } = RESUME_AT_LOAD;
         const { W3SSdk } = await import("@circle-fin/w3s-pw-web-sdk");
         const session = await new Promise<{ userToken: string; encryptionKey: string }>(
           (resolve, reject) => {

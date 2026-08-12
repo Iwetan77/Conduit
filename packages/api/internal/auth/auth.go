@@ -161,27 +161,43 @@ func Middleware(pool *pgxpool.Pool, privyVerifier *PrivyVerifier) func(http.Hand
 // session, KeyID is always empty.
 const KeyTypePrivy KeyType = "privy"
 
+// ProviderPrivy is the auth_provider value for a Privy-issued identity. A
+// second provider gets its own constant rather than reusing this one: the
+// unique index is on (auth_provider, auth_subject), so the provider is half
+// the key and must never be guessed or defaulted.
+const ProviderPrivy = "privy"
+
 // lookupPrivyPrincipal verifies the Privy access token and resolves it to an
-// existing Conduit account by privy_user_id. Returns an error (not a
-// synthetic empty principal) if no account exists yet for this Privy user --
-// account creation for a brand-new Privy login goes through the dedicated
-// PrivyCreateAccount handler, which verifies the token itself and creates
-// the row, rather than this general-purpose middleware silently creating
-// under-specified accounts (a fresh account needs a real name/settle
-// currency/settle address, which aren't in the JWT).
+// existing Conduit account. Returns an error (not a synthetic empty principal)
+// if no account exists yet for this user -- account creation for a brand-new
+// login goes through the dedicated bootstrap handler, which verifies the token
+// itself and creates the row, rather than this general-purpose middleware
+// silently creating under-specified accounts (a fresh account needs a real
+// name/settle currency/settle address, which aren't in the JWT).
 func lookupPrivyPrincipal(ctx context.Context, pool *pgxpool.Pool, verifier *PrivyVerifier, token string) (Principal, error) {
-	privyUserID, err := verifier.Verify(token)
+	subject, err := verifier.Verify(token)
 	if err != nil {
 		return Principal{}, err
 	}
+	return lookupAuthPrincipal(ctx, pool, ProviderPrivy, subject)
+}
+
+// lookupAuthPrincipal resolves (provider, subject) to an account.
+//
+// Matching on BOTH columns is the point. During a provider migration two rows
+// can exist for the same human, and a subject string is only unique within the
+// provider that issued it -- so a lookup that ignored the provider could hand a
+// caller someone else's account if the two providers ever minted the same
+// subject. The unique index is on the pair for the same reason.
+func lookupAuthPrincipal(ctx context.Context, pool *pgxpool.Pool, provider, subject string) (Principal, error) {
 	var accountID string
 	var livemode bool
-	err = pool.QueryRow(ctx,
-		`SELECT id, livemode FROM accounts WHERE privy_user_id = $1`,
-		privyUserID,
+	err := pool.QueryRow(ctx,
+		`SELECT id, livemode FROM accounts WHERE auth_provider = $1 AND auth_subject = $2`,
+		provider, subject,
 	).Scan(&accountID, &livemode)
 	if err != nil {
-		return Principal{}, fmt.Errorf("no account for Privy user %s: %w", privyUserID, err)
+		return Principal{}, fmt.Errorf("no account for %s user %s: %w", provider, subject, err)
 	}
 	return Principal{AccountID: accountID, KeyType: KeyTypePrivy, Livemode: livemode}, nil
 }

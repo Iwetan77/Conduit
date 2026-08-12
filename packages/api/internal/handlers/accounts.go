@@ -127,8 +127,9 @@ func (h *Accounts) CreateFromPrivy(w http.ResponseWriter, r *http.Request) {
 	var existing privyAccountResponse
 	var loginWallet *string
 	err = h.Pool.QueryRow(ctx,
-		`SELECT id, name, logo_url, settle_currency, settle_address, login_wallet, livemode FROM accounts WHERE privy_user_id = $1`,
-		privyUserID,
+		`SELECT id, name, logo_url, settle_currency, settle_address, login_wallet, livemode
+		 FROM accounts WHERE auth_provider = $1 AND auth_subject = $2`,
+		auth.ProviderPrivy, privyUserID,
 	).Scan(&existing.ID, &existing.Name, &existing.LogoURL, &existing.SettleCurrency, &existing.SettleAddress, &loginWallet, &existing.Livemode)
 	if err == nil {
 		if loginWallet != nil {
@@ -158,10 +159,13 @@ func (h *Accounts) CreateFromPrivy(w http.ResponseWriter, r *http.Request) {
 	}
 
 	accountID := models.NewID("acct")
+	// privy_user_id is still written alongside the provider-agnostic columns so
+	// this migration stays reversible -- rolling back 0014 loses nothing. It is
+	// dropped only once auth_subject is proven populated for every row.
 	_, err = h.Pool.Exec(ctx,
-		`INSERT INTO accounts (id, name, settle_currency, settle_address, privy_user_id, login_wallet, livemode)
-		 VALUES ($1,$2,$3,$4,$5,$6,false)`,
-		accountID, req.Name, req.SettleCurrency, settleAddress, privyUserID, req.LoginWallet,
+		`INSERT INTO accounts (id, name, settle_currency, settle_address, privy_user_id, auth_provider, auth_subject, login_wallet, livemode)
+		 VALUES ($1,$2,$3,$4,$5,$6,$5,$7,false)`,
+		accountID, req.Name, req.SettleCurrency, settleAddress, privyUserID, auth.ProviderPrivy, req.LoginWallet,
 	)
 	if err != nil {
 		writeErr(w, apierrors.E(apierrors.CodeInternal, ""))

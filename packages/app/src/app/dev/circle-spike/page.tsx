@@ -106,6 +106,13 @@ export default function CircleSpikePage() {
   const [diag, setDiag] = useState<string[]>([]);
   const sdkRef = useRef<unknown>(null);
   const resumedRef = useRef(false);
+  // Whoever is currently waiting for a login to complete. Settled by either the
+  // SDK's callback or the verify-token message, whichever arrives — the second
+  // one to arrive finds this null and does nothing.
+  const loginWaiterRef = useRef<{
+    resolve: (s: { userToken: string; encryptionKey: string }) => void;
+    reject: (e: Error) => void;
+  } | null>(null);
 
   const note = (line: string) =>
     setDiag((prev) => (prev.includes(line) ? prev : [...prev, line]));
@@ -130,8 +137,48 @@ export default function CircleSpikePage() {
   useEffect(() => {
     const onMsg = (e: MessageEvent) => {
       if (e.origin !== "https://pw-auth.circle.com") return;
-      const keys = Object.keys((e.data ?? {}) as Record<string, unknown>).join(",");
-      note(`iframe → page: ${keys || "(empty)"}`);
+      const data = (e.data ?? {}) as Record<string, unknown>;
+      note(`iframe → page: ${Object.keys(data).join(",") || "(empty)"}`);
+
+      // The verified login result, straight from Circle's service.
+      //
+      // Taking it here rather than waiting for the SDK's onLoginComplete is
+      // not a shortcut around the real flow -- it IS the real flow. This is
+      // the same postMessage, from Circle's own origin, carrying the same
+      // payload the SDK would have forwarded. The SDK receives it and then
+      // fails to hand it on, so the run stalls holding a completed login.
+      const verified = data.onSocialLoginVerified as
+        | { error?: { code?: number; message?: string }; result?: Record<string, unknown> }
+        | undefined;
+      if (!verified) return;
+
+      note(
+        `onSocialLoginVerified: error=${
+          verified.error ? `${verified.error.code} ${verified.error.message}` : "none"
+        } result keys=${Object.keys(verified.result ?? {}).join(",") || "(none)"}`
+      );
+
+      const waiting = loginWaiterRef.current;
+      if (!waiting) {
+        note("…but no run was waiting for it");
+        return;
+      }
+      loginWaiterRef.current = null;
+      if (verified.error) {
+        waiting.reject(
+          new Error(`Circle rejected the login: ${verified.error.code} ${verified.error.message}`)
+        );
+        return;
+      }
+      const r = verified.result as
+        | { userToken?: string; encryptionKey?: string }
+        | undefined;
+      if (!r?.userToken || !r?.encryptionKey) {
+        waiting.reject(new Error("Circle verified the login but returned no user token"));
+        return;
+      }
+      note("login completed from the verify-token message");
+      waiting.resolve({ userToken: r.userToken, encryptionKey: r.encryptionKey });
     };
     const onRej = (e: PromiseRejectionEvent) =>
       note(`unhandled rejection: ${String(e.reason?.message ?? e.reason)}`);
@@ -248,6 +295,10 @@ export default function CircleSpikePage() {
         const { deviceToken, deviceEncryptionKey } = RESUME_AT_LOAD;
         const session = await new Promise<{ userToken: string; encryptionKey: string }>(
           (resolve, reject) => {
+            // Register BEFORE the SDK is built: its constructor consumes the
+            // callback hash and starts the verify-token exchange immediately,
+            // so a waiter installed afterwards can miss the answer.
+            loginWaiterRef.current = { resolve, reject };
             void makeSdk(
               {
                 appSettings: { appId: APP_ID },
@@ -261,13 +312,20 @@ export default function CircleSpikePage() {
                   },
                 },
               },
+              // Kept wired even though the verify-token message is what
+              // actually settles this today: if a later SDK release starts
+              // delivering the callback, this is the path that should win.
               (err: unknown, result: unknown) => {
-                if (err) return reject(err instanceof Error ? err : new Error(String(err)));
+                const waiting = loginWaiterRef.current;
+                if (!waiting) return; // already settled by the message
+                loginWaiterRef.current = null;
+                note("login completed from the SDK callback");
+                if (err) return waiting.reject(err instanceof Error ? err : new Error(String(err)));
                 const r = result as { userToken?: string; encryptionKey?: string } | undefined;
                 if (!r?.userToken || !r?.encryptionKey) {
-                  return reject(new Error("login returned no user token"));
+                  return waiting.reject(new Error("login returned no user token"));
                 }
-                resolve({ userToken: r.userToken, encryptionKey: r.encryptionKey });
+                waiting.resolve({ userToken: r.userToken, encryptionKey: r.encryptionKey });
               }
             ).catch(reject);
             watchIframe();
@@ -275,15 +333,13 @@ export default function CircleSpikePage() {
             // asynchronously. If it never does, the page would sit on step 2
             // forever looking like a hang -- so fail loudly with the state that
             // explains why instead.
-            setTimeout(
-              () =>
-                reject(
-                  new Error(
-                    "Circle's SDK never completed the login. " + notes.join(" · ")
-                  )
-                ),
-              20_000
-            );
+            setTimeout(() => {
+              if (!loginWaiterRef.current) return; // already settled
+              loginWaiterRef.current = null;
+              reject(
+                new Error("Circle's SDK never completed the login. " + notes.join(" · "))
+              );
+            }, 20_000);
           }
         );
         await finish(session);

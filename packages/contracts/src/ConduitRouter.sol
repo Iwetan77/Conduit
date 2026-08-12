@@ -322,34 +322,48 @@ contract ConduitRouter is IConduitRouter, ReentrancyGuard, Ownable2Step {
     // ── Admin ─────────────────────────────────────────────────────────────────
 
     function setDeclarationRegistry(address registry) external override onlyOwner {
+        require(registry != address(0), "zero: registry");
         declarationRegistry = DeclarationRegistry(registry);
         emit DeclarationRegistrySet(registry);
     }
 
     function setStableFXAdapter(address adapter) external override onlyOwner {
+        require(adapter != address(0), "zero: adapter");
         stableFXAdapter = StableFXAdapter(adapter);
         emit StableFXAdapterSet(adapter);
     }
 
     function setAtomicSettler(address settler) external override onlyOwner {
+        require(settler != address(0), "zero: settler");
         atomicSettler = AtomicSettler(settler);
         emit AtomicSettlerSet(settler);
     }
 
     function setSettlementPreferenceRegistry(address registry) external onlyOwner {
+        require(registry != address(0), "zero: preference registry");
         settlementPreferenceRegistry = SettlementPreferenceRegistry(registry);
         emit SettlementPreferenceRegistrySet(registry);
     }
 
+    /// @dev Emits ProtocolFeeSet. A fee change moves what every payer is
+    ///      charged, and it was previously the one admin action that left no
+    ///      trace an indexer could follow.
     function setProtocolFee(uint256 bps) external override onlyOwner {
         require(bps <= MAX_PROTOCOL_FEE_BPS, "fee too high");
         protocolFeeBps = bps;
+        emit ProtocolFeeSet(bps);
     }
 
+    /// @dev `to` is checked because safeTransfer to address(0) succeeds for
+    ///      most ERC-20s -- it is an ordinary balance update, not a revert --
+    ///      so a mistyped recipient burns the accumulated fees irreversibly
+    ///      after the balance has already been zeroed.
     function withdrawFees(address token, address to) external override onlyOwner {
+        require(to != address(0), "zero: to");
         uint256 amount = accumulatedFees[token];
         accumulatedFees[token] = 0;
         IERC20(token).safeTransfer(to, amount);
+        emit FeesWithdrawn(token, to, amount);
     }
 
     // ── Internal ──────────────────────────────────────────────────────────────

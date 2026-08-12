@@ -57,6 +57,46 @@ contract ConduitRouterTest is Test {
         eurc.mint(PAYER, 500 * 1e6);   // 500 EURC
     }
 
+    // ── Admin guards (SolidityScan: missing zero-address validation, events) ──
+
+    /// The constructor rejected zero for these three, but the setters that
+    /// REPLACE them did not — so the guard held at deploy time and then went
+    /// away for the rest of the contract's life. Setting any to address(0)
+    /// points the router at an address with no code.
+    function test_setters_rejectZeroAddress() public {
+        vm.startPrank(OWNER);
+        vm.expectRevert(bytes("zero: registry"));
+        router.setDeclarationRegistry(address(0));
+
+        vm.expectRevert(bytes("zero: adapter"));
+        router.setStableFXAdapter(address(0));
+
+        vm.expectRevert(bytes("zero: settler"));
+        router.setAtomicSettler(address(0));
+
+        vm.expectRevert(bytes("zero: preference registry"));
+        router.setSettlementPreferenceRegistry(address(0));
+        vm.stopPrank();
+    }
+
+    /// safeTransfer to address(0) is an ordinary balance update for most
+    /// ERC-20s, not a revert — so without this guard a mistyped recipient
+    /// burns the fees, and does it AFTER the balance has been zeroed.
+    function test_withdrawFees_rejectsZeroRecipient() public {
+        vm.prank(OWNER);
+        vm.expectRevert(bytes("zero: to"));
+        router.withdrawFees(address(usdc), address(0));
+    }
+
+    /// A fee change alters what every payer is charged and was the one admin
+    /// action leaving no trace an indexer could follow.
+    function test_setProtocolFee_emitsEvent() public {
+        vm.prank(OWNER);
+        vm.expectEmit(false, false, false, true);
+        emit IConduitRouter.ProtocolFeeSet(25);
+        router.setProtocolFee(25);
+    }
+
     // ── Direct Send — Same Currency ───────────────────────────────────────────
 
     function test_directSend_sameToken() public {

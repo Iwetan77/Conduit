@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { listAccounts, createSubAccount, getStorefrontLink, type Account, ConduitApiError } from "@/lib/conduit-api";
 import { SETTLE_CURRENCIES as CURRENCIES, currencyFlag } from "@/lib/currencies";
+import { tokenLabel } from "@/lib/format";
 import { PageHeader } from "@/components/Dashboard/PageHeader";
 
 function DownloadableQR({ value, filename }: { value: string; filename: string }) {
@@ -77,10 +78,16 @@ function StorefrontCard({ account }: { account: Account }) {
 
   return (
     <div className="border border-border p-4 flex flex-col items-center gap-3">
+      {/* Deliberately no settle address here. This card is the thing a cashier
+          has open at the till, and an address on screen is something a customer
+          can be handed or can photograph. Paying it directly moves real money
+          on-chain while bypassing Conduit entirely -- no conversion into the
+          storefront's currency, no settlement row, no attribution -- so it
+          looks to everyone like a payment that succeeded and simply isn't
+          there. The QR is the only thing on this card meant to leave it. */}
       <div className="text-center">
         <p className="font-medium text-sm">{account.name}</p>
-        <p className="text-ink-dim text-xs">{account.settle_currency}</p>
-        <p className="text-ink-dim text-[10px] font-mono break-all">{account.settle_address}</p>
+        <p className="text-ink-dim text-xs">{tokenLabel(account.settle_currency)}</p>
       </div>
       {link ? (
         <>

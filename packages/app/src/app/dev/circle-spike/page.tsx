@@ -36,6 +36,19 @@ const SPIKE_PATH = "/dev/circle-spike";
 // after it, so the resumed page has to find them where the outgoing page left
 // them. sessionStorage, not localStorage: this is one run, not a preference.
 const RESUME_KEY = "conduit_circle_spike_resume";
+
+// Snapshot of the OAuth callback, taken at module scope — i.e. before React
+// mounts and before any SDK instance can run history.replaceState over it.
+// Reading this inside an effect is too late: the SDK strips the hash as soon as
+// it consumes it, so an effect that finds nothing cannot tell "Google never
+// came back" apart from "something already ate the answer". Those need very
+// different fixes, which is why this is captured rather than inferred.
+const CALLBACK_AT_LOAD =
+  typeof window === "undefined"
+    ? ""
+    : window.location.hash && window.location.hash.length > 1
+      ? window.location.hash.slice(1)
+      : "";
 function deviceId(): string {
   let id = localStorage.getItem(DEVICE_ID_KEY);
   if (!id) {
@@ -67,6 +80,9 @@ export default function CircleSpikePage() {
   );
   const [busy, setBusy] = useState(false);
   const [verdict, setVerdict] = useState<string>("");
+  // What the page knows about how it got here. Shown on screen so a failed run
+  // reports its own cause instead of being described second-hand.
+  const [diag, setDiag] = useState<string[]>([]);
   const sdkRef = useRef<unknown>(null);
 
   const set = (i: number, status: Status, detail?: string) =>
@@ -81,7 +97,27 @@ export default function CircleSpikePage() {
   // for the callback now in the URL; from there the flow re-enters at step 3.
   useEffect(() => {
     const stashed = sessionStorage.getItem(RESUME_KEY);
-    if (!stashed) return;
+    const provider = localStorage.getItem("socialLoginProvider");
+    const notes = [
+      `callback hash at load: ${CALLBACK_AT_LOAD ? `present (${CALLBACK_AT_LOAD.length} chars)` : "ABSENT"}`,
+      `has id_token: ${CALLBACK_AT_LOAD.includes("id_token") ? "yes" : "no"}`,
+      `pending run to resume: ${stashed ? "yes" : "no"}`,
+      `SDK socialLoginProvider: ${provider || "(unset)"}`,
+    ];
+    setDiag(notes);
+
+    // Came back from Google but nothing was waiting to resume: the run that
+    // started the sign-in is gone and its device token with it, so there is
+    // nothing to continue and starting over silently would just loop.
+    if (!stashed) {
+      if (CALLBACK_AT_LOAD.includes("id_token")) {
+        setVerdict(
+          "Google came back with a token, but this page had no run waiting for it. " +
+            "Press Run spike to start a fresh attempt."
+        );
+      }
+      return;
+    }
     sessionStorage.removeItem(RESUME_KEY); // one shot: never loop on a failure
 
     (async () => {
@@ -115,6 +151,19 @@ export default function CircleSpikePage() {
               }
             );
             sdkRef.current = sdk;
+            // The SDK consumes the hash in its constructor and calls back
+            // asynchronously. If it never does, the page would sit on step 2
+            // forever looking like a hang -- so fail loudly with the state that
+            // explains why instead.
+            setTimeout(
+              () =>
+                reject(
+                  new Error(
+                    "Circle's SDK never completed the login. " + notes.join(" · ")
+                  )
+                ),
+              20_000
+            );
           }
         );
         await finish(session);
@@ -329,6 +378,19 @@ export default function CircleSpikePage() {
           </li>
         ))}
       </ol>
+
+      {diag.length > 0 && (
+        <div className="mt-6 border border-border bg-surface p-4">
+          <p className="text-[10px] font-mono text-ink-dim uppercase tracking-wider mb-2">
+            How this page loaded
+          </p>
+          {diag.map((d) => (
+            <p key={d} className="text-ink-dim text-xs font-mono">
+              {d}
+            </p>
+          ))}
+        </div>
+      )}
 
       {verdict && (
         <p

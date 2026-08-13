@@ -54,6 +54,7 @@ export default function CircleConnectorPage() {
   const [busy, setBusy] = useState(false);
 
   const circle = connectors.find((c) => c.id === CIRCLE_CONNECTOR_ID);
+  const onCircle = isConnected && connector?.id === CIRCLE_CONNECTOR_ID;
   const set = (i: number, status: Status, detail?: string) =>
     setChecks((prev) => prev.map((c, idx) => (idx === i ? { ...c, status, detail } : c)));
 
@@ -63,9 +64,21 @@ export default function CircleConnectorPage() {
     setChecks(CHECKS.map((name) => ({ name, status: "pending" as Status })));
     try {
       // 1 — wagmi knows the wallet, with no Circle-specific code here.
+      //
+      // The connector identity is asserted, not just reported. Without this
+      // the gate ran against whatever wallet happened to be connected — an
+      // injected extension auto-reconnecting is enough — and passed four
+      // checks about a wallet the migration has nothing to do with. A gate
+      // that can pass without exercising the thing under test is worse than
+      // no gate.
       set(0, "running");
       if (!isConnected || !address) throw new Error("not connected");
-      set(0, "pass", `${address} via connector "${connector?.id}"`);
+      if (connector?.id !== CIRCLE_CONNECTOR_ID) {
+        throw new Error(
+          `connected via "${connector?.id}", not the Circle connector. Disconnect and sign in with Google.`
+        );
+      }
+      set(0, "pass", `${address} via connector "${connector.id}"`);
 
       // 2 — THE gate. Unmodified, exactly as every write path calls it.
       set(1, "running");
@@ -131,7 +144,10 @@ export default function CircleConnectorPage() {
       </p>
 
       <div className="mt-6 flex items-center gap-3">
-        {!isConnected ? (
+        {/* Shown whenever the CIRCLE connector is not the connected one — an
+            injected extension auto-reconnecting would otherwise hide the only
+            control that gets this page to the wallet it exists to test. */}
+        {!onCircle && (
           <button
             onClick={() => circle && connect({ connector: circle })}
             disabled={!circle || isPending}
@@ -139,29 +155,39 @@ export default function CircleConnectorPage() {
           >
             {isPending ? "Connecting…" : "Sign in with Google"}
           </button>
-        ) : (
-          <>
-            <button
-              onClick={run}
-              disabled={busy}
-              className="bg-signal text-signal-ink font-mono px-5 py-2.5 text-sm disabled:opacity-50"
-            >
-              {busy ? "Running…" : "Run gate"}
-            </button>
-            <button
-              onClick={() => disconnect()}
-              className="border border-border text-ink-dim font-mono px-4 py-2.5 text-xs"
-            >
-              Disconnect
-            </button>
-          </>
         )}
-        {!circle && (
-          <span className="text-danger text-xs font-mono">
-            circle connector not registered — check NEXT_PUBLIC_CIRCLE_APP_ID
-          </span>
+        {onCircle && (
+          <button
+            onClick={run}
+            disabled={busy}
+            className="bg-signal text-signal-ink font-mono px-5 py-2.5 text-sm disabled:opacity-50"
+          >
+            {busy ? "Running…" : "Run gate"}
+          </button>
+        )}
+        {isConnected && (
+          <button
+            onClick={() => disconnect()}
+            className="border border-border text-ink-dim font-mono px-4 py-2.5 text-xs"
+          >
+            Disconnect {connector?.id}
+          </button>
         )}
       </div>
+
+      {/* What wagmi actually has. "Not registered" on its own gives nothing to
+          act on: the connector could be missing because the env vars never
+          reached the bundle, or because this page is under a different wagmi
+          config than the one it was added to. The list tells those apart. */}
+      <p className="mt-3 text-[10px] font-mono text-ink-dim break-all">
+        connectors: {connectors.map((c) => c.id).join(", ") || "(none)"}
+        {!circle && (
+          <span className="text-danger">
+            {" "}
+            — no &quot;{CIRCLE_CONNECTOR_ID}&quot; connector in this config
+          </span>
+        )}
+      </p>
 
       {isConnected && (
         <p className="mt-4 text-xs font-mono text-ink-dim break-all">

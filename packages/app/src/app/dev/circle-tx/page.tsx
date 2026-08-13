@@ -22,7 +22,7 @@ import { useEffect, useState } from "react";
 import { ethers } from "ethers";
 import { useCircleSession } from "@/lib/circle/session";
 import { createCircleProvider } from "@/lib/circle/provider";
-import { ARC_RPC_URL, arcTestnet } from "@/lib/wagmi";
+import { ARC_RPC_URL, arcTestnet } from "@/lib/chain";
 
 const API_BASE = process.env.NEXT_PUBLIC_CONDUIT_API_URL ?? "http://localhost:8080";
 const APP_ID = process.env.NEXT_PUBLIC_CIRCLE_APP_ID ?? "";

@@ -25,7 +25,7 @@
 // forwarded to Arc's JSON-RPC unchanged, which keeps eth_call, eth_getLogs,
 // gas estimation and every other read on exactly the path they already use.
 
-import { ARC_RPC_URL, arcTestnet } from "@/lib/wagmi";
+import { ARC_RPC_URL, arcTestnet } from "@/lib/chain";
 
 /** Circle's challenge execution, injected so this file never imports the SDK. */
 export type ExecuteChallenge = (challengeId: string) => Promise<unknown>;

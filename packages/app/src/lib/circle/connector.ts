@@ -29,6 +29,7 @@ import {
   hasPendingResume,
   hasPersistedSession,
   restoreSession,
+  returnPathAfterLogin,
   startGoogleSignIn,
   clearCircleSession,
   type CircleConfig,
@@ -71,6 +72,12 @@ export function circleConnector(params: CircleConfig) {
             accounts: [s.wallet.address as `0x${string}`],
             chainId: arcTestnet.id,
           });
+          // Google only ever redirects to the one registered callback, so put
+          // the merchant back where they pressed sign in. Done after the
+          // session exists, or the destination would load signed-out and
+          // bounce them straight back here.
+          const back = returnPathAfterLogin();
+          if (back) window.location.replace(back);
         }
       } catch {
         // Swallowed deliberately. setup() runs during app boot for every user,

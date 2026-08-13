@@ -20,6 +20,7 @@
 
 const RESUME_KEY = "conduit_circle_resume";
 const SESSION_KEY = "conduit_circle_session";
+const RETURN_KEY = "conduit_circle_return_to";
 const CIRCLE_AUTH_ORIGIN = "https://pw-auth.circle.com";
 
 // Circle user tokens last 60 minutes. Treat them as dead a little early so a
@@ -53,6 +54,35 @@ const RESUME_AT_LOAD: { deviceToken: string; deviceEncryptionKey: string } | nul
     return null;
   }
 })();
+
+// Where the user was when they pressed sign in.
+//
+// Google redirects to ONE registered URI, so every Circle sign-in lands on the
+// callback route regardless of where it started. Without this, signing in from
+// /dashboard leaves the merchant sitting on the callback page, signed in and
+// nowhere near what they were doing. Read at module scope and cleared, like
+// the other one-shot values here.
+const RETURN_AT_LOAD: string | null = (() => {
+  if (typeof window === "undefined") return null;
+  const v = sessionStorage.getItem(RETURN_KEY);
+  if (v) sessionStorage.removeItem(RETURN_KEY);
+  return v;
+})();
+
+/**
+ * The path to send the user back to after a completed redirect sign-in, or
+ * null if they are already where they started.
+ *
+ * Same-origin paths only. This value survives a full-page navigation, so
+ * treating it as a URL would let a crafted link redirect somewhere else
+ * entirely after login.
+ */
+export function returnPathAfterLogin(): string | null {
+  if (!RETURN_AT_LOAD) return null;
+  if (!RETURN_AT_LOAD.startsWith("/") || RETURN_AT_LOAD.startsWith("//")) return null;
+  if (RETURN_AT_LOAD === window.location.pathname) return null;
+  return RETURN_AT_LOAD;
+}
 
 export interface CircleWallet {
   id: string;
@@ -487,6 +517,13 @@ export async function startGoogleSignIn(): Promise<void> {
       deviceEncryptionKey: dev.device_encryption_key,
     })
   );
+
+  // Remember where to come back to before the page is gone.
+  try {
+    sessionStorage.setItem(RETURN_KEY, window.location.pathname + window.location.search);
+  } catch {
+    // Storage unavailable — sign-in still works, it just lands on the callback.
+  }
 
   note("redirecting to Google…");
   // performLogin takes SocialLoginProvider, which the package imports but never

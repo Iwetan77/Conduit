@@ -57,6 +57,17 @@ type Config struct {
 	CircleBaseURL string
 }
 
+// statusRecorder captures the status code so the request log can report it.
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (s *statusRecorder) WriteHeader(code int) {
+	s.status = code
+	s.ResponseWriter.WriteHeader(code)
+}
+
 func New(cfg Config) http.Handler {
 	stableFX := fx.NewStableFXProvider(cfg.StableFXBase, cfg.StableFXKey)
 	dispatcher := webhooks.NewDispatcher(cfg.Pool)
@@ -140,6 +151,32 @@ func New(cfg Config) http.Handler {
 		AllowCredentials: false,
 		MaxAge:           300,
 	}))
+	// Request log, on by default for the dev server and opt-in elsewhere.
+	//
+	// Added because a blank dashboard is indistinguishable from three different
+	// causes -- requests not being made, requests being rejected, or requests
+	// succeeding with no data -- and none of them were visible from either end.
+	// Guessing between them is exactly the loop this project keeps paying for.
+	if os.Getenv("CONDUIT_REQUEST_LOG") != "0" {
+		r.Use(func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				start := time.Now()
+				rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+				next.ServeHTTP(rec, req)
+				if strings.HasPrefix(req.URL.Path, "/v1/") {
+					auth := "none"
+					if req.Header.Get("X-Circle-User-Token") != "" {
+						auth = "circle"
+					} else if req.Header.Get("Authorization") != "" {
+						auth = "bearer"
+					}
+					log.Printf("%s %s -> %d (%s, auth=%s)",
+						req.Method, req.URL.Path, rec.status, time.Since(start).Round(time.Millisecond), auth)
+				}
+			})
+		})
+	}
+
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) })
 
 	// (deploy pipeline restored via deploy-api Action + Render Deploy Hook)

@@ -5,7 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { usePrivy, useLogin, useCreateWallet } from "@privy-io/react-auth";
 import { useQueryClient } from "@tanstack/react-query";
-import { useAccount, useDisconnect } from "wagmi";
+import { useAccount, useConnect, useDisconnect } from "wagmi";
 import {
   clearSessionToken,
   createAccountFromCircle,
@@ -405,6 +405,44 @@ function PrivyDashboard({ children }: { children: React.ReactNode }) {
 }
 
 
+// The sign-in screen for a Circle merchant.
+//
+// A separate component from LoginGate rather than a flag inside it: LoginGate
+// calls Privy's useLogin(), and under the Circle flag there is no Privy
+// provider mounted for that hook to reach. It does not throw -- it simply
+// returns a login() that does nothing, so the button rendered fine and clicked
+// into the void.
+function CircleLoginGate() {
+  const { connect, connectors, isPending } = useConnect();
+  const [error, setError] = useState("");
+  const circle = connectors.find((c) => c.id === CIRCLE_CONNECTOR_ID);
+
+  return (
+    <div className="min-h-screen text-ink flex items-center justify-center p-6">
+      <div className="w-full max-w-md space-y-8 text-center">
+        <div>
+          <h1 className="font-display text-3xl font-bold">Conduit Dashboard</h1>
+          <p className="text-ink-dim text-sm mt-1">Sign in to continue.</p>
+        </div>
+        <button
+          onClick={() => {
+            if (!circle) {
+              setError("Circle sign-in is not configured on this build.");
+              return;
+            }
+            connect({ connector: circle });
+          }}
+          disabled={isPending || !circle}
+          className="w-full bg-signal text-signal-ink font-medium py-2 text-sm disabled:opacity-50"
+        >
+          {isPending ? "Opening Google…" : "Sign in with Google"}
+        </button>
+        {error && <p className="text-danger text-sm">{error}</p>}
+      </div>
+    </div>
+  );
+}
+
 // Circle identity, via the wagmi connector.
 //
 // Much shorter than the Privy version, and not because corners were cut: the
@@ -461,7 +499,7 @@ function CircleDashboard({ children }: { children: React.ReactNode }) {
     clearCircleSession();
   };
 
-  if (!onCircle) return <LoginGate />;
+  if (!onCircle) return <CircleLoginGate />;
   if (needsOnboarding) {
     return (
       <CircleOnboarding

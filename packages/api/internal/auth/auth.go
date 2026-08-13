@@ -138,7 +138,11 @@ func Middleware(pool *pgxpool.Pool, privyVerifier *PrivyVerifier, circleVerifier
 
 			var principal Principal
 			var err error
-			if privyVerifier != nil && looksLikePrivyToken(key) {
+			// Conduit's own session first: a local HMAC check and one row read,
+			// with no identity provider in the path.
+			if strings.HasPrefix(key, SessionTokenPrefix) {
+				principal, err = lookupSessionPrincipal(r.Context(), pool, key)
+			} else if privyVerifier != nil && looksLikePrivyToken(key) {
 				principal, err = lookupPrivyPrincipal(r.Context(), pool, privyVerifier, key)
 			} else {
 				principal, err = lookupKey(r.Context(), pool, key)
@@ -228,6 +232,23 @@ func lookupAuthPrincipal(ctx context.Context, pool *pgxpool.Pool, provider, subj
 		return Principal{}, fmt.Errorf("no account for %s user %s: %w", provider, subject, err)
 	}
 	return Principal{AccountID: accountID, KeyType: KeyTypePrivy, Livemode: livemode}, nil
+}
+
+// lookupSessionPrincipal resolves a Conduit session token to its account.
+//
+// The account row is still read rather than trusted from the token: an account
+// can be deleted or change livemode after the token was signed, and a session
+// that outlived its account would be authenticated against nothing.
+func lookupSessionPrincipal(ctx context.Context, pool *pgxpool.Pool, token string) (Principal, error) {
+	accountID, err := ParseSessionToken(token)
+	if err != nil {
+		return Principal{}, err
+	}
+	var livemode bool
+	if err := pool.QueryRow(ctx, `SELECT livemode FROM accounts WHERE id = $1`, accountID).Scan(&livemode); err != nil {
+		return Principal{}, fmt.Errorf("no account for session %s: %w", accountID, err)
+	}
+	return Principal{AccountID: accountID, KeyType: KeyTypeSession, Livemode: livemode}, nil
 }
 
 func lookupKey(ctx context.Context, pool *pgxpool.Pool, key string) (Principal, error) {

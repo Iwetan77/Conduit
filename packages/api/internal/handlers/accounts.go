@@ -94,6 +94,11 @@ type createFromPrivyRequest struct {
 	LoginWallet    string `json:"login_wallet"`   // the payer's Privy embedded wallet address
 }
 type privyAccountResponse struct {
+	// SessionToken is Conduit's own dashboard session, issued here so the
+	// identity provider is not on the hot path. Without it every subsequent
+	// request re-verifies with the provider -- for Circle that is a network
+	// call, measured between 280ms and 7.6s on a polling dashboard.
+	SessionToken   string  `json:"session_token,omitempty"`
 	ID             string  `json:"id"`
 	Name           string  `json:"name"`
 	LogoURL        *string `json:"logo_url,omitempty"`
@@ -176,6 +181,7 @@ func (h *Accounts) bootstrapAccount(w http.ResponseWriter, r *http.Request, prov
 		if loginWallet != nil {
 			existing.LoginWallet = *loginWallet
 		}
+		existing.SessionToken = auth.NewSessionToken(existing.ID)
 		writeJSON(w, http.StatusOK, existing)
 		return
 	}
@@ -219,7 +225,8 @@ func (h *Accounts) bootstrapAccount(w http.ResponseWriter, r *http.Request, prov
 	}
 
 	writeJSON(w, http.StatusCreated, privyAccountResponse{
-		ID: accountID, Name: req.Name, SettleCurrency: req.SettleCurrency,
+		SessionToken: auth.NewSessionToken(accountID),
+		ID:           accountID, Name: req.Name, SettleCurrency: req.SettleCurrency,
 		SettleAddress: settleAddress, LoginWallet: req.LoginWallet, Livemode: false,
 	})
 }

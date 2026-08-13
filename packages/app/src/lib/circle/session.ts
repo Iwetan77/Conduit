@@ -10,7 +10,8 @@
 // resume" on a redirect that was working fine. Two owners of a one-shot value
 // is the bug; one owner and a binding is the fix.
 //
-// The public shape is unchanged so /dev/circle-tx keeps working untouched.
+// Kept as the React-facing surface for any component that wants the session
+// directly rather than through wagmi.
 
 import { useCallback, useEffect, useReducer, useState } from "react";
 import {

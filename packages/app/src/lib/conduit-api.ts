@@ -67,11 +67,13 @@ async function request<T>(
   const apiKey = options.apiKey ?? getSessionToken();
   const headers: Record<string, string> = { "content-type": "application/json" };
   if (apiKey) headers["authorization"] = `Bearer ${apiKey}`;
-  // Sent alongside, not instead of: a merchant on Circle may still be holding
-  // a pasted sk_ key for programmatic access, and the server prefers whichever
-  // it can resolve. Only one of these is ever populated in practice.
-  const circleToken = options.circleToken ?? getCircleSessionToken();
-  if (circleToken) headers["X-Circle-User-Token"] = circleToken;
+  // Only when a caller passes it explicitly, which in practice is the login
+  // bootstrap alone. Attaching a stored Circle token to every request made the
+  // API re-verify with Circle on each one -- a network round trip per call,
+  // measured between 280ms and 7.6s on a polling dashboard, with Circle's
+  // availability in front of every request. The bootstrap returns a Conduit
+  // session token instead, and that is what authenticates everything after.
+  if (options.circleToken) headers["X-Circle-User-Token"] = options.circleToken;
   if (options.idempotencyKey) headers["idempotency-key"] = options.idempotencyKey;
 
   const res = await fetch(`${API_BASE}${path}`, {
@@ -184,6 +186,9 @@ export function getStorefrontLink(accountId: string) {
 }
 
 export interface PrivyAccount {
+  // Conduit's own dashboard session. Present on both login bootstraps; store
+  // it and use it for every subsequent call.
+  session_token?: string;
   id: string;
   name: string;
   settle_currency: string;

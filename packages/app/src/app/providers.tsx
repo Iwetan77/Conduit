@@ -59,28 +59,23 @@ export function Providers({ children }: { children: React.ReactNode }) {
     return () => window.removeEventListener(GOOGLE_LOGIN_EVENT, onLoginRequest);
   }, []);
 
-  // The /dev spike routes must never mount Privy, and this is not a
-  // preference — the two stacks cannot share a wagmi config.
+  // The Circle callback must never mount Privy.
   //
-  // @privy-io/wagmi's createConfig does:
-  //
+  // Not a preference — the two stacks cannot share a wagmi config.
+  // @privy-io/wagmi's createConfig does
   //   connectors: e.connectors?.filter((o) => "mock" === o.type)
-  //
-  // i.e. it discards every connector that is not a mock, and turns off
-  // EIP-6963 discovery, supplying wallets through its own sync instead. So
-  // whenever the Privy stack is mounted, injected(), walletConnect() and the
-  // Circle connector are all absent from wagmi, whatever lib/wagmi declares.
-  // A returning Privy session mounts that stack on EVERY route, which is what
-  // left the Circle gate page looking at a connector list of one Privy-synced
-  // wallet and no "circle" at all.
-  const isDevRoute = Boolean(pathname?.startsWith("/dev/"));
+  // and disables EIP-6963 discovery, so wherever it is mounted the Circle
+  // connector is absent from wagmi whatever lib/wagmi declares — and the
+  // callback route is precisely where that connector has to be present to
+  // consume the login.
+  const isCircleCallback = Boolean(pathname?.startsWith("/auth/circle/"));
 
   // Dashboard always needs Privy (merchant auth). Checked in render so the
   // stack starts loading on first client render, not after an effect tick.
   const privyOn =
     !CIRCLE_AUTH &&
     Boolean(PRIVY_APP_ID) &&
-    !isDevRoute &&
+    !isCircleCallback &&
     (wantPrivy || Boolean(pathname?.startsWith("/dashboard")));
 
   if (!privyOn) {

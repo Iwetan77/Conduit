@@ -10,7 +10,6 @@ import {
   clearSessionToken,
   createAccountFromCircle,
   createAccountFromPrivy,
-  setCircleSessionToken,
   setSessionToken,
 } from "@/lib/conduit-api";
 import { CIRCLE_CONNECTOR_ID } from "@/lib/circle/connector";
@@ -459,14 +458,6 @@ function CircleDashboard({ children }: { children: React.ReactNode }) {
   const [needsOnboarding, setNeedsOnboarding] = useState(false);
   const onCircle = isConnected && connector?.id === CIRCLE_CONNECTOR_ID;
 
-  // Register the Circle session with the API client, so every existing call in
-  // the app authenticates without knowing Circle exists.
-  useEffect(() => {
-    const s = currentSession();
-    if (!s) return;
-    setCircleSessionToken(s.userToken);
-  }, [address]);
-
   // Resolve (or create) the Conduit account for this Circle identity.
   useEffect(() => {
     if (!onCircle || !address) {
@@ -478,7 +469,11 @@ function CircleDashboard({ children }: { children: React.ReactNode }) {
     let cancelled = false;
     (async () => {
       try {
-        await createAccountFromCircle(s.userToken, { login_wallet: address });
+        const account = await createAccountFromCircle(s.userToken, { login_wallet: address });
+        // From here on the app authenticates with Conduit's own session, not
+        // Circle's token — one local check per request instead of a round trip
+        // to Circle.
+        if (account.session_token) setSessionToken(account.session_token);
         if (!cancelled) setAccountReady(true);
       } catch {
         // A first-ever login has no name/settle currency yet, which the server
@@ -533,11 +528,12 @@ function CircleOnboarding({ address, onDone }: { address: string; onDone: () => 
     try {
       const s = currentSession();
       if (!s) throw new Error("No Circle session");
-      await createAccountFromCircle(s.userToken, {
+      const account = await createAccountFromCircle(s.userToken, {
         name,
         settle_currency: settleCurrency,
         login_wallet: address,
       });
+      if (account.session_token) setSessionToken(account.session_token);
       onDone();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));

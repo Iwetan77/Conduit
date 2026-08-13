@@ -21,7 +21,7 @@ const conduitApiBase = process.env.NEXT_PUBLIC_CONDUIT_API_URL ?? "http://localh
 // Where Google returns after a Circle sign-in. Exported so the spike pages and
 // the eventual app callback route agree on one value — a mismatch here fails
 // as redirect_uri_mismatch at Google, well away from anything that mentions it.
-export const CIRCLE_CALLBACK_PATH = "/dev/circle-connector";
+export const CIRCLE_CALLBACK_PATH = "/auth/circle/callback";
 
 export const wagmiConfigParams = {
   chains: [arcTestnet],

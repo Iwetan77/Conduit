@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/go-chi/chi/v5"
+
 	"github.com/kzn-labs/conduit/api/internal/circle"
 	apierrors "github.com/kzn-labs/conduit/api/internal/errors"
 )
@@ -151,4 +153,102 @@ func (h *CircleAuth) SignTypedData(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"challenge_id": challengeID})
+}
+
+// SignMessage is POST /v1/auth/circle/sign_message — prepares an EIP-191
+// personal_sign.
+func (h *CircleAuth) SignMessage(w http.ResponseWriter, r *http.Request) {
+	if !h.available(w) {
+		return
+	}
+	token := userToken(r)
+	if token == "" {
+		writeErr(w, apierrors.E(apierrors.CodeUnauthorized, "X-Circle-User-Token"))
+		return
+	}
+	var req struct {
+		WalletID     string `json:"wallet_id"`
+		Message      string `json:"message"`
+		EncodedByHex bool   `json:"encoded_by_hex"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.WalletID == "" || req.Message == "" {
+		writeErr(w, apierrors.E(apierrors.CodeInvalidRequest, "wallet_id, message"))
+		return
+	}
+	challengeID, err := h.Client.SignMessageChallenge(r.Context(), token, req.WalletID, req.Message, req.EncodedByHex)
+	if err != nil {
+		h.upstream(w, "sign message", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"challenge_id": challengeID})
+}
+
+// ContractExecution is POST /v1/auth/circle/contract_execution — one
+// eth_sendTransaction. Returns a challenge the user must execute; Circle
+// broadcasts only after they authorise it.
+func (h *CircleAuth) ContractExecution(w http.ResponseWriter, r *http.Request) {
+	if !h.available(w) {
+		return
+	}
+	token := userToken(r)
+	if token == "" {
+		writeErr(w, apierrors.E(apierrors.CodeUnauthorized, "X-Circle-User-Token"))
+		return
+	}
+	var req struct {
+		WalletID string `json:"wallet_id"`
+		To       string `json:"to"`
+		Data     string `json:"data"`
+		Amount   string `json:"amount"`
+		FeeLevel string `json:"fee_level"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.WalletID == "" || req.To == "" {
+		writeErr(w, apierrors.E(apierrors.CodeInvalidRequest, "wallet_id, to"))
+		return
+	}
+	// Calldata is forwarded verbatim. Re-encoding a call we were handed is the
+	// one way to execute something other than what the caller asked for.
+	challengeID, err := h.Client.CreateContractExecutionChallenge(r.Context(), token, circle.ContractExecution{
+		WalletID:        req.WalletID,
+		ContractAddress: req.To,
+		CallData:        req.Data,
+		Amount:          req.Amount,
+		FeeLevel:        req.FeeLevel,
+	})
+	if err != nil {
+		h.upstream(w, "contract execution", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"challenge_id": challengeID})
+}
+
+// Transaction is GET /v1/auth/circle/transactions/{id} — the bridge between
+// Circle's transaction id and the tx hash every EIP-1193 caller expects. The
+// browser polls this until a hash exists or the transaction fails.
+func (h *CircleAuth) Transaction(w http.ResponseWriter, r *http.Request) {
+	if !h.available(w) {
+		return
+	}
+	token := userToken(r)
+	if token == "" {
+		writeErr(w, apierrors.E(apierrors.CodeUnauthorized, "X-Circle-User-Token"))
+		return
+	}
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		writeErr(w, apierrors.E(apierrors.CodeInvalidRequest, "id"))
+		return
+	}
+	tx, err := h.Client.GetTransaction(r.Context(), token, id)
+	if err != nil {
+		h.upstream(w, "get transaction", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"id":           tx.ID,
+		"state":        tx.State,
+		"tx_hash":      tx.TxHash,
+		"failed":       tx.Failed(),
+		"error_reason": tx.ErrorReason,
+	})
 }

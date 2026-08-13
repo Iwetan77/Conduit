@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/google/uuid"
@@ -299,4 +300,101 @@ func (c *Client) SignTypedDataChallenge(ctx context.Context, userToken, walletID
 		return "", err
 	}
 	return out.ChallengeID, nil
+}
+
+// SignMessageChallenge prepares an EIP-191 personal_sign.
+func (c *Client) SignMessageChallenge(ctx context.Context, userToken, walletID, message string, encodedByHex bool) (string, error) {
+	var out struct {
+		ChallengeID string `json:"challengeId"`
+	}
+	err := c.doUser(ctx, http.MethodPost, "/v1/w3s/user/sign/message", userToken, map[string]any{
+		"walletId": walletID,
+		"message":  message,
+		// personal_sign carries arbitrary bytes as hex. Saying so is what stops
+		// Circle signing the literal characters "0x…" instead of the bytes.
+		"encodedByHex": encodedByHex,
+	}, &out)
+	if err != nil {
+		return "", err
+	}
+	return out.ChallengeID, nil
+}
+
+// ContractExecution is one eth_sendTransaction, in Circle's terms.
+//
+// CallData is the ABI-encoded call exactly as an EIP-1193 caller already
+// produces it. Circle also accepts abiFunctionSignature + abiParameters, but
+// that would mean decoding calldata we were handed and re-encoding it, which
+// can only introduce a difference between the call the caller asked for and
+// the one that executes. The two forms are mutually exclusive.
+type ContractExecution struct {
+	WalletID        string
+	ContractAddress string
+	CallData        string
+	// Amount of native currency to send, as a DECIMAL string in whole units
+	// (Circle's convention here, not minor units). Empty for a pure call.
+	Amount   string
+	FeeLevel string
+}
+
+// CreateContractExecutionChallenge asks Circle to prepare a contract call. The
+// user authorises it in the browser by executing the returned challenge;
+// Circle then broadcasts. Nothing here can move funds on its own.
+func (c *Client) CreateContractExecutionChallenge(ctx context.Context, userToken string, ex ContractExecution) (string, error) {
+	feeLevel := ex.FeeLevel
+	if feeLevel == "" {
+		feeLevel = "MEDIUM"
+	}
+	body := map[string]any{
+		"idempotencyKey":  uuid.NewString(),
+		"walletId":        ex.WalletID,
+		"contractAddress": ex.ContractAddress,
+		"callData":        ex.CallData,
+		"feeLevel":        feeLevel,
+	}
+	if ex.Amount != "" {
+		body["amount"] = ex.Amount
+	}
+	var out struct {
+		ChallengeID string `json:"challengeId"`
+	}
+	if err := c.doUser(ctx, http.MethodPost, "/v1/w3s/user/transactions/contractExecution", userToken, body, &out); err != nil {
+		return "", err
+	}
+	return out.ChallengeID, nil
+}
+
+// Transaction is Circle's view of a submitted transaction.
+//
+// The whole reason this type exists is that Circle hands back an id of its own
+// and a state machine, while every EIP-1193 caller expects a tx hash. TxHash
+// is empty until Circle has actually broadcast.
+type Transaction struct {
+	ID          string `json:"id"`
+	State       string `json:"state"`
+	TxHash      string `json:"txHash"`
+	Blockchain  string `json:"blockchain"`
+	ErrorReason string `json:"errorReason"`
+}
+
+// Terminal failure states. A transaction in any of these will never produce a
+// hash, so a poller that waits for one would spin until its own timeout and
+// then report "timed out" for something that had already definitively failed.
+func (t Transaction) Failed() bool {
+	switch t.State {
+	case "FAILED", "DENIED", "CANCELLED":
+		return true
+	}
+	return false
+}
+
+// GetTransaction reads one transaction by Circle's id.
+func (c *Client) GetTransaction(ctx context.Context, userToken, id string) (*Transaction, error) {
+	var out struct {
+		Transaction Transaction `json:"transaction"`
+	}
+	if err := c.doUser(ctx, http.MethodGet, "/v1/w3s/transactions/"+url.PathEscape(id), userToken, nil, &out); err != nil {
+		return nil, err
+	}
+	return &out.Transaction, nil
 }

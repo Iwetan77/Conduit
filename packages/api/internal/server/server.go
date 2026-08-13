@@ -197,6 +197,9 @@ func New(cfg Config) http.Handler {
 		r.Post("/auth/circle/initialize", circleAuthH.Initialize)
 		r.Get("/auth/circle/wallets", circleAuthH.Wallets)
 		r.Post("/auth/circle/sign_typed_data", circleAuthH.SignTypedData)
+		r.Post("/auth/circle/sign_message", circleAuthH.SignMessage)
+		r.Post("/auth/circle/contract_execution", circleAuthH.ContractExecution)
+		r.Get("/auth/circle/transactions/{id}", circleAuthH.Transaction)
 
 		// Public, minimal intent details for the payer surface (/pay/[id]) --
 		// a payer landing on a bare payment link has no API key. Deliberately

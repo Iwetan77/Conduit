@@ -1,0 +1,307 @@
+"use client";
+
+// An EIP-1193 provider backed by a Circle user-controlled wallet.
+//
+// This is the whole point of Phase 2. Every write path in the app already goes
+// through getWalletProvider(connector) and then ethers.BrowserProvider, so if
+// a Circle wallet can present itself as an EIP-1193 provider, those eight call
+// sites do not change at all. The alternative — teaching each one about
+// challenges and user tokens — would spread Circle's API across the codebase
+// and make backing out of the migration impossible.
+//
+// The impedance mismatch is transactions. An EIP-1193 caller expects
+// eth_sendTransaction to return a transaction HASH, synchronously enough to
+// hand to provider.waitForTransaction(). Circle instead:
+//
+//   1. prepares a challenge (server, API key)
+//   2. has the USER authorise it in Circle's own UI (browser, PIN)
+//   3. broadcasts it, and gives back an id of Circle's own
+//   4. produces a tx hash some seconds later
+//
+// So eth_sendTransaction here is a long operation that polls until the hash
+// exists. That is a real wait on a real network, and callers already await it.
+//
+// Reads are not Circle's business. Anything that isn't a wallet operation is
+// forwarded to Arc's JSON-RPC unchanged, which keeps eth_call, eth_getLogs,
+// gas estimation and every other read on exactly the path they already use.
+
+import { ARC_RPC_URL, arcTestnet } from "@/lib/wagmi";
+
+/** Circle's challenge execution, injected so this file never imports the SDK. */
+export type ExecuteChallenge = (challengeId: string) => Promise<unknown>;
+
+export interface CircleProviderConfig {
+  /** The wallet's on-chain address. */
+  address: string;
+  /** Circle's id for the wallet, which its transaction APIs key on. */
+  walletId: string;
+  /** Circle's per-user session token. */
+  userToken: string;
+  /** Conduit API base — challenges are minted server-side. */
+  apiBase: string;
+  /** Runs a challenge in Circle's UI. */
+  execute: ExecuteChallenge;
+  /** Called with progress while a send is in flight. Optional. */
+  onProgress?: (stage: string) => void;
+}
+
+/** How long to wait for Circle to turn a challenge into a broadcast tx hash. */
+const HASH_TIMEOUT_MS = 120_000;
+const HASH_POLL_MS = 2_000;
+
+/** EIP-1193 error shape. Callers (and wagmi) switch on `code`. */
+class ProviderRpcError extends Error {
+  code: number;
+  constructor(code: number, message: string) {
+    super(message);
+    this.code = code;
+    this.name = "ProviderRpcError";
+  }
+}
+
+interface TxRequest {
+  from?: string;
+  to?: string;
+  data?: string;
+  value?: string;
+  gas?: string;
+}
+
+export function createCircleProvider(config: CircleProviderConfig) {
+  const { address, walletId, userToken, apiBase, execute } = config;
+  const progress = (s: string) => config.onProgress?.(s);
+
+  const api = async (path: string, init?: RequestInit) => {
+    const res = await fetch(`${apiBase}${path}`, {
+      ...init,
+      headers: {
+        "content-type": "application/json",
+        "X-Circle-User-Token": userToken,
+      },
+    }).catch(() => {
+      throw new ProviderRpcError(
+        -32603,
+        `could not reach ${apiBase}${path} — the API is down, or CORS refused the request`
+      );
+    });
+    const text = await res.text();
+    const json = text ? JSON.parse(text) : {};
+    if (!res.ok) {
+      const e = json?.error as { message?: string; param?: string } | undefined;
+      throw new ProviderRpcError(
+        -32603,
+        [e?.message ?? `HTTP ${res.status}`, e?.param].filter(Boolean).join(" — ")
+      );
+    }
+    return json;
+  };
+
+  /** Forward a read to Arc. Circle has no opinion about these. */
+  const rpc = async (method: string, params: unknown[]) => {
+    const res = await fetch(ARC_RPC_URL, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: Date.now(), method, params }),
+    });
+    const json = await res.json();
+    if (json.error) {
+      throw new ProviderRpcError(json.error.code ?? -32603, json.error.message ?? "RPC error");
+    }
+    return json.result;
+  };
+
+  /**
+   * Wait for Circle to produce a tx hash.
+   *
+   * Terminal failure states are checked explicitly. Without that, a FAILED or
+   * DENIED transaction — which will never have a hash — would spin here until
+   * the timeout and then be reported as "timed out", hiding the fact that
+   * Circle had already refused it and said why.
+   */
+  const waitForHash = async (circleTxId: string): Promise<string> => {
+    const deadline = Date.now() + HASH_TIMEOUT_MS;
+    for (;;) {
+      const tx = await api(`/v1/auth/circle/transactions/${circleTxId}`);
+      if (tx.tx_hash) return tx.tx_hash as string;
+      if (tx.failed) {
+        throw new ProviderRpcError(
+          -32000,
+          `Circle ${String(tx.state).toLowerCase()} the transaction${
+            tx.error_reason ? `: ${tx.error_reason}` : ""
+          }`
+        );
+      }
+      if (Date.now() > deadline) {
+        // Name the id: the transaction may still land, and without this there
+        // is no way to find out which one it was.
+        throw new ProviderRpcError(
+          -32603,
+          `Circle did not broadcast within ${HASH_TIMEOUT_MS / 1000}s. ` +
+            `Last state ${tx.state}. Circle transaction id ${circleTxId} — it may still complete.`
+        );
+      }
+      progress(`waiting for Circle to broadcast (${tx.state})…`);
+      await new Promise((r) => setTimeout(r, HASH_POLL_MS));
+    }
+  };
+
+  const sendTransaction = async (tx: TxRequest): Promise<string> => {
+    if (!tx.to) {
+      // Contract creation has no `to`. Circle's contract-execution endpoint
+      // cannot express it, and silently doing something else would be worse
+      // than saying so.
+      throw new ProviderRpcError(-32601, "Circle wallets cannot deploy contracts");
+    }
+    if (tx.from && tx.from.toLowerCase() !== address.toLowerCase()) {
+      // Signing as someone else is the bug class that made the Privy embedded
+      // wallet unusable. Refuse rather than quietly sign from the wrong address.
+      throw new ProviderRpcError(
+        -32602,
+        `this wallet is ${address}, but the transaction asks to send from ${tx.from}`
+      );
+    }
+
+    progress("preparing…");
+    const { challenge_id } = await api("/v1/auth/circle/contract_execution", {
+      method: "POST",
+      body: JSON.stringify({
+        wallet_id: walletId,
+        to: tx.to,
+        data: tx.data ?? "0x",
+        // `value` is hex wei on the wire; Circle wants a decimal string in
+        // whole native units. Omitted entirely when zero, which is every
+        // ERC-20 call, so the common path never touches this conversion.
+        amount: tx.value && BigInt(tx.value) > 0n ? weiToWholeUnits(tx.value) : "",
+      }),
+    });
+
+    progress("waiting for you to approve in Circle…");
+    const result = (await execute(challenge_id)) as
+      | { data?: { txHash?: string; id?: string } }
+      | undefined;
+
+    // Circle sometimes returns the hash straight from the challenge. Take it
+    // when offered rather than polling for something already in hand.
+    const immediate = result?.data?.txHash;
+    if (immediate) return immediate;
+
+    const circleTxId = result?.data?.id;
+    if (!circleTxId) {
+      throw new ProviderRpcError(
+        -32603,
+        "Circle accepted the challenge but returned neither a transaction hash nor an id"
+      );
+    }
+    return waitForHash(circleTxId);
+  };
+
+  const signTypedData = async (params: unknown[]): Promise<string> => {
+    // eth_signTypedData_v4 params are [address, jsonString].
+    const [who, payload] = params as [string, string | object];
+    if (who && who.toLowerCase() !== address.toLowerCase()) {
+      throw new ProviderRpcError(-32602, `this wallet is ${address}, not ${who}`);
+    }
+    progress("waiting for you to approve the signature…");
+    const { challenge_id } = await api("/v1/auth/circle/sign_typed_data", {
+      method: "POST",
+      body: JSON.stringify({
+        wallet_id: walletId,
+        // Pass the document through untouched. Re-serialising it would reorder
+        // keys and change the hash that gets signed.
+        data: typeof payload === "string" ? JSON.parse(payload) : payload,
+      }),
+    });
+    const result = (await execute(challenge_id)) as { data?: { signature?: string } } | undefined;
+    const sig = result?.data?.signature;
+    if (!sig) throw new ProviderRpcError(-32603, "Circle returned no signature");
+    return sig;
+  };
+
+  const personalSign = async (params: unknown[]): Promise<string> => {
+    // personal_sign params are [message, address].
+    const [message, who] = params as [string, string];
+    if (who && who.toLowerCase() !== address.toLowerCase()) {
+      throw new ProviderRpcError(-32602, `this wallet is ${address}, not ${who}`);
+    }
+    progress("waiting for you to approve the signature…");
+    const { challenge_id } = await api("/v1/auth/circle/sign_message", {
+      method: "POST",
+      body: JSON.stringify({
+        wallet_id: walletId,
+        message,
+        // A 0x-prefixed message is bytes, not the characters "0x…". Getting
+        // this wrong signs a different message and the signature verifies
+        // against nothing.
+        encoded_by_hex: typeof message === "string" && message.startsWith("0x"),
+      }),
+    });
+    const result = (await execute(challenge_id)) as { data?: { signature?: string } } | undefined;
+    const sig = result?.data?.signature;
+    if (!sig) throw new ProviderRpcError(-32603, "Circle returned no signature");
+    return sig;
+  };
+
+  const request = async ({ method, params = [] }: { method: string; params?: unknown[] }) => {
+    switch (method) {
+      case "eth_accounts":
+      case "eth_requestAccounts":
+        return [address];
+      case "eth_chainId":
+        return `0x${arcTestnet.id.toString(16)}`;
+      case "net_version":
+        return String(arcTestnet.id);
+      case "eth_sendTransaction":
+        return sendTransaction((params[0] ?? {}) as TxRequest);
+      case "eth_signTypedData_v4":
+      case "eth_signTypedData":
+        return signTypedData(params);
+      case "personal_sign":
+        return personalSign(params);
+      case "eth_sign":
+        // Signs arbitrary bytes with no context — a real phishing primitive
+        // and deprecated everywhere. personal_sign covers the honest uses.
+        throw new ProviderRpcError(-32601, "eth_sign is not supported; use personal_sign");
+      case "wallet_switchEthereumChain":
+        // A Circle wallet is provisioned per chain and cannot be moved. Accept
+        // a request for the chain it is already on, refuse anything else.
+        {
+          const target = (params[0] as { chainId?: string })?.chainId;
+          if (target && parseInt(target, 16) === arcTestnet.id) return null;
+          throw new ProviderRpcError(
+            4902,
+            `this Circle wallet exists only on ${arcTestnet.name}`
+          );
+        }
+      default:
+        // Reads and everything else: Arc answers these, not Circle.
+        return rpc(method, params);
+    }
+  };
+
+  // Event methods are part of EIP-1193 and libraries call them unconditionally.
+  // There are no accountsChanged/chainChanged events to emit — the wallet is
+  // fixed to one address on one chain for the life of the session — but the
+  // methods must exist or ethers throws on subscribe.
+  const noop = () => provider;
+  const provider = {
+    request,
+    on: noop,
+    removeListener: noop,
+    isCircle: true as const,
+  };
+  return provider;
+}
+
+/**
+ * Hex wei → decimal whole units, exactly.
+ *
+ * Deliberately not via Number: 1e18 wei does not survive a float, and this is
+ * money. String division keeps every digit.
+ */
+function weiToWholeUnits(hexWei: string): string {
+  const wei = BigInt(hexWei);
+  const base = 10n ** BigInt(arcTestnet.nativeCurrency.decimals);
+  const whole = wei / base;
+  const frac = (wei % base).toString().padStart(arcTestnet.nativeCurrency.decimals, "0").replace(/0+$/, "");
+  return frac ? `${whole}.${frac}` : whole.toString();
+}

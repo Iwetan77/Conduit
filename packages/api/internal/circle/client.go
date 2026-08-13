@@ -331,6 +331,13 @@ type ContractExecution struct {
 	WalletID        string
 	ContractAddress string
 	CallData        string
+	// RefID is our own label on the transaction, and it is what makes this
+	// flow work at all: the challenge result carries no transaction id, and
+	// Circle's list endpoint cannot filter by idempotencyKey. Tagging the
+	// execution and then finding it by tag is the only deterministic way back
+	// to the transaction — "take the most recent" would pick the wrong one for
+	// a wallet with two sends in flight.
+	RefID string
 	// Amount of native currency to send, as a DECIMAL string in whole units
 	// (Circle's convention here, not minor units). Empty for a pure call.
 	Amount   string
@@ -355,6 +362,9 @@ func (c *Client) CreateContractExecutionChallenge(ctx context.Context, userToken
 	if ex.Amount != "" {
 		body["amount"] = ex.Amount
 	}
+	if ex.RefID != "" {
+		body["refId"] = ex.RefID
+	}
 	var out struct {
 		ChallengeID string `json:"challengeId"`
 	}
@@ -375,6 +385,8 @@ type Transaction struct {
 	TxHash      string `json:"txHash"`
 	Blockchain  string `json:"blockchain"`
 	ErrorReason string `json:"errorReason"`
+	RefID       string `json:"refId"`
+	WalletID    string `json:"walletId"`
 }
 
 // Terminal failure states. A transaction in any of these will never produce a
@@ -386,6 +398,36 @@ func (t Transaction) Failed() bool {
 		return true
 	}
 	return false
+}
+
+// FindTransactionByRef locates the transaction a contract execution produced.
+//
+// Needed because the browser never learns Circle's transaction id: the
+// challenge result reports only the challenge's own type and status, and the
+// create call returns nothing but a challengeId. Listing the wallet's recent
+// transactions and matching our refId is the documented way back — refId is
+// returned on every transaction but is not a supported filter, so the match
+// happens here rather than in the query.
+//
+// Returns nil, nil when it has not appeared yet; a transaction takes a moment
+// to exist after the challenge completes, and "not yet" is not an error.
+func (c *Client) FindTransactionByRef(ctx context.Context, userToken, walletID, refID string) (*Transaction, error) {
+	var out struct {
+		Transactions []Transaction `json:"transactions"`
+	}
+	q := url.Values{}
+	q.Set("walletIds", walletID)
+	q.Set("order", "DESC")
+	q.Set("pageSize", "20")
+	if err := c.doUser(ctx, http.MethodGet, "/v1/w3s/transactions?"+q.Encode(), userToken, nil, &out); err != nil {
+		return nil, err
+	}
+	for i := range out.Transactions {
+		if out.Transactions[i].RefID == refID {
+			return &out.Transactions[i], nil
+		}
+	}
+	return nil, nil
 }
 
 // GetTransaction reads one transaction by Circle's id.

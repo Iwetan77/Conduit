@@ -118,11 +118,20 @@ export function createCircleProvider(config: CircleProviderConfig) {
    * the timeout and then be reported as "timed out", hiding the fact that
    * Circle had already refused it and said why.
    */
-  const waitForHash = async (circleTxId: string): Promise<string> => {
+  const waitForHash = async (
+    fetchTx: () => Promise<{
+      found?: boolean;
+      state?: string;
+      tx_hash?: string;
+      failed?: boolean;
+      error_reason?: string;
+    }>,
+    describe: string
+  ): Promise<string> => {
     const deadline = Date.now() + HASH_TIMEOUT_MS;
     for (;;) {
-      const tx = await api(`/v1/auth/circle/transactions/${circleTxId}`);
-      if (tx.tx_hash) return tx.tx_hash as string;
+      const tx = await fetchTx();
+      if (tx.tx_hash) return tx.tx_hash;
       if (tx.failed) {
         throw new ProviderRpcError(
           -32000,
@@ -132,15 +141,18 @@ export function createCircleProvider(config: CircleProviderConfig) {
         );
       }
       if (Date.now() > deadline) {
-        // Name the id: the transaction may still land, and without this there
-        // is no way to find out which one it was.
+        // Name it: the transaction may still land, and without this there is
+        // no way to find out which one it was.
         throw new ProviderRpcError(
           -32603,
           `Circle did not broadcast within ${HASH_TIMEOUT_MS / 1000}s. ` +
-            `Last state ${tx.state}. Circle transaction id ${circleTxId} — it may still complete.`
+            `Last state ${tx.state ?? (tx.found === false ? "not yet created" : "unknown")}. ` +
+            `${describe} — it may still complete.`
         );
       }
-      progress(`waiting for Circle to broadcast (${tx.state})…`);
+      progress(
+        `waiting for Circle to broadcast (${tx.state ?? "creating"})…`
+      );
       await new Promise((r) => setTimeout(r, HASH_POLL_MS));
     }
   };
@@ -162,7 +174,7 @@ export function createCircleProvider(config: CircleProviderConfig) {
     }
 
     progress("preparing…");
-    const { challenge_id } = await api("/v1/auth/circle/contract_execution", {
+    const { challenge_id, ref_id } = await api("/v1/auth/circle/contract_execution", {
       method: "POST",
       body: JSON.stringify({
         wallet_id: walletId,
@@ -186,13 +198,29 @@ export function createCircleProvider(config: CircleProviderConfig) {
     if (immediate) return immediate;
 
     const circleTxId = result?.data?.id;
-    if (!circleTxId) {
-      throw new ProviderRpcError(
-        -32603,
-        "Circle accepted the challenge but returned neither a transaction hash nor an id"
+    if (circleTxId) {
+      return waitForHash(
+        () => api(`/v1/auth/circle/transactions/${circleTxId}`),
+        `Circle transaction id ${circleTxId}`
       );
     }
-    return waitForHash(circleTxId);
+
+    // The normal path. A completed CREATE_TRANSACTION challenge reports the
+    // challenge's own type and status and nothing else — no transaction id —
+    // and the create call returned only a challengeId. The refId we tagged the
+    // execution with is the way back to it. Matching on that rather than
+    // "the wallet's most recent transaction" is what keeps two concurrent
+    // sends from being confused for one another.
+    progress("finding the transaction…");
+    return waitForHash(
+      () =>
+        api(
+          `/v1/auth/circle/transactions?wallet_id=${encodeURIComponent(
+            walletId
+          )}&ref_id=${encodeURIComponent(ref_id)}`
+        ),
+      `ref ${ref_id}`
+    );
   };
 
   const signTypedData = async (params: unknown[]): Promise<string> => {

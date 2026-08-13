@@ -126,8 +126,8 @@ func New(cfg Config) http.Handler {
 		}
 	}
 	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   allowedOrigins,
-		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowedOrigins: allowedOrigins,
+		AllowedMethods: []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		// X-Circle-User-Token is how the browser presents Circle's session on
 		// the /auth/circle/* routes. Leaving it off this list does not produce
 		// a 403 anywhere visible: the preflight answers 200 with no CORS
@@ -199,6 +199,7 @@ func New(cfg Config) http.Handler {
 		r.Post("/auth/circle/sign_typed_data", circleAuthH.SignTypedData)
 		r.Post("/auth/circle/sign_message", circleAuthH.SignMessage)
 		r.Post("/auth/circle/contract_execution", circleAuthH.ContractExecution)
+		r.Get("/auth/circle/transactions", circleAuthH.FindTransaction)
 		r.Get("/auth/circle/transactions/{id}", circleAuthH.Transaction)
 
 		// Public, minimal intent details for the payer surface (/pay/[id]) --

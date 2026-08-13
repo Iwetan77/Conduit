@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 
 	"github.com/kzn-labs/conduit/api/internal/circle"
 	apierrors "github.com/kzn-labs/conduit/api/internal/errors"
@@ -206,6 +207,11 @@ func (h *CircleAuth) ContractExecution(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, apierrors.E(apierrors.CodeInvalidRequest, "wallet_id, to"))
 		return
 	}
+	// Tag the execution so the browser can find the transaction afterwards.
+	// It has no other way: the create call returns only a challengeId, and the
+	// challenge result reports the challenge's status, not a transaction id.
+	refID := uuid.NewString()
+
 	// Calldata is forwarded verbatim. Re-encoding a call we were handed is the
 	// one way to execute something other than what the caller asked for.
 	challengeID, err := h.Client.CreateContractExecutionChallenge(r.Context(), token, circle.ContractExecution{
@@ -214,12 +220,53 @@ func (h *CircleAuth) ContractExecution(w http.ResponseWriter, r *http.Request) {
 		CallData:        req.Data,
 		Amount:          req.Amount,
 		FeeLevel:        req.FeeLevel,
+		RefID:           refID,
 	})
 	if err != nil {
 		h.upstream(w, "contract execution", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"challenge_id": challengeID})
+	writeJSON(w, http.StatusOK, map[string]string{"challenge_id": challengeID, "ref_id": refID})
+}
+
+// FindTransaction is GET /v1/auth/circle/transactions?wallet_id=&ref_id= —
+// the browser's route from "the challenge completed" to a tx hash.
+//
+// Answers 200 with found=false while the transaction does not exist yet.
+// A transaction takes a moment to appear after the challenge completes, and a
+// poller must be able to tell "not yet" from "something went wrong".
+func (h *CircleAuth) FindTransaction(w http.ResponseWriter, r *http.Request) {
+	if !h.available(w) {
+		return
+	}
+	token := userToken(r)
+	if token == "" {
+		writeErr(w, apierrors.E(apierrors.CodeUnauthorized, "X-Circle-User-Token"))
+		return
+	}
+	walletID := r.URL.Query().Get("wallet_id")
+	refID := r.URL.Query().Get("ref_id")
+	if walletID == "" || refID == "" {
+		writeErr(w, apierrors.E(apierrors.CodeInvalidRequest, "wallet_id, ref_id"))
+		return
+	}
+	tx, err := h.Client.FindTransactionByRef(r.Context(), token, walletID, refID)
+	if err != nil {
+		h.upstream(w, "find transaction", err)
+		return
+	}
+	if tx == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"found": false})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"found":        true,
+		"id":           tx.ID,
+		"state":        tx.State,
+		"tx_hash":      tx.TxHash,
+		"failed":       tx.Failed(),
+		"error_reason": tx.ErrorReason,
+	})
 }
 
 // Transaction is GET /v1/auth/circle/transactions/{id} — the bridge between

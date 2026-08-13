@@ -27,6 +27,7 @@ import {
   currentSession,
   executeChallenge,
   hasPendingResume,
+  hasPersistedSession,
   restoreSession,
   startGoogleSignIn,
   clearCircleSession,
@@ -59,7 +60,10 @@ export function circleConnector(params: CircleConfig) {
     // in the URL now, and nothing else will consume it.
     async setup() {
       configureCircle(params);
-      if (!hasPendingResume()) return;
+      // Either a redirect to finish, or a stored session to reattach. Without
+      // the second, a refresh dropped the merchant back to signed-out even
+      // though the session was still valid.
+      if (!hasPendingResume() && !hasPersistedSession()) return;
       try {
         const s = await restoreSession();
         if (s) {
@@ -95,6 +99,7 @@ export function circleConnector(params: CircleConfig) {
       // navigate the user to Google unprompted — that would hijack the page on
       // every refresh. No session means not connected.
       if (isReconnecting) throw new Error("Circle session expired — sign in again");
+
 
       await startGoogleSignIn();
       // Unreachable in practice: startGoogleSignIn navigates away. If the
@@ -135,10 +140,10 @@ export function circleConnector(params: CircleConfig) {
     },
 
     async isAuthorized() {
-      // A pending resume counts as authorized: the session is one network round
-      // trip away and wagmi should wait for it rather than declare the user
-      // disconnected and drop the connection it is about to have.
-      return !!currentSession() || hasPendingResume();
+      // A pending resume or a stored session counts as authorized: the session
+      // is one round trip away and wagmi should wait for it rather than declare
+      // the user disconnected and drop a connection it is about to have.
+      return !!currentSession() || hasPendingResume() || hasPersistedSession();
     },
 
     // A Circle wallet is provisioned per chain and cannot move. Accepting a

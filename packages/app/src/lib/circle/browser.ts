@@ -19,7 +19,13 @@
 // listed here, because the next person will meet them one at a time.
 
 const RESUME_KEY = "conduit_circle_resume";
+const SESSION_KEY = "conduit_circle_session";
 const CIRCLE_AUTH_ORIGIN = "https://pw-auth.circle.com";
+
+// Circle user tokens last 60 minutes. Treat them as dead a little early so a
+// session never expires mid-request: a token that passes the check and then
+// expires two seconds later fails somewhere far less legible than sign-in.
+const SESSION_TTL_MS = 55 * 60 * 1000;
 
 // Captured at module scope: before React mounts, and before any SDK instance
 // can run history.replaceState over the hash. Read this in an effect and it is
@@ -97,7 +103,72 @@ export function onCircleChange(l: Listener): () => void {
 }
 export function clearCircleSession() {
   session = null;
+  try {
+    localStorage.removeItem(SESSION_KEY);
+  } catch {
+    // Private-browsing modes throw on storage access. Losing persistence is
+    // survivable; taking sign-out down with it is not.
+  }
   emit();
+}
+
+// ── Persistence ──────────────────────────────────────────────────────────────
+//
+// The session outlives a page refresh, because Circle is replacing Privy
+// everywhere and every dashboard route would otherwise bounce the merchant
+// through Google on every reload.
+//
+// What is stored is Circle's own user token — a credential, in localStorage,
+// readable by any script that achieves XSS on this origin. That is a real
+// exposure and worth being precise about rather than waving at:
+//
+//   - It is Circle's design that the browser holds this token; it is handed to
+//     the client by the SDK. We are choosing its lifetime, not inventing its
+//     presence.
+//   - It expires in 60 minutes and cannot be renewed from the browser, so the
+//     blast radius is bounded in a way an API key's would not be.
+//   - It cannot move money on its own. Every transfer and signature is a
+//     challenge the user must approve with their PIN inside Circle's iframe,
+//     which this token does not grant.
+//
+// localStorage rather than sessionStorage so the session survives closing a
+// tab, matching what Privy does today. There is no refresh: Circle renews a
+// session through POST /users/token keyed on userId with the API key alone, so
+// an endpoint exposing that would let anyone who learns a userId mint a
+// session for that wallet. Re-login at expiry is the honest cost.
+
+interface PersistedSession extends CircleSessionState {
+  savedAt: number;
+}
+
+function persist(s: CircleSessionState) {
+  try {
+    localStorage.setItem(SESSION_KEY, JSON.stringify({ ...s, savedAt: Date.now() }));
+  } catch {
+    // Storage unavailable — the in-memory session still works for this page.
+  }
+}
+
+function readPersisted(): CircleSessionState | null {
+  try {
+    const raw = localStorage.getItem(SESSION_KEY);
+    if (!raw) return null;
+    const p = JSON.parse(raw) as PersistedSession;
+    if (!p?.userToken || !p?.encryptionKey || !p?.wallet?.address) return null;
+    if (Date.now() - p.savedAt > SESSION_TTL_MS) {
+      localStorage.removeItem(SESSION_KEY);
+      return null;
+    }
+    const { savedAt: _savedAt, ...rest } = p;
+    return rest;
+  } catch {
+    return null;
+  }
+}
+
+/** True when a stored session looks live. Cheap and synchronous. */
+export function hasPersistedSession(): boolean {
+  return readPersisted() !== null;
 }
 
 const log: string[] = [];
@@ -217,6 +288,42 @@ async function loadWallet(token: string): Promise<CircleWallet> {
 export function restoreSession(): Promise<CircleSessionState | null> {
   if (session) return Promise.resolve(session);
   if (restoring) return restoring;
+
+  // A stored session takes priority over a redirect stash: if both exist we
+  // are already signed in and there is nothing to complete.
+  const stored = readPersisted();
+  if (stored) {
+    restoring = (async () => {
+      const cfg = requireConfig();
+      // The SDK must exist and be authenticated before any challenge can run.
+      // Restoring the token without this gives a session that looks connected
+      // and then fails on the first PIN prompt.
+      await ensureSdk({ appSettings: { appId: cfg.appId } }, () => {});
+      sdk!.setAuthentication({
+        userToken: stored.userToken,
+        encryptionKey: stored.encryptionKey,
+      });
+
+      // Prove the token is still good rather than trusting the clock. Circle
+      // can invalidate a session early, and a stale token that only fails at
+      // the first payment is far worse than one caught at page load.
+      try {
+        await api("/v1/auth/circle/wallets", { token: stored.userToken });
+      } catch {
+        note("stored session expired — sign in again");
+        clearCircleSession();
+        return null;
+      }
+      session = stored;
+      emit();
+      return session;
+    })();
+    restoring.catch(() => {
+      restoring = null;
+    });
+    return restoring;
+  }
+
   if (!RESUME_AT_LOAD) return Promise.resolve(null);
 
   restoring = (async () => {
@@ -317,6 +424,7 @@ export function restoreSession(): Promise<CircleSessionState | null> {
     });
     const wallet = await loadWallet(verified.userToken);
     session = { ...verified, wallet };
+    persist(session);
     note(`wallet ${wallet.address} on ${wallet.blockchain}`);
     emit();
     return session;

@@ -157,6 +157,22 @@ export function createCircleProvider(config: CircleProviderConfig) {
     }
   };
 
+  interface CircleTx {
+    id: string;
+    state?: string;
+    tx_hash?: string;
+    failed?: boolean;
+    error_reason?: string;
+    contract_address?: string;
+  }
+
+  const listTransactions = async (): Promise<CircleTx[]> => {
+    const res = await api(
+      `/v1/auth/circle/transactions?wallet_id=${encodeURIComponent(walletId)}`
+    );
+    return (res.data ?? []) as CircleTx[];
+  };
+
   const sendTransaction = async (tx: TxRequest): Promise<string> => {
     if (!tx.to) {
       // Contract creation has no `to`. Circle's contract-execution endpoint
@@ -173,8 +189,22 @@ export function createCircleProvider(config: CircleProviderConfig) {
       );
     }
 
+    // Snapshot the wallet's transactions BEFORE sending.
+    //
+    // This is the only reliable way back to the transaction. Circle gives the
+    // browser no transaction id at any point — the create call returns a
+    // challengeId, and a completed challenge reports the challenge's own type
+    // and status. Tagging with refId was the obvious fix and does not work:
+    // Circle accepts refId and never returns it, verified against the live API.
+    // So the new id that appears after the send is the send. Snapshotting
+    // first is what makes that true even with two sends in flight, which
+    // "take the most recent" would get wrong.
     progress("preparing…");
-    const { challenge_id, ref_id } = await api("/v1/auth/circle/contract_execution", {
+    const before = new Set<string>(
+      ((await listTransactions()) ?? []).map((t) => t.id)
+    );
+
+    const { challenge_id } = await api("/v1/auth/circle/contract_execution", {
       method: "POST",
       body: JSON.stringify({
         wallet_id: walletId,
@@ -205,22 +235,20 @@ export function createCircleProvider(config: CircleProviderConfig) {
       );
     }
 
-    // The normal path. A completed CREATE_TRANSACTION challenge reports the
-    // challenge's own type and status and nothing else — no transaction id —
-    // and the create call returned only a challengeId. The refId we tagged the
-    // execution with is the way back to it. Matching on that rather than
-    // "the wallet's most recent transaction" is what keeps two concurrent
-    // sends from being confused for one another.
+    // The normal path: find the transaction that was not there before.
     progress("finding the transaction…");
-    return waitForHash(
-      () =>
-        api(
-          `/v1/auth/circle/transactions?wallet_id=${encodeURIComponent(
-            walletId
-          )}&ref_id=${encodeURIComponent(ref_id)}`
-        ),
-      `ref ${ref_id}`
-    );
+    return waitForHash(async () => {
+      const list = (await listTransactions()) ?? [];
+      const fresh = list.filter((t) => !before.has(t.id));
+      // Confirm it is ours and not something else the wallet did in the
+      // meantime. Contract address is the strongest signal available — the
+      // list carries no calldata to compare.
+      const mine =
+        fresh.find(
+          (t) => t.contract_address?.toLowerCase() === tx.to!.toLowerCase()
+        ) ?? fresh[0];
+      return mine ?? { found: false };
+    }, `wallet ${walletId}`);
   };
 
   const signTypedData = async (params: unknown[]): Promise<string> => {

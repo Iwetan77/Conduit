@@ -331,13 +331,6 @@ type ContractExecution struct {
 	WalletID        string
 	ContractAddress string
 	CallData        string
-	// RefID is our own label on the transaction, and it is what makes this
-	// flow work at all: the challenge result carries no transaction id, and
-	// Circle's list endpoint cannot filter by idempotencyKey. Tagging the
-	// execution and then finding it by tag is the only deterministic way back
-	// to the transaction — "take the most recent" would pick the wrong one for
-	// a wallet with two sends in flight.
-	RefID string
 	// Amount of native currency to send, as a DECIMAL string in whole units
 	// (Circle's convention here, not minor units). Empty for a pure call.
 	Amount   string
@@ -362,9 +355,6 @@ func (c *Client) CreateContractExecutionChallenge(ctx context.Context, userToken
 	if ex.Amount != "" {
 		body["amount"] = ex.Amount
 	}
-	if ex.RefID != "" {
-		body["refId"] = ex.RefID
-	}
 	var out struct {
 		ChallengeID string `json:"challengeId"`
 	}
@@ -385,8 +375,12 @@ type Transaction struct {
 	TxHash      string `json:"txHash"`
 	Blockchain  string `json:"blockchain"`
 	ErrorReason string `json:"errorReason"`
-	RefID       string `json:"refId"`
 	WalletID    string `json:"walletId"`
+	// The contract called. Used to confirm a newly-appeared transaction is the
+	// one just sent rather than something else the wallet did.
+	ContractAddress string `json:"contractAddress"`
+	Operation       string `json:"operation"`
+	CreateDate      string `json:"createDate"`
 }
 
 // Terminal failure states. A transaction in any of these will never produce a
@@ -400,18 +394,25 @@ func (t Transaction) Failed() bool {
 	return false
 }
 
-// FindTransactionByRef locates the transaction a contract execution produced.
+// ListRecentTransactions returns a wallet's most recent transactions, newest
+// first.
 //
-// Needed because the browser never learns Circle's transaction id: the
-// challenge result reports only the challenge's own type and status, and the
-// create call returns nothing but a challengeId. Listing the wallet's recent
-// transactions and matching our refId is the documented way back — refId is
-// returned on every transaction but is not a supported filter, so the match
-// happens here rather than in the query.
+// This is how the browser gets from "the challenge completed" to a tx hash,
+// and the route is indirect because Circle offers no direct one: the create
+// call returns only a challengeId, and a completed CREATE_TRANSACTION
+// challenge reports the challenge's own type and status — no transaction id
+// anywhere.
 //
-// Returns nil, nil when it has not appeared yet; a transaction takes a moment
-// to exist after the challenge completes, and "not yet" is not an error.
-func (c *Client) FindTransactionByRef(ctx context.Context, userToken, walletID, refID string) (*Transaction, error) {
+// Tagging the execution with refId was the obvious answer and does not work.
+// Circle accepts refId on a contract execution and then omits it from every
+// transaction it returns, so the tag is write-only. Verified against the live
+// API, not inferred: a completed contract execution comes back with id, state,
+// txHash, contractAddress and createDate, and no refId field at all.
+//
+// So the caller correlates instead — snapshot the ids before sending, and the
+// new one afterwards is the send. That stays correct even with two sends in
+// flight, which "take the most recent" would not.
+func (c *Client) ListRecentTransactions(ctx context.Context, userToken, walletID string) ([]Transaction, error) {
 	var out struct {
 		Transactions []Transaction `json:"transactions"`
 	}
@@ -419,15 +420,14 @@ func (c *Client) FindTransactionByRef(ctx context.Context, userToken, walletID, 
 	q.Set("walletIds", walletID)
 	q.Set("order", "DESC")
 	q.Set("pageSize", "20")
+	// Without includeAll, Circle filters to tokens it monitors. Conduit's
+	// currencies on Arc are not all in that set, and a transaction missing
+	// from the list is indistinguishable from one that has not happened yet.
+	q.Set("includeAll", "true")
 	if err := c.doUser(ctx, http.MethodGet, "/v1/w3s/transactions?"+q.Encode(), userToken, nil, &out); err != nil {
 		return nil, err
 	}
-	for i := range out.Transactions {
-		if out.Transactions[i].RefID == refID {
-			return &out.Transactions[i], nil
-		}
-	}
-	return nil, nil
+	return out.Transactions, nil
 }
 
 // GetTransaction reads one transaction by Circle's id.

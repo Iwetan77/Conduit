@@ -270,6 +270,27 @@ type Wallet struct {
 	AccountType string `json:"accountType"`
 }
 
+// VerifyUserToken resolves a Circle session token to the user it belongs to.
+//
+// This is what makes a Circle login trustworthy on the server. The token is a
+// JWT Circle issued and only Circle can validate, so verification is a call to
+// Circle rather than a local signature check — unlike Privy, where we hold the
+// verification key and check an ES256 signature offline.
+//
+// The practical consequence: this costs a network round trip per verification,
+// so callers should establish a Conduit session from it rather than calling it
+// on every request. It is an authentication step, not a per-request check.
+func (c *Client) VerifyUserToken(ctx context.Context, userToken string) (*User, error) {
+	var out User
+	if err := c.doUser(ctx, http.MethodGet, "/v1/w3s/user", userToken, nil, &out); err != nil {
+		return nil, err
+	}
+	if out.ID == "" {
+		return nil, fmt.Errorf("circle: user token resolved to no user id")
+	}
+	return &out, nil
+}
+
 // ListWallets returns the user's wallets.
 func (c *Client) ListWallets(ctx context.Context, userToken string) ([]Wallet, error) {
 	var out struct {

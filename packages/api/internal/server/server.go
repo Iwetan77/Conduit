@@ -70,10 +70,12 @@ func New(cfg Config) http.Handler {
 		}
 	}
 
-	accountsH := &handlers.Accounts{Pool: cfg.Pool, PrivyVerifier: privyVerifier}
+	circleClient := circle.New(cfg.CircleBaseURL, cfg.CircleAPIKey)
+	circleVerifier := auth.NewCircleVerifier(circleClient)
+	accountsH := &handlers.Accounts{Pool: cfg.Pool, PrivyVerifier: privyVerifier, CircleVerifier: circleVerifier}
 	apiKeysH := &handlers.ApiKeys{Pool: cfg.Pool}
 	circleAuthH := &handlers.CircleAuth{
-		Client:      circle.New(cfg.CircleBaseURL, cfg.CircleAPIKey),
+		Client:      circleClient,
 		Blockchains: []string{"ARC-TESTNET"},
 	}
 	// Server-side balance reads with a short cache. Keeps N browsers from
@@ -181,6 +183,14 @@ func New(cfg Config) http.Handler {
 		if privyVerifier != nil {
 			r.Post("/accounts/privy", accountsH.CreateFromPrivy)
 		}
+		// Registered unconditionally, and NOT inside the Privy block above.
+		// Nesting it there would mean the replacement for Privy exists only
+		// where Privy is configured -- so it would 404 on exactly the
+		// deployments that have finished migrating. The handler answers
+		// "not configured" itself when there is no Circle key, which is the
+		// honest response and reaches the caller as a 404 rather than a 405
+		// from a route that was never registered.
+		r.Post("/accounts/circle", accountsH.CreateFromCircle)
 
 		// Circle Wallets: the browser cannot hold the Circle API key, so device
 		// tokens and challenge ids are minted here. Unauthenticated for the same
@@ -262,7 +272,7 @@ func New(cfg Config) http.Handler {
 		}
 
 		r.Group(func(r chi.Router) {
-			r.Use(auth.Middleware(cfg.Pool, privyVerifier))
+			r.Use(auth.Middleware(cfg.Pool, privyVerifier, circleVerifier))
 			r.Use(idempotency.Middleware(cfg.Pool))
 
 			r.Get("/accounts", accountsH.List)

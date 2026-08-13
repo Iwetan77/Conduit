@@ -13,8 +13,9 @@ import (
 )
 
 type Accounts struct {
-	Pool          *pgxpool.Pool
-	PrivyVerifier *auth.PrivyVerifier
+	Pool           *pgxpool.Pool
+	PrivyVerifier  *auth.PrivyVerifier
+	CircleVerifier *auth.CircleVerifier
 }
 
 type createAccountRequest struct {
@@ -114,22 +115,62 @@ func (h *Accounts) CreateFromPrivy(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, apierrors.E(apierrors.CodeUnauthorized, ""))
 		return
 	}
-	token := strings.TrimPrefix(authHeader, "Bearer ")
-	privyUserID, err := h.PrivyVerifier.Verify(token)
+	privyUserID, err := h.PrivyVerifier.Verify(strings.TrimPrefix(authHeader, "Bearer "))
 	if err != nil {
 		writeErr(w, apierrors.E(apierrors.CodeUnauthorized, ""))
 		return
 	}
+	h.bootstrapAccount(w, r, auth.ProviderPrivy, privyUserID)
+}
 
+// CreateFromCircle is POST /v1/accounts/circle -- the same bootstrap for a
+// Circle login. The Circle user token comes in its own header rather than as a
+// Bearer token: it is Circle's credential, not a Conduit key, and must never
+// be resolvable by the same path that resolves sk_/pk_ keys.
+//
+// Verification is a call to Circle, because unlike a Privy JWT this token is
+// opaque to us. That cost is acceptable here precisely because this is the
+// authentication boundary and runs once per login.
+func (h *Accounts) CreateFromCircle(w http.ResponseWriter, r *http.Request) {
+	if h.CircleVerifier == nil {
+		writeErr(w, apierrors.E(apierrors.CodeNotFound, "circle auth is not configured"))
+		return
+	}
+	token := strings.TrimSpace(r.Header.Get("X-Circle-User-Token"))
+	if token == "" {
+		writeErr(w, apierrors.E(apierrors.CodeUnauthorized, "X-Circle-User-Token"))
+		return
+	}
+	circleUserID, err := h.CircleVerifier.Verify(r.Context(), token)
+	if err != nil {
+		writeErr(w, apierrors.E(apierrors.CodeUnauthorized, ""))
+		return
+	}
+	h.bootstrapAccount(w, r, auth.ProviderCircle, circleUserID)
+}
+
+// bootstrapAccount is the shared login bootstrap, once the caller has proven
+// which (provider, subject) they are.
+//
+// Shared rather than copied per provider on purpose. The two flows differ only
+// in how the subject is established; everything after that -- idempotency, the
+// required fields, the settle-address default, which columns get written -- is
+// identical, and a second copy would drift. The provider is passed in because
+// it is half the identity key, never defaulted.
+//
+// Idempotent: a merchant who already onboarded gets their existing account
+// back, not a duplicate. The frontend calls this on every login, not only the
+// first.
+func (h *Accounts) bootstrapAccount(w http.ResponseWriter, r *http.Request, provider, subject string) {
 	ctx := r.Context()
 
 	// Already onboarded -- return the existing account, don't re-create.
 	var existing privyAccountResponse
 	var loginWallet *string
-	err = h.Pool.QueryRow(ctx,
+	err := h.Pool.QueryRow(ctx,
 		`SELECT id, name, logo_url, settle_currency, settle_address, login_wallet, livemode
 		 FROM accounts WHERE auth_provider = $1 AND auth_subject = $2`,
-		auth.ProviderPrivy, privyUserID,
+		provider, subject,
 	).Scan(&existing.ID, &existing.Name, &existing.LogoURL, &existing.SettleCurrency, &existing.SettleAddress, &loginWallet, &existing.Livemode)
 	if err == nil {
 		if loginWallet != nil {
@@ -159,13 +200,18 @@ func (h *Accounts) CreateFromPrivy(w http.ResponseWriter, r *http.Request) {
 	}
 
 	accountID := models.NewID("acct")
-	// privy_user_id is still written alongside the provider-agnostic columns so
-	// this migration stays reversible -- rolling back 0014 loses nothing. It is
-	// dropped only once auth_subject is proven populated for every row.
+	// privy_user_id is written only for a Privy identity. Writing a Circle
+	// subject into a column named privy_user_id would make the rollback path
+	// for migration 0014 -- "fall back to privy_user_id" -- resolve Circle
+	// users as Privy ones.
+	var privyUserID *string
+	if provider == auth.ProviderPrivy {
+		privyUserID = &subject
+	}
 	_, err = h.Pool.Exec(ctx,
 		`INSERT INTO accounts (id, name, settle_currency, settle_address, privy_user_id, auth_provider, auth_subject, login_wallet, livemode)
-		 VALUES ($1,$2,$3,$4,$5,$6,$5,$7,false)`,
-		accountID, req.Name, req.SettleCurrency, settleAddress, privyUserID, auth.ProviderPrivy, req.LoginWallet,
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,false)`,
+		accountID, req.Name, req.SettleCurrency, settleAddress, privyUserID, provider, subject, req.LoginWallet,
 	)
 	if err != nil {
 		writeErr(w, apierrors.E(apierrors.CodeInternal, ""))

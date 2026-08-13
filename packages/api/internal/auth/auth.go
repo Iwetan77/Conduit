@@ -112,9 +112,23 @@ func isPkAllowed(method, path string) bool {
 // Privy isn't configured (opt-in, same graceful-degradation pattern as the
 // bridge feature) -- in that case only sk_/pk_ keys work, exactly as before
 // this phase.
-func Middleware(pool *pgxpool.Pool, privyVerifier *PrivyVerifier) func(http.Handler) http.Handler {
+func Middleware(pool *pgxpool.Pool, privyVerifier *PrivyVerifier, circleVerifier *CircleVerifier) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// A Circle session presents itself in its own header rather than as
+			// a Bearer token, because it is not one: it is Circle's token, sent
+			// to us, and it must not be confused with a Conduit sk_/pk_ key or
+			// mistaken for one by a prefix check.
+			if ct := strings.TrimSpace(r.Header.Get("X-Circle-User-Token")); ct != "" && circleVerifier != nil {
+				principal, err := lookupCirclePrincipal(r.Context(), pool, circleVerifier, ct)
+				if err != nil {
+					writeErr(w, apierrors.E(apierrors.CodeUnauthorized, ""))
+					return
+				}
+				finishAuth(w, r, next, pool, principal)
+				return
+			}
+
 			authHeader := r.Header.Get("Authorization")
 			if !strings.HasPrefix(authHeader, "Bearer ") {
 				writeErr(w, apierrors.E(apierrors.CodeUnauthorized, ""))
@@ -134,26 +148,40 @@ func Middleware(pool *pgxpool.Pool, privyVerifier *PrivyVerifier) func(http.Hand
 				return
 			}
 
-			if principal.KeyType == KeyTypePublishable && !isPkAllowed(r.Method, r.URL.Path) {
-				writeErr(w, apierrors.E(apierrors.CodeForbidden, ""))
-				return
-			}
-
-			// Subaccount switching via Conduit-Account header — only valid if
-			// the key's account IS the parent of the requested subaccount.
-			if sub := r.Header.Get("Conduit-Account"); sub != "" && sub != principal.AccountID {
-				isChild, err := isParentOf(r.Context(), pool, principal.AccountID, sub)
-				if err != nil || !isChild {
-					writeErr(w, apierrors.E(apierrors.CodeForbidden, "Conduit-Account"))
-					return
-				}
-				principal.AccountID = sub
-			}
-
-			ctx := WithPrincipal(r.Context(), principal)
-			next.ServeHTTP(w, r.WithContext(ctx))
+			finishAuth(w, r, next, pool, principal)
 		})
 	}
+}
+
+// finishAuth applies the checks that must hold however the principal was
+// resolved. Shared rather than duplicated per auth path: a permission check
+// that exists on one branch and not another is a hole, and the Circle branch
+// would have been exactly that.
+func finishAuth(
+	w http.ResponseWriter,
+	r *http.Request,
+	next http.Handler,
+	pool *pgxpool.Pool,
+	principal Principal,
+) {
+	if principal.KeyType == KeyTypePublishable && !isPkAllowed(r.Method, r.URL.Path) {
+		writeErr(w, apierrors.E(apierrors.CodeForbidden, ""))
+		return
+	}
+
+	// Subaccount switching via Conduit-Account header — only valid if
+	// the key's account IS the parent of the requested subaccount.
+	if sub := r.Header.Get("Conduit-Account"); sub != "" && sub != principal.AccountID {
+		isChild, err := isParentOf(r.Context(), pool, principal.AccountID, sub)
+		if err != nil || !isChild {
+			writeErr(w, apierrors.E(apierrors.CodeForbidden, "Conduit-Account"))
+			return
+		}
+		principal.AccountID = sub
+	}
+
+	ctx := WithPrincipal(r.Context(), principal)
+	next.ServeHTTP(w, r.WithContext(ctx))
 }
 
 // KeyTypePrivy marks a Principal resolved from a Privy access token rather

@@ -15,9 +15,22 @@ import {
 
 const PRIVY_APP_ID = process.env.NEXT_PUBLIC_PRIVY_APP_ID ?? "";
 
+// Which identity provider is live. Defaults to privy so an unset variable
+// changes nothing.
+//
+// This switches the whole provider tree, and it has to: @privy-io/wagmi's
+// createConfig does `connectors: e.connectors?.filter((o) => "mock" === o.type)`
+// and disables EIP-6963 discovery, so mounting the Privy stack removes every
+// custom connector -- including Circle's -- from wagmi no matter what
+// lib/wagmi declares. The two cannot run side by side in one config, so this
+// is a switch rather than an addition.
+const AUTH_PROVIDER = process.env.NEXT_PUBLIC_AUTH_PROVIDER ?? "privy";
+const CIRCLE_AUTH = AUTH_PROVIDER === "circle";
+
 // ~700 kB of @privy-io/* kept out of the payer-page bundle: loaded only for
 // a returning Privy session, a dashboard route, or a Google sign-in click.
 const PrivyStack = dynamic(() => import("./privy-stack"), { ssr: false });
+const CircleStack = dynamic(() => import("./circle-stack"), { ssr: false });
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(
@@ -65,6 +78,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
   // Dashboard always needs Privy (merchant auth). Checked in render so the
   // stack starts loading on first client render, not after an effect tick.
   const privyOn =
+    !CIRCLE_AUTH &&
     Boolean(PRIVY_APP_ID) &&
     !isDevRoute &&
     (wantPrivy || Boolean(pathname?.startsWith("/dashboard")));
@@ -73,7 +87,13 @@ export function Providers({ children }: { children: React.ReactNode }) {
     return (
       <PrivyGateContext.Provider value={{ mounted: false, requestMount, walletSettled: true }}>
         <WagmiProvider config={wagmiConfig}>
-          <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+          <QueryClientProvider client={queryClient}>
+            {/* Circle needs no provider tree of its own -- it is a wagmi
+                connector. This only translates the app's existing sign-in and
+                sign-out events into connect/disconnect on it. */}
+            {CIRCLE_AUTH && <CircleStack />}
+            {children}
+          </QueryClientProvider>
         </WagmiProvider>
       </PrivyGateContext.Provider>
     );

@@ -22,6 +22,26 @@ export function setSessionToken(token: string): void {
 
 export function clearSessionToken(): void {
   window.localStorage.removeItem(STORAGE_KEY);
+  window.localStorage.removeItem(CIRCLE_STORAGE_KEY);
+}
+
+// A Circle session is NOT a bearer token, and must not be stored as one.
+//
+// The API resolves sk_/pk_ keys and Privy JWTs from the Authorization header.
+// Circle's user token is a credential issued by Circle to the browser; putting
+// it in that same header would hand it to the code path that looks up Conduit
+// keys, where at best it fails confusingly and at worst it is compared against
+// key hashes. The server reads it from X-Circle-User-Token precisely so the two
+// can never be mistaken for one another, and this mirrors that.
+const CIRCLE_STORAGE_KEY = "conduit.circleSession";
+
+export function getCircleSessionToken(): string | null {
+  if (typeof window === "undefined") return null;
+  return window.localStorage.getItem(CIRCLE_STORAGE_KEY);
+}
+
+export function setCircleSessionToken(token: string): void {
+  window.localStorage.setItem(CIRCLE_STORAGE_KEY, token);
 }
 
 export class ConduitApiError extends Error {
@@ -36,11 +56,22 @@ export class ConduitApiError extends Error {
 
 async function request<T>(
   path: string,
-  options: { method?: string; body?: unknown; apiKey?: string; idempotencyKey?: string } = {}
+  options: {
+    method?: string;
+    body?: unknown;
+    apiKey?: string;
+    circleToken?: string;
+    idempotencyKey?: string;
+  } = {}
 ): Promise<T> {
   const apiKey = options.apiKey ?? getSessionToken();
   const headers: Record<string, string> = { "content-type": "application/json" };
   if (apiKey) headers["authorization"] = `Bearer ${apiKey}`;
+  // Sent alongside, not instead of: a merchant on Circle may still be holding
+  // a pasted sk_ key for programmatic access, and the server prefers whichever
+  // it can resolve. Only one of these is ever populated in practice.
+  const circleToken = options.circleToken ?? getCircleSessionToken();
+  if (circleToken) headers["X-Circle-User-Token"] = circleToken;
   if (options.idempotencyKey) headers["idempotency-key"] = options.idempotencyKey;
 
   const res = await fetch(`${API_BASE}${path}`, {
@@ -172,6 +203,20 @@ export function createAccountFromPrivy(
   body: { name?: string; settle_currency?: string; settle_address?: string; login_wallet: string }
 ) {
   return request<PrivyAccount>("/v1/accounts/privy", { method: "POST", body, apiKey: accessToken });
+}
+
+// The same idempotent bootstrap for a Circle login. The Circle user token
+// authenticates the call in its own header; the server verifies it with Circle
+// before creating or returning the account.
+export function createAccountFromCircle(
+  circleUserToken: string,
+  body: { name?: string; settle_currency?: string; settle_address?: string; login_wallet: string }
+) {
+  return request<PrivyAccount>("/v1/accounts/circle", {
+    method: "POST",
+    body,
+    circleToken: circleUserToken,
+  });
 }
 
 // ── Settlement intents ───────────────────────────────────────────────────────

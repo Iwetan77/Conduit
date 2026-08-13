@@ -5,7 +5,16 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { usePrivy, useLogin, useCreateWallet } from "@privy-io/react-auth";
 import { useQueryClient } from "@tanstack/react-query";
-import { clearSessionToken, createAccountFromPrivy, setSessionToken } from "@/lib/conduit-api";
+import { useAccount, useDisconnect } from "wagmi";
+import {
+  clearSessionToken,
+  createAccountFromCircle,
+  createAccountFromPrivy,
+  setCircleSessionToken,
+  setSessionToken,
+} from "@/lib/conduit-api";
+import { CIRCLE_CONNECTOR_ID } from "@/lib/circle/connector";
+import { clearCircleSession, currentSession } from "@/lib/circle/browser";
 import { SETTLE_CURRENCIES, settleCurrencyLabel } from "@/lib/currencies";
 import { Logo } from "@/components/Shared/Logo";
 import { PaymentToasts } from "@/components/Dashboard/PaymentToasts";
@@ -212,59 +221,27 @@ function AccountGate({ onReady }: { onReady: () => void }) {
   );
 }
 
-function DashboardShell({ children }: { children: React.ReactNode }) {
+// The dashboard chrome, with no identity provider in it.
+//
+// Extracted so Privy and Circle can share it. The alternative -- a second
+// copy of the sidebar, nav and mobile menu behind a flag -- would drift the
+// moment either one is edited, and the whole point of this migration is that
+// swapping the provider does not mean rewriting the app around it.
+function DashboardChrome({
+  children,
+  signOut,
+}: {
+  children: React.ReactNode;
+  signOut: () => void | Promise<void>;
+}) {
   const pathname = usePathname();
-  const { ready, authenticated, logout, getAccessToken } = usePrivy();
-  const queryClient = useQueryClient();
-  const [accountReady, setAccountReady] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
-  const refreshing = useRef(false);
 
   // Any navigation closes the mobile menu — otherwise it stayed open on top
   // of the page the merchant just tapped through to.
-  useEffect(() => { setMenuOpen(false); }, [pathname]);
-
-  // Keep the stored bearer token fresh with Privy's own (short-lived,
-  // auto-rotated) access token for as long as the merchant stays on a
-  // dashboard page -- every existing API call in this app reads it via
-  // getSessionToken(), so this is the only place that needs to know Privy
-  // issues the token.
   useEffect(() => {
-    if (!authenticated) return;
-    const refresh = async () => {
-      if (refreshing.current) return;
-      refreshing.current = true;
-      try {
-        const token = await getAccessToken();
-        if (token) setSessionToken(token);
-      } finally {
-        refreshing.current = false;
-      }
-    };
-    refresh();
-    const interval = setInterval(refresh, 5 * 60 * 1000);
-    return () => clearInterval(interval);
-  }, [authenticated, getAccessToken]);
-
-  useEffect(() => {
-    if (!authenticated) setAccountReady(false);
-  }, [authenticated]);
-
-  if (!ready) return null;
-  if (!authenticated) return <LoginGate />;
-  if (!accountReady) return <AccountGate onReady={() => setAccountReady(true)} />;
-
-  const signOut = async () => {
-    clearSessionToken();
-    // Drop every cached query too. Without this, a second merchant signing
-    // in on the same machine could be served the previous merchant's cached
-    // data before their own request resolves.
-    queryClient.clear();
-    try {
-      localStorage.removeItem("conduit.lastMerchant");
-    } catch {}
-    await logout();
-  };
+    setMenuOpen(false);
+  }, [pathname]);
 
   return (
     <div className="min-h-screen text-ink flex flex-col md:flex-row">
@@ -376,9 +353,205 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
   );
 }
 
-// PrivyProvider now lives at the root (app/providers.tsx) so payers can use
-// Google sign-in too; the dashboard keeps only its gates. Business
-// onboarding (AccountGate) still happens exclusively here.
+// Privy identity. Unchanged behaviour; it just renders the shared chrome now.
+function PrivyDashboard({ children }: { children: React.ReactNode }) {
+  const { ready, authenticated, logout, getAccessToken } = usePrivy();
+  const queryClient = useQueryClient();
+  const [accountReady, setAccountReady] = useState(false);
+  const refreshing = useRef(false);
+
+  // Keep the stored bearer token fresh with Privy's own (short-lived,
+  // auto-rotated) access token for as long as the merchant stays on a
+  // dashboard page -- every existing API call in this app reads it via
+  // getSessionToken(), so this is the only place that needs to know Privy
+  // issues the token.
+  useEffect(() => {
+    if (!authenticated) return;
+    const refresh = async () => {
+      if (refreshing.current) return;
+      refreshing.current = true;
+      try {
+        const token = await getAccessToken();
+        if (token) setSessionToken(token);
+      } finally {
+        refreshing.current = false;
+      }
+    };
+    refresh();
+    const interval = setInterval(refresh, 5 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, [authenticated, getAccessToken]);
+
+  useEffect(() => {
+    if (!authenticated) setAccountReady(false);
+  }, [authenticated]);
+
+  if (!ready) return null;
+  if (!authenticated) return <LoginGate />;
+  if (!accountReady) return <AccountGate onReady={() => setAccountReady(true)} />;
+
+  const signOut = async () => {
+    clearSessionToken();
+    // Drop every cached query too. Without this, a second merchant signing
+    // in on the same machine could be served the previous merchant's cached
+    // data before their own request resolves.
+    queryClient.clear();
+    try {
+      localStorage.removeItem("conduit.lastMerchant");
+    } catch {}
+    await logout();
+  };
+  return <DashboardChrome signOut={signOut}>{children}</DashboardChrome>;
+}
+
+
+// Circle identity, via the wagmi connector.
+//
+// Much shorter than the Privy version, and not because corners were cut: the
+// connector already carries the session, so there is no separate access token
+// to keep refreshing and no embedded wallet to wait on. The wallet address IS
+// the connected account.
+function CircleDashboard({ children }: { children: React.ReactNode }) {
+  const { address, isConnected, connector } = useAccount();
+  const { disconnectAsync } = useDisconnect();
+  const queryClient = useQueryClient();
+  const [accountReady, setAccountReady] = useState(false);
+  const [needsOnboarding, setNeedsOnboarding] = useState(false);
+  const onCircle = isConnected && connector?.id === CIRCLE_CONNECTOR_ID;
+
+  // Register the Circle session with the API client, so every existing call in
+  // the app authenticates without knowing Circle exists.
+  useEffect(() => {
+    const s = currentSession();
+    if (!s) return;
+    setCircleSessionToken(s.userToken);
+  }, [address]);
+
+  // Resolve (or create) the Conduit account for this Circle identity.
+  useEffect(() => {
+    if (!onCircle || !address) {
+      setAccountReady(false);
+      return;
+    }
+    const s = currentSession();
+    if (!s) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        await createAccountFromCircle(s.userToken, { login_wallet: address });
+        if (!cancelled) setAccountReady(true);
+      } catch {
+        // A first-ever login has no name/settle currency yet, which the server
+        // requires. That is onboarding, not an error.
+        if (!cancelled) setNeedsOnboarding(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [onCircle, address]);
+
+  const signOut = async () => {
+    clearSessionToken();
+    queryClient.clear();
+    try {
+      localStorage.removeItem("conduit.lastMerchant");
+    } catch {}
+    await disconnectAsync();
+    clearCircleSession();
+  };
+
+  if (!onCircle) return <LoginGate />;
+  if (needsOnboarding) {
+    return (
+      <CircleOnboarding
+        address={address!}
+        onDone={() => {
+          setNeedsOnboarding(false);
+          setAccountReady(true);
+        }}
+      />
+    );
+  }
+  if (!accountReady) return null;
+  return <DashboardChrome signOut={signOut}>{children}</DashboardChrome>;
+}
+
+// First-login onboarding for a Circle merchant. Same required fields as the
+// Privy path -- the server rejects an account without them, and an account
+// with no settle currency is one nothing can be paid into.
+function CircleOnboarding({ address, onDone }: { address: string; onDone: () => void }) {
+  const [name, setName] = useState("");
+  const [settleCurrency, setSettleCurrency] = useState("USD");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    setError("");
+    try {
+      const s = currentSession();
+      if (!s) throw new Error("No Circle session");
+      await createAccountFromCircle(s.userToken, {
+        name,
+        settle_currency: settleCurrency,
+        login_wallet: address,
+      });
+      onDone();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen flex items-center justify-center p-6">
+      <div className="w-full max-w-sm space-y-4">
+        <h1 className="font-display text-xl font-bold text-ink">Create your account</h1>
+        <form onSubmit={submit} className="space-y-3">
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Business name"
+            required
+            className="w-full bg-surface border border-border p-2 text-sm text-ink"
+          />
+          <select
+            value={settleCurrency}
+            onChange={(e) => setSettleCurrency(e.target.value)}
+            className="w-full bg-surface border border-border p-2 text-sm text-ink"
+          >
+            {SETTLE_CURRENCIES.map((c) => (
+              <option key={c} value={c}>
+                {settleCurrencyLabel(c)}
+              </option>
+            ))}
+          </select>
+          <button
+            type="submit"
+            disabled={busy}
+            className="w-full bg-signal text-signal-ink font-medium py-2 text-sm disabled:opacity-50"
+          >
+            {busy ? "Creating..." : "Create account"}
+          </button>
+        </form>
+        {error && <p className="text-danger text-sm">{error}</p>}
+      </div>
+    </div>
+  );
+}
+
+// Which identity provider the dashboard runs on. Defaults to privy, so an
+// unset variable leaves the merchant experience byte-for-byte unchanged.
+//
+// A switch rather than a choice made per-component: the two cannot share a
+// wagmi config (see app/providers.tsx), so the whole dashboard runs on one or
+// the other.
+const CIRCLE_AUTH = process.env.NEXT_PUBLIC_AUTH_PROVIDER === "circle";
+
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
-  return <DashboardShell>{children}</DashboardShell>;
+  if (CIRCLE_AUTH) return <CircleDashboard>{children}</CircleDashboard>;
+  return <PrivyDashboard>{children}</PrivyDashboard>;
 }

@@ -457,6 +457,16 @@ export function restoreSession(): Promise<CircleSessionState | null> {
     persist(session);
     note(`wallet ${wallet.address} on ${wallet.blockchain}`);
     emit();
+
+    // Send the user back where they started, here rather than in the
+    // connector's setup(). setup() is called by wagmi during config creation
+    // and is not guaranteed to have run — or to have run first — by the time
+    // the page has settled, which is why a sign-in begun on /dashboard was
+    // finishing on the callback page. This is the one place that knows the
+    // login just completed, so it is the one place the redirect cannot be
+    // raced.
+    const back = returnPathAfterLogin();
+    if (back) window.location.replace(back);
     return session;
   })();
 

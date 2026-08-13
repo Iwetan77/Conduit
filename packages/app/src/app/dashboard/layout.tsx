@@ -250,7 +250,9 @@ function DashboardChrome({
       {/* Desktop sidebar — hidden below md, replaced by the hamburger bar below.
           The brand is the ⊙D logo mark, not the word "Conduit". */}
       <aside className="hidden md:flex w-60 border-r border-border p-4 flex-col shrink-0">
-        <Link href="/" className="inline-block mb-6"><Logo size="sm" /></Link>
+        {/* Logo renders its own <Link href="/">. Wrapping it in another one
+            nests <a> inside <a>, which is invalid HTML and fails hydration. */}
+        <div className="inline-block mb-6"><Logo size="sm" /></div>
         <MerchantIdentity />
         <nav className="flex flex-col gap-6">
           {NAV_GROUPS.map((group) => (
@@ -296,7 +298,7 @@ function DashboardChrome({
           full-width panel below the bar. */}
       <div className="md:hidden flex flex-col border-b border-border shrink-0">
         <div className="flex items-center justify-between px-4 py-3">
-          <Link href="/" className="inline-block"><Logo size="sm" /></Link>
+          <div className="inline-block"><Logo size="sm" /></div>
           <button
             onClick={() => setMenuOpen((v) => !v)}
             aria-label={menuOpen ? "Close menu" : "Open menu"}

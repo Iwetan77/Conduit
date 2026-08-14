@@ -114,6 +114,20 @@ body {
   .toast-in { animation: none; }
 }
 
+/* The chain picker slides up from the bottom of the screen — this is usually
+   a phone, and that is where the thumb already is. Matches toast-in's timing
+   so the app has one motion language rather than two. */
+@keyframes sheet-up {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+.sheet-up {
+  animation: sheet-up 180ms ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .sheet-up { animation: none; }
+}
+
 /* Scrollbar */
 ::-webkit-scrollbar {
   width: 4px;

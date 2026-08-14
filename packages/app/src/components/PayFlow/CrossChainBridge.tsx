@@ -37,6 +37,9 @@ import {
   chainLabel,
   chainToSourceSlug,
   fundedChains,
+  SOURCE_CHAINS,
+  SOURCE_CHAIN_LABELS,
+  type SourceKind,
   type PayerAdapter,
   type UnifiedUsdc,
 } from "@/lib/unified-balance";
@@ -70,6 +73,7 @@ export function CrossChainBridge({ intentId, intent }: CrossChainBridgeProps) {
   // a real choice, not a display detail — defaulted to the richest funded chain
   // and overridable whenever more than one can cover the amount.
   const [sourceChain, setSourceChain] = useState<string | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
   // What the wallet is being asked to do right now (e.g. approve a network
   // switch), so the spinner isn't silent while a wallet prompt is waiting.
   const [fxNote, setFxNote] = useState("");
@@ -245,21 +249,81 @@ export function CrossChainBridge({ intentId, intent }: CrossChainBridgeProps) {
           This payment settles on Arc, but you can pay with USDC you already hold on another chain.
           Pick where your USDC is — Conduit bridges it and converts to {isoToToken(intent.settle_currency)} for you.
         </p>
+
+        {/* One button, then a list of chains.
+            The old version asked the payer to choose between "Solana" and "any
+            EVM chain (connected wallet)" — a distinction about wallet plumbing,
+            not about where their money is. The only thing a payer knows is
+            which chain holds their USDC, so ask exactly that. */}
         <button
-          onClick={() => chooseSource("solana")}
-          disabled={!hasPhantom}
-          className="w-full py-4 bg-signal text-signal-ink font-mono hover:bg-signal/90 transition-colors disabled:opacity-40"
+          onClick={() => setPickerOpen(true)}
+          className="w-full py-4 bg-signal text-signal-ink font-mono hover:bg-signal/90 transition-colors"
         >
-          Pay with USDC on Solana
-        </button>
-        {!hasPhantom && <p className="text-ink-dim text-xs">Install a Solana wallet (Solflare, Backpack, Phantom) to pay from Solana.</p>}
-        <button
-          onClick={() => chooseSource("evm")}
-          className="w-full py-4 border border-border text-ink font-mono hover:border-signal/40 transition-colors"
-        >
-          Pay with USDC on any EVM chain (connected wallet)
+          Choose the chain your USDC is on
         </button>
         {error && <p className="text-danger text-sm">{error}</p>}
+
+        {pickerOpen && (
+          <div
+            className="fixed inset-0 z-50 flex items-end justify-center bg-black/70"
+            onClick={() => setPickerOpen(false)}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Choose a chain"
+          >
+            {/* Slides up from the bottom: this is most often a phone, and the
+                bottom of the screen is where a thumb already is. */}
+            <div
+              className="w-full max-w-md bg-surface border-t border-x border-border max-h-[75vh] overflow-y-auto sheet-up"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="sticky top-0 bg-surface border-b border-border px-4 py-3 flex items-center justify-between">
+                <p className="font-mono text-[11px] uppercase tracking-widest text-ink-dim">
+                  Where is your USDC?
+                </p>
+                <button
+                  onClick={() => setPickerOpen(false)}
+                  className="text-ink-dim hover:text-ink font-mono text-sm leading-none"
+                  aria-label="Close"
+                >
+                  ×
+                </button>
+              </div>
+
+              <ul>
+                {(Object.keys(SOURCE_CHAINS) as SourceKind[]).map((kind) => {
+                  // Solana needs its own wallet; everything else uses the
+                  // connected EVM wallet. Disabled rather than hidden, so a
+                  // payer who expected Solana learns why it is unavailable.
+                  const isSolana = kind === "solana";
+                  const disabled = isSolana && !hasPhantom;
+                  return (
+                    <li key={kind}>
+                      <button
+                        disabled={disabled}
+                        onClick={() => {
+                          setPickerOpen(false);
+                          setSourceChain(SOURCE_CHAINS[kind]);
+                          void chooseSource(isSolana ? "solana" : "evm");
+                        }}
+                        className="w-full px-4 py-3.5 flex items-center justify-between text-left
+                                   border-b border-border/60 hover:bg-signal/5 transition-colors
+                                   disabled:opacity-40 disabled:hover:bg-transparent"
+                      >
+                        <span className="font-mono text-sm text-ink">
+                          {SOURCE_CHAIN_LABELS[kind]}
+                        </span>
+                        <span className="font-mono text-[10px] text-ink-dim uppercase tracking-wider">
+                          {disabled ? "wallet needed" : isSolana ? "Solana wallet" : "EVM wallet"}
+                        </span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          </div>
+        )}
       </div>
     );
   }

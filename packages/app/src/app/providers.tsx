@@ -31,6 +31,11 @@ const CIRCLE_AUTH = AUTH_PROVIDER === "circle";
 // a returning Privy session, a dashboard route, or a Google sign-in click.
 const PrivyStack = dynamic(() => import("./privy-stack"), { ssr: false });
 const CircleStack = dynamic(() => import("./circle-stack"), { ssr: false });
+// Named export, so it needs its own dynamic wrapper.
+const CircleWalletGate = dynamic(
+  () => import("./circle-stack").then((m) => m.CircleWalletGate),
+  { ssr: false }
+);
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(
@@ -87,7 +92,10 @@ export function Providers({ children }: { children: React.ReactNode }) {
                 connector. This only translates the app's existing sign-in and
                 sign-out events into connect/disconnect on it. */}
             {CIRCLE_AUTH && <CircleStack />}
-            {children}
+            {/* Holds back anything that displays an address until the Circle
+                session has been adopted — otherwise an auto-connected
+                extension's address shows first and then swaps. */}
+            {CIRCLE_AUTH ? <CircleWalletGate>{children}</CircleWalletGate> : children}
           </QueryClientProvider>
         </WagmiProvider>
       </PrivyGateContext.Provider>

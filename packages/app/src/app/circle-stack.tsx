@@ -14,9 +14,12 @@
 // affordance already speak that vocabulary; giving Circle its own would mean
 // editing all of them, which is exactly the cost this migration is avoiding.
 
-import { useEffect } from "react";
+import { useContext, useEffect, useMemo, useState } from "react";
 import { useAccount, useConnect, useDisconnect } from "wagmi";
 import { CIRCLE_CONNECTOR_ID } from "@/lib/circle/connector";
+import { hasPendingResume, hasPersistedSession } from "@/lib/circle/browser";
+import { createAccountFromCircle, getSessionToken, setSessionToken } from "@/lib/conduit-api";
+import { PrivyGateContext } from "@/lib/privy-gate";
 import { clearCircleSession, currentSession, onCircleChange } from "@/lib/circle/browser";
 import {
   GOOGLE_LOGIN_ALREADY,
@@ -30,7 +33,7 @@ import {
 export default function CircleStack() {
   const { connectors, connectAsync } = useConnect();
   const { disconnectAsync } = useDisconnect();
-  const { connector } = useAccount();
+  const { address, connector } = useAccount();
 
   useEffect(() => {
     const fire = (name: string) => window.dispatchEvent(new Event(name));
@@ -123,6 +126,39 @@ export default function CircleStack() {
     };
   }, [connector, connectors, connectAsync]);
 
+  // A Conduit session on EVERY signed-in page, not just the dashboard.
+  //
+  // The Privy stack does this in SyncSessionToken, and its comment says why:
+  // /send needs a token to create a settlement intent, and when only the
+  // dashboard issued one, a user who signed in anywhere else had no usable
+  // credential. The Circle path had exactly that hole -- only CircleDashboard
+  // stored a token -- so every payer flow outside the dashboard would have
+  // been unauthenticated.
+  //
+  // Calling the bootstrap is safe for a payer with no merchant account: the
+  // server returns the account and a session token when one exists, and
+  // rejects the call when it would have to create one (it needs a name and
+  // settle currency that a payer has not given). That rejection is expected,
+  // not an error worth surfacing.
+  useEffect(() => {
+    if (!address || connector?.id !== CIRCLE_CONNECTOR_ID) return;
+    if (getSessionToken()) return;
+    const s = currentSession();
+    if (!s) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const account = await createAccountFromCircle(s.userToken, { login_wallet: address });
+        if (!cancelled && account.session_token) setSessionToken(account.session_token);
+      } catch {
+        // No Conduit account yet — onboarding lives in the dashboard.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [address, connector]);
+
   // Clear any stale intent flag on mount.
   //
   // This used to auto-dispatch a sign-in when it found the flag, to cover a
@@ -139,4 +175,31 @@ export default function CircleStack() {
   }, []);
 
   return null;
+}
+
+// Tells the rest of the app when useAccount()'s address is final.
+//
+// The Privy stack has PublishWalletSettled for this, and the race it prevents
+// exists here too: a browser extension auto-connects on load, and a moment
+// later the restored Circle session is adopted and the address changes. Any
+// surface that DISPLAYS an address — and offers to copy it — or reads a
+// balance must wait, or it shows an account that is not the user's and invites
+// them to send funds to it.
+//
+// Tested rather than timed, for the same reason: a timeout could only give up
+// and display the wrong account, which is the failure this exists to prevent.
+export function CircleWalletGate({ children }: { children: React.ReactNode }) {
+  const outer = useContext(PrivyGateContext);
+  const { connector } = useAccount();
+  // Read once: both are one-shot module values, and re-reading after the
+  // session is adopted would flip this back to "not settled".
+  const [pendingAtLoad] = useState(() => hasPendingResume() || hasPersistedSession());
+
+  // Nothing to wait for when no Circle session is coming back. Otherwise the
+  // address is final only once the Circle connector is actually the connected
+  // one.
+  const settled = !pendingAtLoad || connector?.id === CIRCLE_CONNECTOR_ID;
+
+  const value = useMemo(() => ({ ...outer, walletSettled: settled }), [outer, settled]);
+  return <PrivyGateContext.Provider value={value}>{children}</PrivyGateContext.Provider>;
 }

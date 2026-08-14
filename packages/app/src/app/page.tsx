@@ -6,7 +6,6 @@ import {
   Hero,
   Features,
   HowItWorks,
-  WaitlistSection,
   EcosystemBadge,
   Footer,
 } from "@/components/Landing/LandingSections";
@@ -32,7 +31,6 @@ export default function LandingPage() {
 
       <Features />
       <HowItWorks />
-      <WaitlistSection />
       <EcosystemBadge />
       <Footer />
 

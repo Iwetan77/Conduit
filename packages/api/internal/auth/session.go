@@ -13,6 +13,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -46,7 +47,14 @@ const KeyTypeSession KeyType = "session"
 // that has nothing to do with them.
 const SessionTTL = 12 * time.Hour
 
-var sessionSecret = func() []byte {
+// Resolved on FIRST USE, not at package init.
+//
+// This was a package-level var, which meant it ran before main() -- so a
+// devserver that reads the secret out of packages/api/.env and exports it could
+// never win the race, and every restart silently minted a new random secret and
+// signed the whole dashboard out. From the outside that is indistinguishable
+// from the API being down.
+var sessionSecret = sync.OnceValue(func() []byte {
 	if v := strings.TrimSpace(os.Getenv("CONDUIT_SESSION_SECRET")); v != "" {
 		if b, err := hex.DecodeString(v); err == nil && len(b) >= 32 {
 			return b
@@ -63,12 +71,12 @@ var sessionSecret = func() []byte {
 	}
 	log.Printf("auth: CONDUIT_SESSION_SECRET is not set — dashboard sessions will not survive a restart and will not work across multiple instances")
 	return b
-}()
+})
 
 // NewSessionToken issues a signed session for an account.
 func NewSessionToken(accountID string) string {
 	payload := fmt.Sprintf("%s.%d", accountID, time.Now().Add(SessionTTL).Unix())
-	mac := hmac.New(sha256.New, sessionSecret)
+	mac := hmac.New(sha256.New, sessionSecret())
 	mac.Write([]byte(payload))
 	sig := base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 	return SessionTokenPrefix + base64.RawURLEncoding.EncodeToString([]byte(payload)) + "." + sig
@@ -90,7 +98,7 @@ func ParseSessionToken(token string) (string, error) {
 	if err != nil {
 		return "", errBadSession
 	}
-	mac := hmac.New(sha256.New, sessionSecret)
+	mac := hmac.New(sha256.New, sessionSecret())
 	mac.Write(rawPayload)
 	want := base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 	// Constant time: a byte-by-byte comparison here leaks how much of a forged

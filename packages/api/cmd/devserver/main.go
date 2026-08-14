@@ -64,6 +64,18 @@ func main() {
 		CircleAPIKey:         loadCircleKey(),
 		CircleBaseURL:        os.Getenv("CIRCLE_BASE_URL"),
 	}
+	// Pull the session secret from packages/api/.env when it is not exported.
+	//
+	// Without this the devserver mints a random secret per boot, so every restart
+	// invalidates every cs_ dashboard session and the app looks signed out --
+	// which is indistinguishable from "the API is down" if you are the one
+	// staring at it. Same file, same reason, as the Circle and relayer keys.
+	if os.Getenv("CONDUIT_SESSION_SECRET") == "" {
+		if v := loadEnvFileKey("CONDUIT_SESSION_SECRET"); v != "" {
+			os.Setenv("CONDUIT_SESSION_SECRET", v)
+		}
+	}
+
 	handler := server.New(cfg)
 
 	server.StartBackgroundWorkers(ctx, pool, cfg.ArcRPC, os.Getenv("CONDUIT_ROUTER_ADDRESS"), cfg)

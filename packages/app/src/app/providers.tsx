@@ -6,6 +6,7 @@ import dynamic from "next/dynamic";
 import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { wagmiConfig } from "@/lib/wagmi";
+import { CIRCLE_AUTH } from "@/lib/auth-provider";
 import {
   GOOGLE_LOGIN_EVENT,
   PrivyGateContext,
@@ -15,8 +16,9 @@ import {
 
 const PRIVY_APP_ID = process.env.NEXT_PUBLIC_PRIVY_APP_ID ?? "";
 
-// Which identity provider is live. Defaults to privy so an unset variable
-// changes nothing.
+// Which identity provider is live. Circle by default as of Phase 6; setting
+// NEXT_PUBLIC_AUTH_PROVIDER=privy puts Privy back, unchanged, for one deploy
+// cycle.
 //
 // This switches the whole provider tree, and it has to: @privy-io/wagmi's
 // createConfig does `connectors: e.connectors?.filter((o) => "mock" === o.type)`
@@ -24,8 +26,6 @@ const PRIVY_APP_ID = process.env.NEXT_PUBLIC_PRIVY_APP_ID ?? "";
 // custom connector -- including Circle's -- from wagmi no matter what
 // lib/wagmi declares. The two cannot run side by side in one config, so this
 // is a switch rather than an addition.
-const AUTH_PROVIDER = process.env.NEXT_PUBLIC_AUTH_PROVIDER ?? "privy";
-const CIRCLE_AUTH = AUTH_PROVIDER === "circle";
 
 // ~700 kB of @privy-io/* kept out of the payer-page bundle: loaded only for
 // a returning Privy session, a dashboard route, or a Google sign-in click.

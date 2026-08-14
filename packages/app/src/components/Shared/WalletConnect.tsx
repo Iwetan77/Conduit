@@ -12,12 +12,11 @@ import {
   GOOGLE_LOGIN_STARTED,
 } from "@/lib/privy-gate";
 import { shortenAddress } from "@/lib/format";
+import { CIRCLE_AUTH } from "@/lib/auth-provider";
 
 const PRIVY_ENABLED = Boolean(process.env.NEXT_PUBLIC_PRIVY_APP_ID);
 // Circle is the identity provider when the flag says so and it is configured.
-const CIRCLE_ENABLED =
-  process.env.NEXT_PUBLIC_AUTH_PROVIDER === "circle" &&
-  Boolean(process.env.NEXT_PUBLIC_CIRCLE_APP_ID);
+const CIRCLE_ENABLED = CIRCLE_AUTH && Boolean(process.env.NEXT_PUBLIC_CIRCLE_APP_ID);
 // Whether ANY Google sign-in exists. Gating the button on PRIVY_ENABLED alone
 // meant the Google option vanished the moment Privy's app id was removed —
 // which is the last step of this migration, so the button would have

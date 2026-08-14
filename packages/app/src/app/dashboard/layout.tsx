@@ -12,6 +12,7 @@ import {
   createAccountFromPrivy,
   setSessionToken,
 } from "@/lib/conduit-api";
+import { CIRCLE_AUTH } from "@/lib/auth-provider";
 import { CIRCLE_CONNECTOR_ID } from "@/lib/circle/connector";
 import { clearCircleSession, currentSession } from "@/lib/circle/browser";
 import { SETTLE_CURRENCIES, settleCurrencyLabel } from "@/lib/currencies";
@@ -589,7 +590,10 @@ function CircleOnboarding({ address, onDone }: { address: string; onDone: () => 
 // A switch rather than a choice made per-component: the two cannot share a
 // wagmi config (see app/providers.tsx), so the whole dashboard runs on one or
 // the other.
-const CIRCLE_AUTH = process.env.NEXT_PUBLIC_AUTH_PROVIDER === "circle";
+// From lib/auth-provider, not read here: this used `=== "circle"`, which is
+// false when the variable is unset, while providers.tsx applied a default. Two
+// readings of one flag is how the dashboard ends up on a different provider
+// than the tree above it.
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   if (CIRCLE_AUTH) return <CircleDashboard>{children}</CircleDashboard>;

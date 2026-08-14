@@ -48,6 +48,15 @@ export default function CircleStack() {
         return;
       }
       fire(GOOGLE_LOGIN_STARTED);
+      // Cleared here, not in a finally: connect() never settles on the happy
+      // path because the document is navigating away, so a finally would never
+      // run and the flag would survive to trigger a phantom sign-in on the
+      // next load.
+      try {
+        sessionStorage.removeItem(GOOGLE_LOGIN_FLAG);
+      } catch {
+        // Storage unavailable; the flag is a hint, not state worth failing on.
+      }
       try {
         // Navigates to Google and never resolves on the happy path — the page
         // is gone. Anything that lands here is a real failure before the
@@ -58,12 +67,6 @@ export default function CircleStack() {
         if (connector?.id === CIRCLE_CONNECTOR_ID) return;
         console.error("circle: sign-in failed", err);
         fire(GOOGLE_LOGIN_FAILED);
-      } finally {
-        try {
-          sessionStorage.removeItem(GOOGLE_LOGIN_FLAG);
-        } catch {
-          // Storage unavailable; the flag is a hint, not state worth failing on.
-        }
       }
     };
 
@@ -120,18 +123,19 @@ export default function CircleStack() {
     };
   }, [connector, connectors, connectAsync]);
 
-  // A pending intent flag from a click that happened before this mounted.
+  // Clear any stale intent flag on mount.
+  //
+  // This used to auto-dispatch a sign-in when it found the flag, to cover a
+  // click that happened before this mounted. That is not needed -- CircleStack
+  // mounts at app boot -- and it was actively harmful: it started a connect
+  // that never settles, which left wagmi permanently "pending" and every
+  // sign-in button disabled before the user had touched anything.
   useEffect(() => {
-    let pending = false;
     try {
-      pending = sessionStorage.getItem(GOOGLE_LOGIN_FLAG) === "1";
+      sessionStorage.removeItem(GOOGLE_LOGIN_FLAG);
     } catch {
-      pending = false;
+      // Storage unavailable; nothing to clean up.
     }
-    if (pending && connector?.id !== CIRCLE_CONNECTOR_ID) {
-      window.dispatchEvent(new Event(GOOGLE_LOGIN_EVENT));
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return null;

@@ -433,7 +433,11 @@ function CircleLoginGate() {
             }
             connect({ connector: circle });
           }}
-          disabled={isPending || !circle}
+          // NOT disabled on isPending. connect() deliberately never settles --
+          // the page is navigating to Google -- so isPending stays true for the
+          // life of the document. Gating the button on it left the only way in
+          // permanently unclickable.
+          disabled={!circle}
           className="w-full bg-signal text-signal-ink font-medium py-2 text-sm disabled:opacity-50"
         >
           {isPending ? "Opening Google…" : "Sign in with Google"}

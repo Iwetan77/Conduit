@@ -18,6 +18,8 @@
 // against the live API. They are documented where they are handled rather than
 // listed here, because the next person will meet them one at a time.
 
+import { circleThemeColor } from "@/lib/circle/theme";
+
 const RESUME_KEY = "conduit_circle_resume";
 const SESSION_KEY = "conduit_circle_session";
 const RETURN_KEY = "conduit_circle_return_to";
@@ -261,10 +263,26 @@ async function ensureSdk(
   const { W3SSdk } = await import("@circle-fin/w3s-pw-web-sdk");
   if (sdk) {
     sdk.updateConfigs(configs, cb);
+    applyTheme(sdk);
     return sdk;
   }
   sdk = new W3SSdk(configs, cb);
+  applyTheme(sdk);
   return sdk;
+}
+
+// Circle's dialog is an iframe on Circle's origin, so our CSS cannot reach it;
+// the SDK forwards a theme in instead. Applied on every construction because
+// the PIN prompt is the last thing a payer sees before authorising money, and
+// a white-and-blue dialog appearing mid-flow from a company they have never
+// heard of reads as a phishing step rather than a confirmation.
+function applyTheme(instance: import("@circle-fin/w3s-pw-web-sdk").W3SSdk) {
+  try {
+    instance.setThemeColor(circleThemeColor);
+  } catch {
+    // Theming is cosmetic. If a future SDK renames a token, the flow must
+    // still work — losing the colours is not worth losing the payment.
+  }
 }
 
 /** Runs a Circle challenge in Circle's own UI (PIN, security questions). */

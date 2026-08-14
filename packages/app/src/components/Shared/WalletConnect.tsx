@@ -14,6 +14,15 @@ import {
 import { shortenAddress } from "@/lib/format";
 
 const PRIVY_ENABLED = Boolean(process.env.NEXT_PUBLIC_PRIVY_APP_ID);
+// Circle is the identity provider when the flag says so and it is configured.
+const CIRCLE_ENABLED =
+  process.env.NEXT_PUBLIC_AUTH_PROVIDER === "circle" &&
+  Boolean(process.env.NEXT_PUBLIC_CIRCLE_APP_ID);
+// Whether ANY Google sign-in exists. Gating the button on PRIVY_ENABLED alone
+// meant the Google option vanished the moment Privy's app id was removed —
+// which is the last step of this migration, so the button would have
+// disappeared exactly when Circle became the only way in.
+const GOOGLE_SIGN_IN_ENABLED = PRIVY_ENABLED || CIRCLE_ENABLED;
 
 // Payers get two ways in: a real wallet (injected/WalletConnect) or a Google
 // sign-in that provisions a Privy embedded wallet. No business onboarding on
@@ -167,11 +176,18 @@ function PrivySignOut() {
   );
 }
 
+// Sign-out for the non-Privy path.
+//
+// Under Circle a bare wagmi disconnect is not enough: the Circle session stays
+// in localStorage, the connector's isAuthorized() still says yes, and the next
+// page load silently signs the user back in. That is the same dead end
+// privy-gate documents for Privy, so it goes through the same event, which
+// CircleStack handles by disconnecting AND clearing the session.
 function DisconnectX() {
   const { disconnect } = useDisconnect();
   return (
     <button
-      onClick={() => disconnect()}
+      onClick={() => (CIRCLE_ENABLED ? requestSignOut() : disconnect())}
       className="ml-1 text-scale-2 font-mono text-ink-dim hover:text-danger transition-colors leading-none"
       title="Disconnect"
       aria-label="Disconnect"
@@ -238,7 +254,7 @@ export function WalletConnect() {
           )}
         </>
       )}
-      {PRIVY_ENABLED && <GoogleSignIn />}
+      {GOOGLE_SIGN_IN_ENABLED && <GoogleSignIn />}
     </div>
   );
 }
@@ -278,7 +294,7 @@ export function WalletConnectCompact() {
           </button>
         )}
       </div>
-      {PRIVY_ENABLED && <GoogleSignIn short />}
+      {GOOGLE_SIGN_IN_ENABLED && <GoogleSignIn short />}
     </div>
   );
 }

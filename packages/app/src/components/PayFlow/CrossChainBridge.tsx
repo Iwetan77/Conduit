@@ -43,6 +43,7 @@ import {
   type PayerAdapter,
   type UnifiedUsdc,
 } from "@/lib/unified-balance";
+import { ChainIcon } from "@/components/PayFlow/ChainIcon";
 import { CIRCLE_CONNECTOR_ID } from "@/lib/circle/connector";
 import { chainByEvmId } from "@/lib/circle/chains";
 
@@ -341,8 +342,11 @@ export function CrossChainBridge({ intentId, intent }: CrossChainBridgeProps) {
                                    border-b border-border/60 hover:bg-signal/5 transition-colors
                                    disabled:opacity-40 disabled:hover:bg-transparent"
                       >
-                        <span className="font-mono text-sm text-ink">
-                          {SOURCE_CHAIN_LABELS[kind]}
+                        <span className="flex items-center gap-3">
+                          <ChainIcon kind={kind} />
+                          <span className="font-mono text-sm text-ink">
+                            {SOURCE_CHAIN_LABELS[kind]}
+                          </span>
                         </span>
                         <span className="font-mono text-[10px] text-ink-dim uppercase tracking-wider">
                           {disabled ? "wallet needed" : isSolana ? "Solana wallet" : "EVM wallet"}

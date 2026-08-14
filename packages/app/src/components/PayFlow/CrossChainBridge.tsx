@@ -43,6 +43,8 @@ import {
   type PayerAdapter,
   type UnifiedUsdc,
 } from "@/lib/unified-balance";
+import { CIRCLE_CONNECTOR_ID } from "@/lib/circle/connector";
+import { chainByEvmId } from "@/lib/circle/chains";
 
 interface CrossChainBridgeProps {
   intentId: string;
@@ -205,6 +207,26 @@ export function CrossChainBridge({ intentId, intent }: CrossChainBridgeProps) {
       // rebuild the adapter so it's bound to the network we just moved to.
       let payer = adapter;
       const sourceChainId = chosen.allocations[0]?.chain;
+
+      // A Circle wallet exists per blockchain, and Circle cannot provision one
+      // on every chain Gateway supports. Say that here, where the chain is
+      // known and the payer can still pick another one — otherwise the switch
+      // below fails inside Circle's adapter as an unsupported-method error that
+      // says nothing about what went wrong or what to do about it.
+      if (connector?.id === CIRCLE_CONNECTOR_ID && payer.family === "evm" && sourceChainId) {
+        const { resolveChainIdentifier } = await import("@circle-fin/unified-balance-kit");
+        const def = resolveChainIdentifier(sourceChainId as never) as unknown as {
+          type?: string;
+          chainId?: number;
+        };
+        if (def?.type === "evm" && typeof def.chainId === "number" && !chainByEvmId(def.chainId)) {
+          throw new Error(
+            `Signing in with Google can't hold USDC on ${chainLabel(sourceChainId)}. ` +
+              `Choose a different chain, or connect a wallet that holds USDC there.`
+          );
+        }
+      }
+
       if (payer.family === "evm" && sourceChainId) {
         setFxNote(`Switch to ${chainLabel(sourceChainId)} in your wallet…`);
         await ensureEvmChain(payer.provider, sourceChainId);

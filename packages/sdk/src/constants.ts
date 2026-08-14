@@ -173,6 +173,11 @@ export const ROUTER_ABI = [
   "function executeWithAmm((address payer, address recipient, address payerToken, address recipientToken, uint256 amount, uint256 deadline, bytes32 declarationId) instruction, address[] path, uint256 amountInMax, address ammRouter) external returns (bytes32 receiptId)",
   "function quote((address payer, address recipient, address payerToken, address recipientToken, uint256 amount, uint256 deadline, bytes32 declarationId) instruction) external view returns (uint256 payerAmount)",
   "event PaymentSettled(bytes32 indexed receiptId, address indexed payer, address indexed recipient, address payerToken, address recipientToken, uint256 payerAmount, uint256 recipientAmount, bytes32 declarationId, uint256 settledAt)",
+  // Custom errors, so a revert arrives decoded instead of as raw bytes. Without
+  // this entry the recipient's standing settlement preference rejecting a
+  // payment -- a designed, explainable outcome -- reached the payer as a bare
+  // "execution reverted", which reads as the network being broken.
+  "error PreferenceMismatch(address recipient, address preferenceToken, address instructionToken)",
 ] as const;
 
 // DeclarationRegistry minimal ABI

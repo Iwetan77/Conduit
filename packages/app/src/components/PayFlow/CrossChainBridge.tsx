@@ -132,7 +132,7 @@ export function CrossChainBridge({ intentId, intent }: CrossChainBridgeProps) {
   // Build the chosen wallet's adapter, read the plan (how much USDC to spend +
   // where to mint) and the payer's unified USDC balance, then confirm or report
   // that there isn't enough across all their chains.
-  async function chooseSource(kind: "solana" | "evm") {
+  async function chooseSource(kind: "solana" | "evm", picked?: string) {
     setError("");
     setPhase("connecting");
     try {
@@ -167,8 +167,15 @@ export function CrossChainBridge({ intentId, intent }: CrossChainBridgeProps) {
       const need = BigInt(plan.required_usdc);
       // Default to the richest chain that can cover this on its own — that's
       // the one the spend would actually succeed from.
-      const payable = fundedChains(bal).find((c) => c.minor >= need);
-      setSourceChain(payable?.chain ?? null);
+      const funded = fundedChains(bal);
+      const payable = funded.find((c) => c.minor >= need);
+      // The payer picked a chain in the sheet; that choice outranks the greedy
+      // default. Without this the pick was read and then thrown away here, and
+      // a payer who chose Polygon but held more USDC on Base silently paid from
+      // Base. Fall back only when nothing was picked, or when the pick can't
+      // cover the amount on its own — the confirm screen then shows what can.
+      const pickedFunded = picked ? funded.find((c) => c.chain === picked && c.minor >= need) : undefined;
+      setSourceChain(pickedFunded?.chain ?? payable?.chain ?? null);
       if (payable || planAllocations(bal, need)) {
         setPhase("confirm");
       } else {
@@ -326,7 +333,9 @@ export function CrossChainBridge({ intentId, intent }: CrossChainBridgeProps) {
                         onClick={() => {
                           setPickerOpen(false);
                           setSourceChain(SOURCE_CHAINS[kind]);
-                          void chooseSource(isSolana ? "solana" : "evm");
+                          // Passed, not read from state: setSourceChain above
+                          // has not flushed by the time chooseSource runs.
+                          void chooseSource(isSolana ? "solana" : "evm", SOURCE_CHAINS[kind]);
                         }}
                         className="w-full px-4 py-3.5 flex items-center justify-between text-left
                                    border-b border-border/60 hover:bg-signal/5 transition-colors

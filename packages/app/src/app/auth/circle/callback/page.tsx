@@ -23,11 +23,17 @@ export default function CircleCallbackPage() {
   const [stalled, setStalled] = useState(false);
 
   useEffect(() => {
-    // Say nothing at first. The resume normally finishes in a few hundred
-    // milliseconds, and a message that flashes up and vanishes reads as an
-    // extra step in sign-in that Privy's popup never had. Blank for that
-    // window looks like the redirect it actually is.
-    const quiet = setTimeout(() => setSlow(true), 1200);
+    // Say nothing at first. Privy signed in through a popup, so the page never
+    // navigated and there was no return trip to render; Circle's SDK navigates
+    // the whole tab, and Google requires one registered redirect URI, so this
+    // page has to exist. Any text on it reads as an extra step in sign-in.
+    //
+    // 3s, not the 1.2s this started at: the resume reattaches the SDK and
+    // validates the token against Circle, which was measured at ~1s on its own
+    // and is slower on a cold load. Blank for that window looks like the
+    // redirect it is. Past 3s something is genuinely wrong and silence would be
+    // worse than a word.
+    const quiet = setTimeout(() => setSlow(true), 3000);
     // If the return-to redirect has not happened by now, the login either
     // failed or there was nowhere to go back to. Send them somewhere real
     // rather than leaving them on a page that only ever meant "in transit".

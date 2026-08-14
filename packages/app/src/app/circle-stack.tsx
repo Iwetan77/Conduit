@@ -37,13 +37,25 @@ export default function CircleStack() {
 
   useEffect(() => {
     const fire = (name: string) => window.dispatchEvent(new Event(name));
+    // Failures carry their reason. The button reads event.detail and falls back
+    // to "Google sign-in failed." -- which is all it could ever show, because
+    // this fired a plain Event with no detail. Every distinct cause looked
+    // identical on screen, and the only way to tell them apart was the console.
+    const fail = (reason: string) => {
+      console.error("circle: sign-in failed —", reason);
+      window.dispatchEvent(new CustomEvent(GOOGLE_LOGIN_FAILED, { detail: reason }));
+    };
 
     const onLogin = async () => {
       const circle = connectors.find((c) => c.id === CIRCLE_CONNECTOR_ID);
       if (!circle) {
         // Nothing to connect to. Saying so beats a button stuck on "Opening…"
         // forever, which is what silence looks like from the outside.
-        fire(GOOGLE_LOGIN_FAILED);
+        fail(
+          `Google sign-in isn't wired up here (no Circle connector; wagmi has: ${
+            connectors.map((c) => c.id).join(", ") || "none"
+          }).`
+        );
         return;
       }
       if (connector?.id === CIRCLE_CONNECTOR_ID) {
@@ -69,7 +81,7 @@ export default function CircleStack() {
         // A session restored under us mid-click is not a failure.
         if (connector?.id === CIRCLE_CONNECTOR_ID) return;
         console.error("circle: sign-in failed", err);
-        fire(GOOGLE_LOGIN_FAILED);
+        fail(err instanceof Error ? err.message : String(err));
       }
     };
 

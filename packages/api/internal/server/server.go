@@ -153,7 +153,12 @@ func New(cfg Config) http.Handler {
 	}
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins: allowedOrigins,
-		AllowedMethods: []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		// PATCH is here because /v1/accounts/{id} is a PATCH and was unreachable
+		// from the browser without it — the preflight answered without the
+		// method, so the browser never sent the request and Settings' "Business
+		// identity" could not be saved. Same failure mode as a missing header
+		// below: nothing in the API log, because nothing arrived.
+		AllowedMethods: []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		// X-Circle-User-Token is how the browser presents Circle's session on
 		// the /auth/circle/* routes. Leaving it off this list does not produce
 		// a 403 anywhere visible: the preflight answers 200 with no CORS

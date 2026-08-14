@@ -256,7 +256,16 @@ func (h *SettlementIntents) CreateDirect(w http.ResponseWriter, r *http.Request)
 // from migration 0008 turns a concurrent double-insert into a conflict we
 // resolve by re-reading, so a payer never accumulates one account per send.
 func (h *SettlementIntents) personalAccountForWallet(ctx context.Context, wallet, settleCurrency string) (string, error) {
-	lookup := `SELECT id FROM accounts WHERE privy_user_id IS NULL AND lower(login_wallet) = lower($1)`
+	// "Has no login identity" is the test for a personal account, and it has to
+	// name every column an identity can live in. It used to check
+	// privy_user_id alone, which stopped meaning that the moment migration 0014
+	// moved identity to auth_provider/auth_subject: a merchant signed in with
+	// Circle has privy_user_id NULL, so their MERCHANT account matched here and
+	// every payer-created link was attached to it -- shown under the business
+	// name and recorded against the merchant's books.
+	lookup := `SELECT id FROM accounts
+	           WHERE privy_user_id IS NULL AND auth_subject IS NULL
+	             AND lower(login_wallet) = lower($1)`
 
 	var accountID string
 	err := h.Pool.QueryRow(ctx, lookup, wallet).Scan(&accountID)

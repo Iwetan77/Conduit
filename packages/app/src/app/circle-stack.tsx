@@ -17,7 +17,7 @@
 import { useEffect } from "react";
 import { useAccount, useConnect, useDisconnect } from "wagmi";
 import { CIRCLE_CONNECTOR_ID } from "@/lib/circle/connector";
-import { clearCircleSession } from "@/lib/circle/browser";
+import { clearCircleSession, currentSession, onCircleChange } from "@/lib/circle/browser";
 import {
   GOOGLE_LOGIN_ALREADY,
   GOOGLE_LOGIN_EVENT,
@@ -86,6 +86,39 @@ export default function CircleStack() {
       window.removeEventListener(SIGN_OUT_EVENT, onSignOut);
     };
   }, [connectors, connectAsync, disconnectAsync, connector]);
+
+  // Adopt a restored session into wagmi.
+  //
+  // Returning from Google leaves a live Circle session that wagmi does not
+  // know about yet. The connector emits "connect" from setup(), but that is
+  // not enough for wagmi to adopt it as the current connector -- so the user
+  // came back signed in, saw "not connected", and had to press the button a
+  // second time before the UI caught up. Going through wagmi's own connect
+  // action is what actually sets its state; the connector short-circuits on
+  // the existing session, so this costs no round trip and never re-opens
+  // Google.
+  useEffect(() => {
+    let cancelled = false;
+    const adopt = async () => {
+      if (cancelled) return;
+      if (connector?.id === CIRCLE_CONNECTOR_ID) return;
+      if (!currentSession()) return;
+      const circle = connectors.find((c) => c.id === CIRCLE_CONNECTOR_ID);
+      if (!circle) return;
+      try {
+        await connectAsync({ connector: circle });
+      } catch (err) {
+        console.error("circle: could not adopt the restored session", err);
+      }
+    };
+    void adopt();
+    // The session may land after this mounts -- restoring it is asynchronous.
+    const unsubscribe = onCircleChange(() => void adopt());
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, [connector, connectors, connectAsync]);
 
   // A pending intent flag from a click that happened before this mounted.
   useEffect(() => {

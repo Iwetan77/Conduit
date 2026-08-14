@@ -104,9 +104,20 @@ export function circleConnector(params: CircleConfig) {
 
 
       await startGoogleSignIn();
-      // Unreachable in practice: startGoogleSignIn navigates away. If the
-      // browser blocked the navigation, saying so beats hanging forever.
-      throw new Error("redirecting to Google…");
+
+      // Do NOT throw here. The document is navigating to Google, and throwing
+      // makes wagmi report a failed connection while the redirect is still in
+      // flight -- the user sees sign-in "fail" a moment before Google opens.
+      // Wait instead: on the happy path this promise never settles because the
+      // page is gone. Only if the navigation genuinely did not happen is there
+      // anything worth reporting.
+      await new Promise<never>((_, reject) =>
+        setTimeout(
+          () => reject(new Error("the browser did not open Google — check pop-up or redirect blocking")),
+          15_000
+        )
+      );
+      throw new Error("unreachable");
     },
 
     async disconnect() {

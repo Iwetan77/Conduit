@@ -26,9 +26,20 @@ import (
 // authorises the user-scoped ones.
 type CircleAuth struct {
 	Client *circle.Client
-	// Blockchains the wallet is created on. Arc is where Conduit settles;
-	// anything else would produce a wallet that can't pay.
+	// Blockchains to provision wallets on.
+	//
+	// Arc is where Conduit settles. The rest exist so a payer signed in with
+	// Google can pay from USDC they hold on another chain: Circle wallets are
+	// per-blockchain, so a wallet that exists only on Arc cannot deposit into
+	// Gateway from Base or Polygon, and the cross-chain path is impossible
+	// without them.
 	Blockchains []string
+	// Fallback if the list above is rejected.
+	//
+	// This runs on the LOGIN path. A single blockchain identifier that Circle
+	// does not accept would otherwise 400 the whole call and lock every user
+	// out — a chain list is not worth taking sign-in down for.
+	FallbackBlockchains []string
 }
 
 // upstream renders a failed Circle call.
@@ -96,6 +107,13 @@ func (h *CircleAuth) Initialize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	challengeID, err := h.Client.InitializeUser(r.Context(), token, h.Blockchains)
+	if err != nil && len(h.FallbackBlockchains) > 0 {
+		// Never let a chain list break sign-in. Retry with the minimum that
+		// must work, and say loudly which chains were lost — cross-chain pay
+		// will be unavailable for this user until it is fixed.
+		log.Printf("circle: initialize with %v failed (%v); retrying with %v", h.Blockchains, err, h.FallbackBlockchains)
+		challengeID, err = h.Client.InitializeUser(r.Context(), token, h.FallbackBlockchains)
+	}
 	if err != nil {
 		h.upstream(w, "initialize user", err)
 		return

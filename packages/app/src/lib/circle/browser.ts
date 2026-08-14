@@ -95,7 +95,17 @@ export interface CircleWallet {
 export interface CircleSessionState {
   userToken: string;
   encryptionKey: string;
+  /** The wallet on the settlement chain (Arc) — the default for everything. */
   wallet: CircleWallet;
+  /**
+   * Every wallet this user holds, one per blockchain.
+   *
+   * Carried so the provider can answer wallet_switchEthereumChain by swapping
+   * which wallet signs. Without it a Google user cannot pay cross-chain at
+   * all: Circle wallets are per-chain, and the Arc one cannot deposit into
+   * Gateway from Base.
+   */
+  wallets?: CircleWallet[];
 }
 
 export interface CircleConfig {
@@ -302,7 +312,7 @@ export async function executeChallenge(challengeId: string): Promise<unknown> {
  * creation, not that the wallet exists — provisioning is asynchronous, so an
  * empty first read is normal rather than a failure.
  */
-async function loadWallet(token: string): Promise<CircleWallet> {
+async function loadWallet(token: string): Promise<{ wallet: CircleWallet; wallets: CircleWallet[] }> {
   const blockchain = requireConfig().blockchain ?? "ARC-TESTNET";
   const init = await api("/v1/auth/circle/initialize", { method: "POST", token });
   if (init.challenge_id) {
@@ -314,7 +324,7 @@ async function loadWallet(token: string): Promise<CircleWallet> {
     const res = await api("/v1/auth/circle/wallets", { token });
     const list = (res.data ?? []) as CircleWallet[];
     const found = list.find((w) => w.blockchain === blockchain) ?? list[0];
-    if (found?.address) return found;
+    if (found?.address) return { wallet: found, wallets: list };
     if (Date.now() > deadline) {
       throw new Error(
         `Circle returned no wallets after 60s. The create-wallet challenge succeeded, ` +
@@ -470,8 +480,8 @@ export function restoreSession(): Promise<CircleSessionState | null> {
       userToken: verified.userToken,
       encryptionKey: verified.encryptionKey,
     });
-    const wallet = await loadWallet(verified.userToken);
-    session = { ...verified, wallet };
+    const { wallet, wallets } = await loadWallet(verified.userToken);
+    session = { ...verified, wallet, wallets };
     persist(session);
     note(`wallet ${wallet.address} on ${wallet.blockchain}`);
     emit();

@@ -86,8 +86,21 @@ func New(cfg Config) http.Handler {
 	accountsH := &handlers.Accounts{Pool: cfg.Pool, PrivyVerifier: privyVerifier, CircleVerifier: circleVerifier}
 	apiKeysH := &handlers.ApiKeys{Pool: cfg.Pool}
 	circleAuthH := &handlers.CircleAuth{
-		Client:      circleClient,
-		Blockchains: []string{"ARC-TESTNET"},
+		Client: circleClient,
+		// Arc plus every Circle-supported chain the cross-chain payer flow
+		// offers as a source. Sonic, World Chain, Sei and HyperEVM appear in
+		// that flow but Circle cannot hold a wallet on them, so a Circle user
+		// simply cannot pay from those — a real gap, not an omission here.
+		Blockchains: []string{
+			"ARC-TESTNET",
+			"BASE-SEPOLIA",
+			"MATIC-AMOY",
+			"AVAX-FUJI",
+			"ARB-SEPOLIA",
+			"OP-SEPOLIA",
+			"UNI-SEPOLIA",
+		},
+		FallbackBlockchains: []string{"ARC-TESTNET"},
 	}
 	// Server-side balance reads with a short cache. Keeps N browsers from
 	// each fanning out their own RPC calls and tripping Arc's rate limiter.

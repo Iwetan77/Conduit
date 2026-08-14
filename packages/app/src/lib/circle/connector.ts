@@ -14,9 +14,16 @@
 //   1. connect() navigates the whole page to Google. The returned promise does
 //      not resolve — the document is gone. The connection is completed on the
 //      NEXT page load, which is what setup() is for.
-//   2. There is nothing to listen to. A Circle wallet is one address on one
-//      chain for the life of the session, so accountsChanged and chainChanged
-//      never fire. The handlers exist because wagmi calls them unconditionally.
+//   2. There is nothing to listen to. The account does not change for the life
+//      of the session, so accountsChanged and chainChanged never fire. The
+//      handlers exist because wagmi calls them unconditionally.
+//
+// Note the provider underneath IS multi-chain: Circle provisions a wallet per
+// blockchain, and it answers wallet_switchEthereumChain by swapping which one
+// signs, so a cross-chain Gateway deposit can come from the payer's Base or
+// Polygon wallet. wagmi only knows about Arc, which is correct — Arc is the
+// only chain this app settles on, and the source-chain switch is internal to
+// one payment.
 
 import { createConnector } from "wagmi";
 import type { Eip1193Provider } from "ethers";
@@ -144,6 +151,9 @@ export function circleConnector(params: CircleConfig) {
         provider = createCircleProvider({
           address: s.wallet.address,
           walletId: s.wallet.id,
+          // Every chain this user has a wallet on, so the provider can switch
+          // for a cross-chain Gateway deposit.
+          wallets: s.wallets,
           userToken: s.userToken,
           apiBase: params.apiBase,
           execute: executeChallenge,
@@ -159,11 +169,13 @@ export function circleConnector(params: CircleConfig) {
       return !!currentSession() || hasPendingResume() || hasPersistedSession();
     },
 
-    // A Circle wallet is provisioned per chain and cannot move. Accepting a
-    // switch to the chain it is already on is honest; anything else is not.
+    // wagmi's chain list is Arc alone, so this only ever answers for Arc.
+    // Source-chain switching for a Gateway deposit does not come through here
+    // — Circle's UBK adapter talks to the provider directly, which swaps the
+    // signing wallet itself.
     async switchChain({ chainId }) {
       if (chainId !== arcTestnet.id) {
-        throw new Error(`this Circle wallet exists only on ${arcTestnet.name}`);
+        throw new Error(`Conduit settles on ${arcTestnet.name}; this app has no other chain configured`);
       }
       return arcTestnet;
     },
@@ -172,7 +184,7 @@ export function circleConnector(params: CircleConfig) {
       // Never fires — one wallet, one address, for the session's lifetime.
     },
     onChainChanged() {
-      // Never fires — the wallet is bound to Arc.
+      // Never fires — wagmi only knows about Arc.
     },
     onDisconnect() {
       clearCircleSession();

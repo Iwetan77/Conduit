@@ -22,10 +22,18 @@
 // exists. That is a real wait on a real network, and callers already await it.
 //
 // Reads are not Circle's business. Anything that isn't a wallet operation is
-// forwarded to Arc's JSON-RPC unchanged, which keeps eth_call, eth_getLogs,
-// gas estimation and every other read on exactly the path they already use.
+// forwarded to the ACTIVE chain's JSON-RPC unchanged, which keeps eth_call,
+// eth_getLogs, gas estimation and every other read on exactly the path they
+// already use.
+//
+// Multi-chain, because Circle provisions a wallet per blockchain. Paying an
+// invoice from USDC held on Base means depositing into Gateway from a Base
+// wallet, so wallet_switchEthereumChain swaps which wallet signs rather than
+// refusing. Refusing is what made cross-chain pay impossible for a Google
+// sign-in: the wallet was pinned to Arc and there was nothing to deposit from.
 
 import { ARC_RPC_URL, arcTestnet } from "@/lib/chain";
+import { chainByCircleId, chainByEvmId, type CircleChain } from "@/lib/circle/chains";
 
 /** Circle's challenge execution, injected so this file never imports the SDK. */
 export type ExecuteChallenge = (challengeId: string) => Promise<unknown>;
@@ -35,6 +43,16 @@ export interface CircleProviderConfig {
   address: string;
   /** Circle's id for the wallet, which its transaction APIs key on. */
   walletId: string;
+  /**
+   * Every wallet this user holds, one per blockchain.
+   *
+   * Cross-chain pay depends on this. Circle provisions a wallet per chain, so
+   * depositing into Gateway from Base means signing with the Base wallet —
+   * the Arc wallet cannot do it. wallet_switchEthereumChain swaps which of
+   * these is active, which is how an ordinary EIP-1193 consumer (Circle's own
+   * UBK adapter, here) gets a wallet that is "on" the source chain.
+   */
+  wallets?: { id: string; address: string; blockchain: string }[];
   /** Circle's per-user session token. */
   userToken: string;
   /** Conduit API base — challenges are minted server-side. */
@@ -68,8 +86,24 @@ interface TxRequest {
 }
 
 export function createCircleProvider(config: CircleProviderConfig) {
-  const { address, walletId, userToken, apiBase, execute } = config;
+  const { userToken, apiBase, execute } = config;
   const progress = (s: string) => config.onProgress?.(s);
+
+  // The wallet currently being signed with, and the chain it lives on.
+  // Defaults to the one passed explicitly, which is Arc in every path except
+  // a cross-chain deposit.
+  const wallets = config.wallets?.length
+    ? config.wallets
+    : [{ id: config.walletId, address: config.address, blockchain: "ARC-TESTNET" }];
+
+  let active: { id: string; address: string; blockchain: string } =
+    wallets.find((w) => w.id === config.walletId) ?? wallets[0];
+  let activeChain: CircleChain =
+    chainByCircleId(active.blockchain) ??
+    ({ circle: "ARC-TESTNET", id: arcTestnet.id, rpc: ARC_RPC_URL, label: arcTestnet.name } as CircleChain);
+
+  const address = () => active.address;
+  const walletId = () => active.id;
 
   const api = async (path: string, init?: RequestInit) => {
     const res = await fetch(`${apiBase}${path}`, {
@@ -96,9 +130,15 @@ export function createCircleProvider(config: CircleProviderConfig) {
     return json;
   };
 
-  /** Forward a read to Arc. Circle has no opinion about these. */
+  /**
+   * Forward a read to the ACTIVE chain. Circle has no opinion about these.
+   *
+   * Not pinned to Arc: while the wallet is switched to a source chain for a
+   * Gateway deposit, every balance and receipt read has to hit that chain or
+   * the caller is told it holds nothing.
+   */
   const rpc = async (method: string, params: unknown[]) => {
-    const res = await fetch(ARC_RPC_URL, {
+    const res = await fetch(activeChain.rpc, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ jsonrpc: "2.0", id: Date.now(), method, params }),
@@ -168,7 +208,7 @@ export function createCircleProvider(config: CircleProviderConfig) {
 
   const listTransactions = async (): Promise<CircleTx[]> => {
     const res = await api(
-      `/v1/auth/circle/transactions?wallet_id=${encodeURIComponent(walletId)}`
+      `/v1/auth/circle/transactions?wallet_id=${encodeURIComponent(walletId())}`
     );
     return (res.data ?? []) as CircleTx[];
   };
@@ -180,12 +220,12 @@ export function createCircleProvider(config: CircleProviderConfig) {
       // than saying so.
       throw new ProviderRpcError(-32601, "Circle wallets cannot deploy contracts");
     }
-    if (tx.from && tx.from.toLowerCase() !== address.toLowerCase()) {
+    if (tx.from && tx.from.toLowerCase() !== address().toLowerCase()) {
       // Signing as someone else is the bug class that made the Privy embedded
       // wallet unusable. Refuse rather than quietly sign from the wrong address.
       throw new ProviderRpcError(
         -32602,
-        `this wallet is ${address}, but the transaction asks to send from ${tx.from}`
+        `this wallet is ${address()}, but the transaction asks to send from ${tx.from}`
       );
     }
 
@@ -207,7 +247,7 @@ export function createCircleProvider(config: CircleProviderConfig) {
     const { challenge_id } = await api("/v1/auth/circle/contract_execution", {
       method: "POST",
       body: JSON.stringify({
-        wallet_id: walletId,
+        wallet_id: walletId(),
         to: tx.to,
         data: tx.data ?? "0x",
         // `value` is hex wei on the wire; Circle wants a decimal string in
@@ -254,14 +294,14 @@ export function createCircleProvider(config: CircleProviderConfig) {
   const signTypedData = async (params: unknown[]): Promise<string> => {
     // eth_signTypedData_v4 params are [address, jsonString].
     const [who, payload] = params as [string, string | object];
-    if (who && who.toLowerCase() !== address.toLowerCase()) {
-      throw new ProviderRpcError(-32602, `this wallet is ${address}, not ${who}`);
+    if (who && who.toLowerCase() !== address().toLowerCase()) {
+      throw new ProviderRpcError(-32602, `this wallet is ${address()}, not ${who}`);
     }
     progress("waiting for you to approve the signature…");
     const { challenge_id } = await api("/v1/auth/circle/sign_typed_data", {
       method: "POST",
       body: JSON.stringify({
-        wallet_id: walletId,
+        wallet_id: walletId(),
         // Pass the document through untouched. Re-serialising it would reorder
         // keys and change the hash that gets signed.
         data: typeof payload === "string" ? JSON.parse(payload) : payload,
@@ -276,14 +316,14 @@ export function createCircleProvider(config: CircleProviderConfig) {
   const personalSign = async (params: unknown[]): Promise<string> => {
     // personal_sign params are [message, address].
     const [message, who] = params as [string, string];
-    if (who && who.toLowerCase() !== address.toLowerCase()) {
-      throw new ProviderRpcError(-32602, `this wallet is ${address}, not ${who}`);
+    if (who && who.toLowerCase() !== address().toLowerCase()) {
+      throw new ProviderRpcError(-32602, `this wallet is ${address()}, not ${who}`);
     }
     progress("waiting for you to approve the signature…");
     const { challenge_id } = await api("/v1/auth/circle/sign_message", {
       method: "POST",
       body: JSON.stringify({
-        wallet_id: walletId,
+        wallet_id: walletId(),
         message,
         // A 0x-prefixed message is bytes, not the characters "0x…". Getting
         // this wrong signs a different message and the signature verifies
@@ -301,7 +341,7 @@ export function createCircleProvider(config: CircleProviderConfig) {
     switch (method) {
       case "eth_accounts":
       case "eth_requestAccounts":
-        return [address];
+        return [address()];
       case "eth_chainId":
         return `0x${arcTestnet.id.toString(16)}`;
       case "net_version":
@@ -318,15 +358,37 @@ export function createCircleProvider(config: CircleProviderConfig) {
         // and deprecated everywhere. personal_sign covers the honest uses.
         throw new ProviderRpcError(-32601, "eth_sign is not supported; use personal_sign");
       case "wallet_switchEthereumChain":
-        // A Circle wallet is provisioned per chain and cannot be moved. Accept
-        // a request for the chain it is already on, refuse anything else.
+        // A real chain switch, by swapping which wallet signs.
+        //
+        // Circle provisions a wallet per blockchain, so "being on Base" means
+        // using the Base wallet. Circle's own UBK adapter calls this before a
+        // Gateway deposit, and refusing it is what made cross-chain pay
+        // impossible for a Google sign-in: the wallet was pinned to Arc, so
+        // there was nothing to deposit from.
         {
           const target = (params[0] as { chainId?: string })?.chainId;
-          if (target && parseInt(target, 16) === arcTestnet.id) return null;
-          throw new ProviderRpcError(
-            4902,
-            `this Circle wallet exists only on ${arcTestnet.name}`
-          );
+          const wanted = target ? parseInt(target, 16) : NaN;
+          if (!Number.isFinite(wanted)) {
+            throw new ProviderRpcError(-32602, "wallet_switchEthereumChain needs a chainId");
+          }
+          if (wanted === activeChain.id) return null;
+
+          const chain = chainByEvmId(wanted);
+          const wallet = chain && wallets.find((w) => w.blockchain === chain.circle);
+          if (!chain || !wallet) {
+            // 4902 is the code every wallet library reads as "this chain is
+            // not available here", which is exactly true: Circle either does
+            // not support it, or this user has no wallet provisioned on it.
+            throw new ProviderRpcError(
+              4902,
+              `this Circle wallet does not exist on chain ${wanted}. ` +
+                `Available: ${wallets.map((w) => w.blockchain).join(", ")}`
+            );
+          }
+          active = wallet;
+          activeChain = chain;
+          progress(`switched to ${chain.label}`);
+          return null;
         }
       default:
         // Reads and everything else: Arc answers these, not Circle.

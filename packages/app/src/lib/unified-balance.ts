@@ -178,7 +178,7 @@ export function usdcHumanToMinor(human: string): bigint {
 
 // Build a UBK adapter over the payer's connected EVM wallet. `provider` is the
 // EIP-1193 provider from wagmi's connector.getProvider() — the SAME provider
-// the rest of the app signs Arc transactions through, so a Google/Privy
+// the rest of the app signs Arc transactions through, so a Google
 // embedded wallet and an injected MetaMask both flow through here identically.
 export async function buildEvmAdapter(provider: unknown, address: string): Promise<PayerAdapter> {
   const { createViemAdapterFromProvider } = await import("@circle-fin/adapter-viem-v2");

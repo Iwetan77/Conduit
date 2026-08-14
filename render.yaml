@@ -33,10 +33,13 @@ services:
       - key: CONDUIT_APP_BASE_URL
         sync: false
 
-      # ── Optional: merchant login (both required, or neither) ───────────
-      - key: PRIVY_APP_ID
-        sync: false
-      - key: PRIVY_VERIFICATION_KEY
+      # ── Merchant login: Circle Wallets ─────────────────────────────────
+      # The API key is a server-side secret and never reaches the browser;
+      # the app calls /v1/auth/circle/* to mint device and user tokens.
+      # Optional in the same way PRIVY_APP_ID / PRIVY_VERIFICATION_KEY were
+      # before Phase 7 removed them: without it those routes report
+      # "not configured" and only sk_/pk_ key auth works.
+      - key: CIRCLE_API_KEY
         sync: false
 
       # ── Optional: cross-chain funding (signs only, holds no gas) ───────

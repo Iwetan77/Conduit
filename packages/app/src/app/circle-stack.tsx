@@ -19,7 +19,7 @@ import { useAccount, useConnect, useDisconnect } from "wagmi";
 import { CIRCLE_CONNECTOR_ID } from "@/lib/circle/connector";
 import { hasPendingResume, hasPersistedSession } from "@/lib/circle/browser";
 import { createAccountFromCircle, getSessionToken, setSessionToken } from "@/lib/conduit-api";
-import { PrivyGateContext } from "@/lib/privy-gate";
+import { WalletGateContext } from "@/lib/wallet-gate";
 import { clearCircleSession, currentSession, onCircleChange } from "@/lib/circle/browser";
 import {
   GOOGLE_LOGIN_ALREADY,
@@ -28,7 +28,7 @@ import {
   GOOGLE_LOGIN_FLAG,
   GOOGLE_LOGIN_STARTED,
   SIGN_OUT_EVENT,
-} from "@/lib/privy-gate";
+} from "@/lib/wallet-gate";
 
 export default function CircleStack() {
   const { connectors, connectAsync } = useConnect();
@@ -201,7 +201,7 @@ export default function CircleStack() {
 // Tested rather than timed, for the same reason: a timeout could only give up
 // and display the wrong account, which is the failure this exists to prevent.
 export function CircleWalletGate({ children }: { children: React.ReactNode }) {
-  const outer = useContext(PrivyGateContext);
+  const outer = useContext(WalletGateContext);
   const { connector } = useAccount();
   // Read once: both are one-shot module values, and re-reading after the
   // session is adopted would flip this back to "not settled".
@@ -213,5 +213,5 @@ export function CircleWalletGate({ children }: { children: React.ReactNode }) {
   const settled = !pendingAtLoad || connector?.id === CIRCLE_CONNECTOR_ID;
 
   const value = useMemo(() => ({ ...outer, walletSettled: settled }), [outer, settled]);
-  return <PrivyGateContext.Provider value={value}>{children}</PrivyGateContext.Provider>;
+  return <WalletGateContext.Provider value={value}>{children}</WalletGateContext.Provider>;
 }

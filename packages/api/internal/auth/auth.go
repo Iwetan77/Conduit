@@ -103,16 +103,19 @@ func isPkAllowed(method, path string) bool {
 	return false
 }
 
-// Middleware validates the Authorization: Bearer <key> header. The bearer
-// value is either one of this codebase's own sk_/pk_ API keys (looked up by
-// hash, as before) or a Privy access token (a JWT, verified against Privy's
-// static ES256 key) -- Privy is the human dashboard login layer on top of
-// the existing machine-key system, not a replacement for it (see
-// docs/-carried spec note in WHERE-I-STOPPED.md). privyVerifier is nil when
-// Privy isn't configured (opt-in, same graceful-degradation pattern as the
-// bridge feature) -- in that case only sk_/pk_ keys work, exactly as before
-// this phase.
-func Middleware(pool *pgxpool.Pool, privyVerifier *PrivyVerifier, circleVerifier *CircleVerifier) func(http.Handler) http.Handler {
+// Middleware validates the Authorization: Bearer <key> header. The bearer value
+// is either one of this codebase's own sk_/pk_ API keys (looked up by hash) or
+// a Conduit session token (cs_..., HMAC-verified locally). A Circle session
+// arrives separately, in X-Circle-User-Token.
+//
+// A third branch used to sit between them: a Privy access token, a JWT verified
+// against Privy's static ES256 key. It was removed in Phase 7 of the Circle
+// migration. Note what replaced it -- not "the Circle equivalent", but the
+// session token. Verifying a provider's JWT on every request put that provider
+// on the hot path of the whole API; a cs_ token is minted once at sign-in and
+// checked with a local HMAC, which is why there is deliberately no
+// "verify a Circle token on every request" branch here.
+func Middleware(pool *pgxpool.Pool, circleVerifier *CircleVerifier) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// A Circle session presents itself in its own header rather than as
@@ -142,8 +145,6 @@ func Middleware(pool *pgxpool.Pool, privyVerifier *PrivyVerifier, circleVerifier
 			// with no identity provider in the path.
 			if strings.HasPrefix(key, SessionTokenPrefix) {
 				principal, err = lookupSessionPrincipal(r.Context(), pool, key)
-			} else if privyVerifier != nil && looksLikePrivyToken(key) {
-				principal, err = lookupPrivyPrincipal(r.Context(), pool, privyVerifier, key)
 			} else {
 				principal, err = lookupKey(r.Context(), pool, key)
 			}
@@ -188,31 +189,11 @@ func finishAuth(
 	next.ServeHTTP(w, r.WithContext(ctx))
 }
 
-// KeyTypePrivy marks a Principal resolved from a Privy access token rather
-// than a stored sk_/pk_ key -- there is no api_keys row backing this
-// session, KeyID is always empty.
-const KeyTypePrivy KeyType = "privy"
-
-// ProviderPrivy is the auth_provider value for a Privy-issued identity. A
-// second provider gets its own constant rather than reusing this one: the
-// unique index is on (auth_provider, auth_subject), so the provider is half
-// the key and must never be guessed or defaulted.
-const ProviderPrivy = "privy"
-
-// lookupPrivyPrincipal verifies the Privy access token and resolves it to an
-// existing Conduit account. Returns an error (not a synthetic empty principal)
-// if no account exists yet for this user -- account creation for a brand-new
-// login goes through the dedicated bootstrap handler, which verifies the token
-// itself and creates the row, rather than this general-purpose middleware
-// silently creating under-specified accounts (a fresh account needs a real
-// name/settle currency/settle address, which aren't in the JWT).
-func lookupPrivyPrincipal(ctx context.Context, pool *pgxpool.Pool, verifier *PrivyVerifier, token string) (Principal, error) {
-	subject, err := verifier.Verify(token)
-	if err != nil {
-		return Principal{}, err
-	}
-	return lookupAuthPrincipal(ctx, pool, ProviderPrivy, subject)
-}
+// KeyTypePrivy and ProviderPrivy stood here, alongside lookupPrivyPrincipal.
+// Removed in Phase 7. ProviderPrivy is deliberately NOT kept as a legacy
+// constant: accounts.auth_provider can still hold 'privy' on old rows, but
+// nothing in this codebase should be able to resolve one, and leaving the
+// constant around is how that quietly comes back.
 
 // lookupAuthPrincipal resolves (provider, subject) to an account.
 //
@@ -231,7 +212,10 @@ func lookupAuthPrincipal(ctx context.Context, pool *pgxpool.Pool, provider, subj
 	if err != nil {
 		return Principal{}, fmt.Errorf("no account for %s user %s: %w", provider, subject, err)
 	}
-	return Principal{AccountID: accountID, KeyType: KeyTypePrivy, Livemode: livemode}, nil
+	// KeyType is the CALLER's to set -- it knows which provider it verified.
+	// This used to hard-code KeyTypePrivy and the Circle path overwrote it,
+	// which meant the default was wrong for every caller that forgot to.
+	return Principal{AccountID: accountID, Livemode: livemode}, nil
 }
 
 // lookupSessionPrincipal resolves a Conduit session token to its account.

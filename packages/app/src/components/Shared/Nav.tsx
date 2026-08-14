@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAccount, useDisconnect, useChainId, useSwitchChain } from "wagmi";
-import { usePrivyGate, requestSignOut } from "@/lib/privy-gate";
+import { useWalletGate, requestSignOut } from "@/lib/wallet-gate";
+import { CIRCLE_CONNECTOR_ID } from "@/lib/circle/connector";
 import { useEffect, useRef, useState } from "react";
 import { CURRENCIES, type Currency } from "@conduit/sdk/lite";
 import { Logo } from "./Logo";
@@ -38,10 +39,18 @@ function WalletMenu({ address }: { address: `0x${string}` }) {
   const [copied, setCopied] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const { disconnect } = useDisconnect();
-  const { mounted: privyMounted } = usePrivyGate();
-  // Privy owns the session when it is mounted; a wagmi-only disconnect
-  // leaves it authenticated with no connected account and no way back.
-  const signOut = () => (privyMounted ? requestSignOut() : disconnect());
+  const { connector } = useAccount();
+  const isCircleSession = connector?.id === CIRCLE_CONNECTOR_ID;
+  // Sign-out goes through the event, not a bare wagmi disconnect: that would
+  // leave the Circle session in localStorage, so isAuthorized() still says yes
+  // and the next page load signs the user straight back in. CircleStack does
+  // both halves. `disconnect` is kept for a plain injected wallet, which has no
+  // session of its own to clear.
+  //
+  // This used to branch on whether the Privy stack was mounted. It no longer
+  // can: Circle is always live, so the event is always the right answer for a
+  // Google session.
+  const signOut = () => (isCircleSession ? requestSignOut() : disconnect());
 
   // Balances come from the Conduit API's cached endpoint (one server-side
   // Multicall3 read shared by every visitor), not from this browser. Split
@@ -139,10 +148,12 @@ function WalletMenu({ address }: { address: `0x${string}` }) {
   );
 }
 
-// Shared connect UI — handles both provider stacks (plain wagmi connectors
-// vs Privy's connect modal once the Privy stack is mounted, which strips
-// wagmi's own connectors). Keeping one implementation prevents the nav and
-// page bodies from drifting apart again.
+// Shared connect UI. There used to be two provider stacks to handle here —
+// plain wagmi connectors, or Privy's own connect modal once its stack was
+// mounted, because @privy-io/wagmi stripped wagmi's connectors. With Privy
+// gone there is one config containing every connector including Circle's, so
+// this is a straight pass-through. Kept as a named component anyway: it is what
+// stops the nav and the page bodies drifting apart again.
 function ConnectButton() {
   return <WalletConnect />;
 }
@@ -158,7 +169,7 @@ export function Nav({ minimal = false }: { minimal?: boolean } = {}) {
   const { switchChain } = useSwitchChain();
   const [mounted, setMounted] = useState(false);
   useEffect(() => { setMounted(true); }, []);
-  const { walletSettled } = usePrivyGate();
+  const { walletSettled } = useWalletGate();
 
   const isWrongNetwork = mounted && walletSettled && isConnected && chainId !== arcTestnet.id;
 
@@ -189,7 +200,7 @@ export function Nav({ minimal = false }: { minimal?: boolean } = {}) {
         </nav>
 
         <div className="flex-1 flex items-center justify-end">
-          {/* walletSettled: until Privy has booted, useAccount() reports
+          {/* walletSettled: until the Circle session is adopted, useAccount() reports
               whichever wallet an extension auto-connected, which is not
               necessarily the one this user signed in with. Showing it anyway
               flashed a MetaMask address — copyable, with a balance beside it —

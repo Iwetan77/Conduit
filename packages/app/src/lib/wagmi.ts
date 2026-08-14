@@ -14,13 +14,15 @@ const circleAppId = process.env.NEXT_PUBLIC_CIRCLE_APP_ID;
 const googleClientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
 const conduitApiBase = process.env.NEXT_PUBLIC_CONDUIT_API_URL ?? "http://localhost:8080";
 
-// Shared by the plain config below AND the Privy-synced config built inside
-// the lazily-loaded privy-stack (do NOT build the Privy config here — a
-// module-level @privy-io/wagmi import would drag all of @privy-io into the
-// main bundle and undo the lazy split).
-// Where Google returns after a Circle sign-in. Exported so the spike pages and
-// the eventual app callback route agree on one value — a mismatch here fails
-// as redirect_uri_mismatch at Google, well away from anything that mentions it.
+// These params were shared with a second, Privy-synced config built inside the
+// lazily-loaded privy-stack, because @privy-io/wagmi's createConfig filtered the
+// connector list down to mock connectors only — the two could never be one
+// config. With Privy gone in Phase 7 there is exactly one config and every
+// connector, Circle's included, lives in it.
+//
+// CIRCLE_CALLBACK_PATH is where Google returns after a Circle sign-in. Exported
+// so every caller agrees on one value — a mismatch here fails as
+// redirect_uri_mismatch at Google, well away from anything that mentions it.
 export const CIRCLE_CALLBACK_PATH = "/auth/circle/callback";
 
 export const wagmiConfigParams = {
@@ -51,5 +53,5 @@ export const wagmiConfigParams = {
   },
 } as const;
 
-// Plain config: used whenever the Privy stack isn't mounted.
+// The app's one and only wagmi config.
 export const wagmiConfig = createConfig(wagmiConfigParams);

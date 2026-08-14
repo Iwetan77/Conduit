@@ -18,14 +18,20 @@ USDC on Solana → [Circle Gateway] → USDC on Arc → [FX] → EURC     (cross
 
 Conduit is not one app. It's a settlement engine (`packages/api`) with two separate front-end surfaces that never share auth or state:
 
-- **Merchant** — authenticated, sticky. A business logs in with email (via **Privy**), sets the currency it wants to receive once, and creates payment links and QR codes with real lifecycle policy (fixed/open amounts, expiry, single-use vs reusable, void). This is the dashboard (`/dashboard/*`).
+- **Merchant** — authenticated, sticky. A business signs in with Google (via **Circle Wallets**, which provisions a non-custodial MPC wallet), sets the currency it wants to receive once, and creates payment links and QR codes with real lifecycle policy (fixed/open amounts, expiry, single-use vs reusable, void). This is the dashboard (`/dashboard/*`).
 - **Payer** — public, unauthenticated, the surface most people touch. Someone opens a link or scans a QR, sees the merchant's business name (not a bare hex address), and pays. No account, no jargon, mobile-first. This is `/pay/[id]`.
 
-The dashboard is wrapped in Privy; the payer surface is deliberately **never** wrapped in Privy or any login. Keeping those two isolated is a hard product invariant.
+The dashboard requires a sign-in; the payer surface is deliberately **never** behind one. Keeping those two isolated is a hard product invariant.
 
-### Merchant auth (Privy)
+### Merchant auth (Circle Wallets)
 
-Human dashboard login is email OTP (or Google) through Privy embedded wallets. Server-side, the API verifies Privy's ES256 access-token JWTs against a static public key from the Privy dashboard. The existing `sk_`/`pk_` API-key system stays as the machine/programmatic-access path — Privy is layered on top for human login, not a replacement. **Privy requires HTTPS in production**; local development over `http://localhost` is the only exception Privy allows.
+Human dashboard login is Google, through Circle **user-controlled** wallets — MPC, non-custodial, so Conduit never holds a key. Circle is exposed to the app as an EIP-1193 provider behind a wagmi connector (`packages/app/src/lib/circle/`), which is why every `useAccount()` call site and all eight signing paths work against it unchanged.
+
+Server-side, the Circle user token is verified **once, at login**, and exchanged for a Conduit session token (`cs_`, HMAC-signed, 12h). Every subsequent request carries that instead of the provider's credential — re-verifying a provider token per request costs a network call to that provider, measured at 281ms to 7.6s on a polling dashboard.
+
+The existing `sk_`/`pk_` API-key system stays as the machine/programmatic-access path; Google login is layered on top for humans, not a replacement.
+
+This replaced Privy (removed 2026-08-14). Privy's free tier caps at 150 users and the next tier is $200/month; Circle's first 1,000 monthly active wallets are free.
 
 ## Settlement paths
 
@@ -86,9 +92,9 @@ conduit/
 ├── packages/
 │   ├── contracts/   # Solidity (Foundry) — ConduitRouter, AtomicSettler, StableFXAdapter, DeclarationRegistry
 │   ├── api/         # Go — the settlement engine: accounts, payment links, settlement intents,
-│   │                #   StableFX FX, Circle Gateway funding, Privy auth, webhooks. Postgres.
+│   │                #   StableFX FX, Circle Gateway funding, Circle auth, webhooks. Postgres.
 │   ├── sdk/         # TypeScript — @conduit/sdk (bigint amounts, never number)
-│   ├── app/         # Next.js — merchant dashboard (Privy) + payer checkout (/pay). app.conduit.xyz
+│   ├── app/         # Next.js — merchant dashboard (Circle Wallets) + payer checkout (/pay). app.conduit.xyz
 │   ├── docs/        # Next.js — renders repo-root docs/*.md as a site
 │   └── marketing/   # Next.js static — conduit.xyz
 ├── docs/            # Source-of-truth markdown (quickstart, errors, webhooks, currencies, fx, ubk, …)
@@ -149,7 +155,7 @@ pnpm install
 cd packages/api
 # Requires: DATABASE_URL (Postgres), STABLEFX_API_KEY.
 # Optional: ARC_RELAYER_KEY (enables cross-chain funding),
-#           PRIVY_APP_ID + PRIVY_VERIFICATION_KEY (enables merchant Privy login).
+#           CIRCLE_API_KEY (enables merchant Google login via Circle Wallets).
 go run ./cmd/api
 # Or, for a self-contained embedded Postgres (local dev / e2e):
 go run ./cmd/devserver
@@ -161,7 +167,7 @@ go run ./cmd/devserver
 cd packages/app
 cp .env.example .env.local
 # Set NEXT_PUBLIC_CONDUIT_API_URL, the deployed contract addresses,
-# and NEXT_PUBLIC_PRIVY_APP_ID (must match the API's PRIVY_APP_ID).
+# and NEXT_PUBLIC_CIRCLE_APP_ID + NEXT_PUBLIC_GOOGLE_CLIENT_ID (Google sign-in).
 pnpm dev
 ```
 
@@ -169,7 +175,7 @@ pnpm dev
 
 | Area | Endpoints |
 |---|---|
-| Accounts | `POST /v1/accounts`, `POST /v1/accounts/privy`, `GET /v1/accounts/me`, `PATCH /v1/accounts/:id` |
+| Accounts | `POST /v1/accounts`, `POST /v1/accounts/circle`, `GET /v1/accounts/me`, `PATCH /v1/accounts/:id` |
 | Payment links | `POST/GET /v1/payment_links`, `GET /v1/payment_links/:id`, `POST /v1/payment_links/:id/void`, `GET /v1/payment_links/:id/public`, `POST /v1/payment_links/:id/pay` |
 | Settlement intents | `POST/GET /v1/settlement_intents`, `GET /v1/settlement_intents/:id`, `.../quote`, `.../prepare`, `.../confirm`, `.../public` |
 | Cross-chain funding | `POST /v1/settlement_intents/:id/bridge/initiate`, `GET .../bridge/status`, `GET .../bridge/balance` |

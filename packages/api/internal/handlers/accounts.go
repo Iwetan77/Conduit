@@ -14,7 +14,6 @@ import (
 
 type Accounts struct {
 	Pool           *pgxpool.Pool
-	PrivyVerifier  *auth.PrivyVerifier
 	CircleVerifier *auth.CircleVerifier
 }
 
@@ -87,13 +86,17 @@ func (h *Accounts) Create(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-type createFromPrivyRequest struct {
+// Named for the job, not the provider. These were createFromPrivyRequest and
+// privyAccountResponse; the shapes never had anything to do with Privy, which
+// is why the Circle bootstrap reused them verbatim and why the names outlived
+// their accuracy by a whole migration.
+type bootstrapAccountRequest struct {
 	Name           string `json:"name"`
 	SettleCurrency string `json:"settle_currency"`
 	SettleAddress  string `json:"settle_address"` // defaults to LoginWallet if empty
-	LoginWallet    string `json:"login_wallet"`   // the payer's Privy embedded wallet address
+	LoginWallet    string `json:"login_wallet"`   // the signed-in user's wallet address
 }
-type privyAccountResponse struct {
+type bootstrapAccountResponse struct {
 	// SessionToken is Conduit's own dashboard session, issued here so the
 	// identity provider is not on the hot path. Without it every subsequent
 	// request re-verifies with the provider -- for Circle that is a network
@@ -108,25 +111,10 @@ type privyAccountResponse struct {
 	Livemode       bool    `json:"livemode"`
 }
 
-// CreateFromPrivy is POST /v1/accounts/privy -- the dashboard's login
-// bootstrap. Verifies the Privy access token itself (this route is NOT
-// behind auth.Middleware, since a brand-new Privy user has no account yet
-// for the middleware to resolve against). Idempotent: a merchant who
-// already onboarded just gets their existing account back, not a
-// duplicate -- the frontend calls this on every login, not only the first.
-func (h *Accounts) CreateFromPrivy(w http.ResponseWriter, r *http.Request) {
-	authHeader := r.Header.Get("Authorization")
-	if !strings.HasPrefix(authHeader, "Bearer ") {
-		writeErr(w, apierrors.E(apierrors.CodeUnauthorized, ""))
-		return
-	}
-	privyUserID, err := h.PrivyVerifier.Verify(strings.TrimPrefix(authHeader, "Bearer "))
-	if err != nil {
-		writeErr(w, apierrors.E(apierrors.CodeUnauthorized, ""))
-		return
-	}
-	h.bootstrapAccount(w, r, auth.ProviderPrivy, privyUserID)
-}
+// CreateFromPrivy stood here, serving POST /v1/accounts/privy. Removed in
+// Phase 7 along with the route and PrivyVerifier. CreateFromCircle below is
+// the like-for-like replacement -- same bootstrapAccount, same idempotency,
+// different credential.
 
 // CreateFromCircle is POST /v1/accounts/circle -- the same bootstrap for a
 // Circle login. The Circle user token comes in its own header rather than as a
@@ -170,7 +158,7 @@ func (h *Accounts) bootstrapAccount(w http.ResponseWriter, r *http.Request, prov
 	ctx := r.Context()
 
 	// Already onboarded -- return the existing account, don't re-create.
-	var existing privyAccountResponse
+	var existing bootstrapAccountResponse
 	var loginWallet *string
 	err := h.Pool.QueryRow(ctx,
 		`SELECT id, name, logo_url, settle_currency, settle_address, login_wallet, livemode
@@ -191,7 +179,7 @@ func (h *Accounts) bootstrapAccount(w http.ResponseWriter, r *http.Request, prov
 	}
 
 	// First login -- onboard.
-	var req createFromPrivyRequest
+	var req bootstrapAccountRequest
 	if decodeErr := json.NewDecoder(r.Body).Decode(&req); decodeErr != nil {
 		writeErr(w, apierrors.E(apierrors.CodeInvalidRequest, "body"))
 		return
@@ -206,25 +194,22 @@ func (h *Accounts) bootstrapAccount(w http.ResponseWriter, r *http.Request, prov
 	}
 
 	accountID := models.NewID("acct")
-	// privy_user_id is written only for a Privy identity. Writing a Circle
-	// subject into a column named privy_user_id would make the rollback path
-	// for migration 0014 -- "fall back to privy_user_id" -- resolve Circle
-	// users as Privy ones.
-	var privyUserID *string
-	if provider == auth.ProviderPrivy {
-		privyUserID = &subject
-	}
+	// privy_user_id is not written at all any more -- nothing can produce a
+	// Privy identity. The column still exists (old rows carry it, and migration
+	// 0014's rollback reads it), so new rows leave it NULL, which is exactly
+	// what the personal-account predicate in settlement_intents.go expects:
+	// "no identity" means BOTH privy_user_id and auth_subject are NULL.
 	_, err = h.Pool.Exec(ctx,
-		`INSERT INTO accounts (id, name, settle_currency, settle_address, privy_user_id, auth_provider, auth_subject, login_wallet, livemode)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,false)`,
-		accountID, req.Name, req.SettleCurrency, settleAddress, privyUserID, provider, subject, req.LoginWallet,
+		`INSERT INTO accounts (id, name, settle_currency, settle_address, auth_provider, auth_subject, login_wallet, livemode)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,false)`,
+		accountID, req.Name, req.SettleCurrency, settleAddress, provider, subject, req.LoginWallet,
 	)
 	if err != nil {
 		writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, privyAccountResponse{
+	writeJSON(w, http.StatusCreated, bootstrapAccountResponse{
 		SessionToken: auth.NewSessionToken(accountID),
 		ID:           accountID, Name: req.Name, SettleCurrency: req.SettleCurrency,
 		SettleAddress: settleAddress, LoginWallet: req.LoginWallet, Livemode: false,

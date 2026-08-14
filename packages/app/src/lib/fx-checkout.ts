@@ -137,7 +137,7 @@ async function ensurePermit2Allowance(
   const tx = await erc20.approve(permit2, MAX_UINT256);
 
   // Poll the read provider for the receipt rather than the wallet's own
-  // transport: the Privy embedded wallet broadcasts and polls through Arc's
+  // transport: an embedded wallet broadcasts and polls through Arc's
   // rate-limited public RPC, and arcReadProvider() is the batching-disabled,
   // static-network client tuned to survive it. Circle's funding will revert if
   // this isn't mined, so we must actually wait -- up to ~40s, then let the
@@ -226,7 +226,7 @@ export async function runFxCheckout(
     // What a wallet reports as its account and what it signs with can differ.
     // Circle recovers the signer and rejects the trade if it doesn't match the
     // address we registered (3015) -- which is why external wallets settled
-    // and the Privy embedded wallet never did. Recover locally; if it isn't
+    // and an embedded wallet never does. Recover locally; if it isn't
     // who we registered, re-quote against the real signer and go again.
     const signedBy = await recoverTypedDataSigner(quote.typed_data, quoteSignature);
     if (signedBy && signedBy.toLowerCase() !== payerAddress.toLowerCase() && attempt < 2) {

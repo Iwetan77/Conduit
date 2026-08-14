@@ -121,7 +121,7 @@ navigates it once the charge exists. This matters — a `window.open` that runs
 **Desktop opens a tab; mobile redirects in place.** `conduit.js` picks
 automatically, and you don't configure anything beyond `return_url`:
 
-- **Desktop** → a new tab. The checkout needs a real wallet (Google/Privy
+- **Desktop** → a new tab. The checkout needs a real wallet (Google
   sign-in, browser extensions, cross-chain signing). A cross-origin iframe
   blocks all of those, and a chrome-less popup window is nearly as bad —
   extensions route their approval UI differently there, so Solflare/Phantom

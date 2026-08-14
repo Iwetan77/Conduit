@@ -7,6 +7,14 @@ import (
 	"github.com/kzn-labs/conduit/api/internal/db"
 )
 
+// Privy was removed from this codebase in Phase 7 of the Circle migration, but
+// these tests stay. They cover the DATA, not the provider: accounts.auth_provider
+// can still read 'privy' on rows created before the cutover, migration 0014's
+// backfill is what put it there, and the lookup must keep resolving those rows
+// by (auth_provider, auth_subject) rather than by subject alone. Deleting these
+// with the Privy code would drop the only proof that existing merchants survive
+// the migration.
+//
 // TestAuthIdentityBackfill: migration 0014 must move every existing Privy
 // merchant onto the provider-agnostic columns without touching anything else.
 //

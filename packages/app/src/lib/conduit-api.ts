@@ -6,11 +6,16 @@
 const API_BASE = process.env.NEXT_PUBLIC_CONDUIT_API_URL ?? "http://localhost:8080";
 const STORAGE_KEY = "conduit_dashboard_session_token";
 
-// Bearer token used for dashboard requests. Holds either a Privy access
-// token (refreshed periodically by the dashboard layout while a merchant is
-// logged in via Privy -- see DashboardLayout) or, still, a pasted sk_/pk_
-// key for the programmatic-access path -- the API's auth.Middleware accepts
-// both, so this file doesn't need to know which kind it's holding.
+// Bearer token used for dashboard requests. Holds either a Conduit session
+// token (cs_..., minted by the API at sign-in and stored by circle-stack) or a
+// pasted sk_/pk_ key for the programmatic-access path -- the API's
+// auth.Middleware accepts both, so this file doesn't need to know which kind
+// it's holding.
+//
+// It used to hold a Privy access token, refreshed periodically by the dashboard
+// layout. That is what the Conduit session token replaced: verifying a
+// provider's JWT meant a network call to that provider on every request (281ms
+// to 7.6s measured), whereas a cs_ token is HMAC-verified locally.
 export function getSessionToken(): string | null {
   if (typeof window === "undefined") return null;
   return window.localStorage.getItem(STORAGE_KEY);
@@ -27,7 +32,8 @@ export function clearSessionToken(): void {
 
 // A Circle session is NOT a bearer token, and must not be stored as one.
 //
-// The API resolves sk_/pk_ keys and Privy JWTs from the Authorization header.
+// The API resolves sk_/pk_ keys and Conduit session tokens from the
+// Authorization header.
 // Circle's user token is a credential issued by Circle to the browser; putting
 // it in that same header would hand it to the code path that looks up Conduit
 // keys, where at best it fails confusingly and at worst it is compared against
@@ -185,7 +191,7 @@ export function getStorefrontLink(accountId: string) {
   return request<PaymentLink>(`/v1/accounts/${accountId}/storefront_link`, { method: "POST" });
 }
 
-export interface PrivyAccount {
+export interface DashboardAccount {
   // Conduit's own dashboard session. Present on both login bootstraps; store
   // it and use it for every subsequent call.
   session_token?: string;
@@ -197,27 +203,21 @@ export interface PrivyAccount {
   livemode: boolean;
 }
 
-// Idempotent Privy login bootstrap -- called on every successful Privy
-// login, not only the first. accessToken authenticates the request itself
-// (this route isn't behind the usual session-token plumbing, since a
-// brand-new Privy user has no account yet). On first login the body's
-// name/settle_currency/login_wallet are required by the server; on
-// subsequent logins the body is ignored and the existing account returned.
-export function createAccountFromPrivy(
-  accessToken: string,
-  body: { name?: string; settle_currency?: string; settle_address?: string; login_wallet: string }
-) {
-  return request<PrivyAccount>("/v1/accounts/privy", { method: "POST", body, apiKey: accessToken });
-}
-
-// The same idempotent bootstrap for a Circle login. The Circle user token
-// authenticates the call in its own header; the server verifies it with Circle
-// before creating or returning the account.
+// Idempotent login bootstrap -- called on every successful sign-in, not only
+// the first. The Circle user token authenticates the call in its own header
+// (this route isn't behind the usual session-token plumbing, since a brand-new
+// user has no account yet); the server verifies it with Circle before creating
+// or returning the account. On first login the body's
+// name/settle_currency/login_wallet are required by the server; on subsequent
+// logins the body is ignored and the existing account returned.
+//
+// createAccountFromPrivy stood beside this and hit /v1/accounts/privy with a
+// Privy JWT. Removed in Phase 7 along with that route.
 export function createAccountFromCircle(
   circleUserToken: string,
   body: { name?: string; settle_currency?: string; settle_address?: string; login_wallet: string }
 ) {
-  return request<PrivyAccount>("/v1/accounts/circle", {
+  return request<DashboardAccount>("/v1/accounts/circle", {
     method: "POST",
     body,
     circleToken: circleUserToken,

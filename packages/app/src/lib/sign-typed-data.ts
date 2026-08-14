@@ -13,7 +13,8 @@ export interface TypedDataPayload {
 }
 
 // `wallet` is the connected wallet's EIP-1193 provider (see lib/wallet-provider).
-// It must be passed in rather than read off window.ethereum: Privy embedded
+// It must be passed in rather than read off window.ethereum: an embedded
+// wallet (Circle's, and Privy's before it)
 // wallets never inject there, and with several extensions installed the
 // injected one may not be the account the payer is actually paying from.
 export async function signTypedDataWithWallet(
@@ -48,7 +49,7 @@ export async function signTypedDataWithWallet(
 // Circle recovers the signer itself and rejects the trade if it doesn't match
 // the address we registered (error 3015). What a provider reports as its
 // account and what it ultimately signs with are not guaranteed to agree —
-// observed with the Privy embedded wallet, where external wallets settled
+// observed with an embedded wallet, where external wallets settled
 // fine and the embedded one failed 3015 every time. Recovering locally makes
 // the signer knowable instead of assumed, so the address we register can be
 // the one Circle will compute.

@@ -205,19 +205,30 @@ per-step verification provenance): `audit/PHASE8-COHERENCE.md`.
   layout (16-byte `0xff…00` domain prefix + magic-tagged fields — see
   `docs/ubk-capability.md`), not on-chain transactions.
 
-## Privy auth model as built
+## Auth model as built
 
-- Login: Privy modal, email OTP or Google, `@privy-io/react-auth` 3.36.0. Embedded
-  EVM wallet auto-created on first login (`ethereum.createOnLogin`, with a
-  `useCreateWallet()` fallback for the creation race).
-- Server: ES256 access-token JWTs verified against a **static PEM public key** from the
-  Privy dashboard (not JWKS), `golang-jwt/jwt/v5`.
-- **Login wallet vs settle address are separate fields.** `accounts.login_wallet` is the
-  Privy embedded wallet; `settle_address` *defaults* to it at account creation but is
-  independently editable (`PATCH /v1/accounts/:id`) — a business can settle to a
-  treasury address it never logs in with.
-- `sk_`/`pk_` API keys remain the machine path; Privy is layered for humans, not a
-  replacement.
+Privy was replaced by Circle Wallets. The gates above (GATE 2, GATE 8) were run
+against Privy and are left as the historical record of when that surface was
+built; what runs now is:
+
+- Login: Google, via Circle user-controlled wallets (`@circle-fin/w3s-pw-web-sdk`).
+  Circle is exposed to the app as an **EIP-1193 provider behind a wagmi
+  connector** (`lib/circle/`), so every `useAccount()` call site and every
+  signing path reaches it through code that did not change.
+- Wallets are provisioned **per blockchain** at first login (Arc plus the six
+  Circle-supported source chains), which is what makes a cross-chain payment
+  possible from a Google sign-in.
+- Server: the Circle user token is verified **once, at login**, and exchanged
+  for a Conduit session token (`cs_`, HMAC, 12h). Requests carry that, not the
+  provider's credential — verifying a provider token per request was measured at
+  281ms–7.6s and is the reason the session token exists.
+- **Login wallet vs settle address are separate fields.** `accounts.login_wallet`
+  is the Circle wallet on Arc; `settle_address` *defaults* to it at account
+  creation but is independently editable (`PATCH /v1/accounts/:id`) — a business
+  can settle to a treasury address it never logs in with. Unchanged from the
+  Privy era.
+- `sk_`/`pk_` API keys remain the machine path; Google login is layered for
+  humans, not a replacement.
 
 ## Lifecycle enforcement — what the server actually rejects
 
@@ -269,7 +280,8 @@ end-to-end (`*big.Int` / `NUMERIC(78,0)`); no floats anywhere in money paths.
    one pool; embedded-postgres is dev-only, but there's no horizontal-scale story
    (no leader election for the reconciler; two instances would double-poll Circle,
    though DB state transitions stay safe because they're conditional UPDATEs).
-4. **Front-end bundle** — `/pay` first load is 543 kB (Privy/wagmi/web3icons); slow
+4. **Front-end bundle** — `/pay` first load was 543 kB with Privy; re-measure now that
+   @privy-io/* is gone (wagmi/web3icons remain); slow
    networks feel it. Known, owner-deferred performance work.
 
 ## What a hostile payer could do that isn't prevented

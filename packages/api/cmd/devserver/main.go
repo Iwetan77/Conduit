@@ -61,8 +61,6 @@ func main() {
 		SolanaWS:             envOr("SOLANA_WS", "wss://api.devnet.solana.com"),
 		ArcRelayerKey:        loadEnvFileKey("ARC_RELAYER_KEY"),
 		BridgeStaleAfter:     staleAfter,
-		PrivyAppID:           os.Getenv("PRIVY_APP_ID"),
-		PrivyVerificationKey: os.Getenv("PRIVY_VERIFICATION_KEY"),
 		CircleAPIKey:         loadCircleKey(),
 		CircleBaseURL:        os.Getenv("CIRCLE_BASE_URL"),
 	}

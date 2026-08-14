@@ -44,12 +44,6 @@ type Config struct {
 	ArcRelayerKey    string
 	BridgeStaleAfter time.Duration
 
-	// Privy merchant auth. Both optional -- if either is empty, Privy login
-	// is disabled and the dashboard falls back to sk_/pk_ key auth only
-	// (same opt-in pattern as the bridge feature above).
-	PrivyAppID           string
-	PrivyVerificationKey string // ES256 public key, PEM
-
 	// Circle Wallets. Optional on the same opt-in pattern: with no API key
 	// the /auth/circle routes report "not configured" rather than failing
 	// every call, so a deployment without it behaves exactly as before.
@@ -72,18 +66,9 @@ func New(cfg Config) http.Handler {
 	stableFX := fx.NewStableFXProvider(cfg.StableFXBase, cfg.StableFXKey)
 	dispatcher := webhooks.NewDispatcher(cfg.Pool)
 
-	var privyVerifier *auth.PrivyVerifier
-	if cfg.PrivyAppID != "" && cfg.PrivyVerificationKey != "" {
-		var err error
-		privyVerifier, err = auth.NewPrivyVerifier(cfg.PrivyAppID, cfg.PrivyVerificationKey)
-		if err != nil {
-			log.Printf("auth: Privy login disabled: %v", err)
-		}
-	}
-
 	circleClient := circle.New(cfg.CircleBaseURL, cfg.CircleAPIKey)
 	circleVerifier := auth.NewCircleVerifier(circleClient)
-	accountsH := &handlers.Accounts{Pool: cfg.Pool, PrivyVerifier: privyVerifier, CircleVerifier: circleVerifier}
+	accountsH := &handlers.Accounts{Pool: cfg.Pool, CircleVerifier: circleVerifier}
 	apiKeysH := &handlers.ApiKeys{Pool: cfg.Pool}
 	circleAuthH := &handlers.CircleAuth{
 		Client: circleClient,
@@ -231,33 +216,26 @@ func New(cfg Config) http.Handler {
 		// already-signed transaction. See handlers.RPCProxy.
 		r.Post("/rpc", rpcProxyH.Handle)
 		r.Post("/accounts", accountsH.Create)
-		// Privy-authenticated account bootstrap: verifies the bearer token
-		// itself (not gated by auth.Middleware, since a brand-new Privy user
-		// has no account yet for the middleware to resolve) and upserts by
-		// privy_user_id. Registered only when Privy is configured.
-		if privyVerifier != nil {
-			r.Post("/accounts/privy", accountsH.CreateFromPrivy)
-		}
-		// Registered unconditionally, and NOT inside the Privy block above.
-		// Nesting it there would mean the replacement for Privy exists only
-		// where Privy is configured -- so it would 404 on exactly the
-		// deployments that have finished migrating. The handler answers
-		// "not configured" itself when there is no Circle key, which is the
-		// honest response and reaches the caller as a 404 rather than a 405
-		// from a route that was never registered.
+		// Login bootstrap: verifies the credential itself (not gated by
+		// auth.Middleware, since a brand-new user has no account yet for the
+		// middleware to resolve) and upserts by (auth_provider, auth_subject).
+		//
+		// Registered unconditionally, never behind an "is the provider
+		// configured" check. /accounts/privy used to be, and when this route
+		// was first added it was nested in that same block by mistake -- so the
+		// replacement for Privy existed only where Privy was configured, and
+		// 404'd on exactly the deployments that had finished migrating. The
+		// handler answers "not configured" itself when there is no Circle key.
 		r.Post("/accounts/circle", accountsH.CreateFromCircle)
 
 		// Circle Wallets: the browser cannot hold the Circle API key, so device
 		// tokens and challenge ids are minted here. Unauthenticated for the same
-		// reason /accounts/privy is -- the identity being established is the
+		// reason /accounts/circle is -- the identity being established is the
 		// point of the call.
 		//
-		// Registered unconditionally, NOT gated on a key being present. These
-		// were briefly nested in the Privy block above, which meant the
-		// replacement for Privy only existed when Privy was configured -- they
-		// 404'd on any deployment that had moved off it, which is every
-		// deployment this is being built for. The handler reports "not
-		// configured" on its own when there is no Circle key.
+		// Registered unconditionally, NOT gated on a key being present. The
+		// handler reports "not configured" on its own when there is no Circle
+		// key.
 		r.Post("/auth/circle/device", circleAuthH.StartLogin)
 		r.Post("/auth/circle/initialize", circleAuthH.Initialize)
 		r.Get("/auth/circle/wallets", circleAuthH.Wallets)
@@ -327,7 +305,7 @@ func New(cfg Config) http.Handler {
 		}
 
 		r.Group(func(r chi.Router) {
-			r.Use(auth.Middleware(cfg.Pool, privyVerifier, circleVerifier))
+			r.Use(auth.Middleware(cfg.Pool, circleVerifier))
 			r.Use(idempotency.Middleware(cfg.Pool))
 
 			r.Get("/accounts", accountsH.List)

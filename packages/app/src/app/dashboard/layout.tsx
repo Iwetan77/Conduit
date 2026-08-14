@@ -3,16 +3,13 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { usePrivy, useLogin, useCreateWallet } from "@privy-io/react-auth";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAccount, useConnect, useDisconnect } from "wagmi";
 import {
   clearSessionToken,
   createAccountFromCircle,
-  createAccountFromPrivy,
   setSessionToken,
 } from "@/lib/conduit-api";
-import { CIRCLE_AUTH } from "@/lib/auth-provider";
 import { CIRCLE_CONNECTOR_ID } from "@/lib/circle/connector";
 import { clearCircleSession, currentSession } from "@/lib/circle/browser";
 import { SETTLE_CURRENCIES, settleCurrencyLabel } from "@/lib/currencies";
@@ -88,138 +85,17 @@ function MerchantIdentity() {
   );
 }
 
-// Opens Privy's own login modal (configured with loginMethods: ['email',
-// 'google'] in the root Providers) rather than a custom in-page form --
-// this is what actually gives merchants a choice between Google (skips the
-// OTP step entirely) and email OTP in one place, themed dark/green via the
-// same `appearance` config. Account bootstrap happens separately in
-// AccountGate once `authenticated` flips true.
-function LoginGate() {
-  const { login } = useLogin();
 
-  return (
-    <div className="min-h-screen text-ink flex items-center justify-center p-6">
-      <div className="w-full max-w-md space-y-8 text-center">
-        <div>
-          <h1 className="font-display text-3xl font-bold">Conduit Dashboard</h1>
-          <p className="text-ink-dim text-sm mt-1">Sign in to continue.</p>
-        </div>
-        <button
-          onClick={() => login()}
-          className="w-full bg-signal text-signal-ink font-medium py-2 text-sm"
-        >
-          Sign in
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// Runs once Privy reports `authenticated`: resolves the Conduit account for
-// this Privy user (idempotent -- existing merchants just get their account
-// back). Falls back to an inline onboarding form only when the API reports
-// no account exists yet for this Privy user (first-ever login).
-function AccountGate({ onReady }: { onReady: () => void }) {
-  const { user, getAccessToken } = usePrivy();
-  const { createWallet } = useCreateWallet();
-  const [needsOnboarding, setNeedsOnboarding] = useState(false);
-  const [name, setName] = useState("");
-  const [settleCurrency, setSettleCurrency] = useState("EUR");
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-  const attempted = useRef(false);
-
-  // The embedded wallet from `embeddedWallets: { ethereum: { createOnLogin:
-  // 'users-without-wallets' } }` isn't always present on `user` the instant
-  // `authenticated` flips true -- creation can still be in flight. Try
-  // creating one explicitly; if it already exists, createWallet() rejects
-  // and the address is already on `user.wallet` by then.
-  const ensureLoginWallet = async (): Promise<string> => {
-    if (user?.wallet?.address) return user.wallet.address;
-    try {
-      const wallet = await createWallet();
-      return wallet.address;
-    } catch {
-      if (user?.wallet?.address) return user.wallet.address;
-      throw new Error("No embedded wallet on this Privy user yet");
-    }
-  };
-
-  const bootstrap = async (extra?: { name: string; settle_currency: string }) => {
-    const token = await getAccessToken();
-    if (!token) throw new Error("No Privy access token");
-    const loginWallet = await ensureLoginWallet();
-    await createAccountFromPrivy(token, { login_wallet: loginWallet, ...extra });
-    setSessionToken(token);
-  };
-
-  useEffect(() => {
-    if (attempted.current) return;
-    attempted.current = true;
-    (async () => {
-      try {
-        await bootstrap();
-        onReady();
-      } catch {
-        setNeedsOnboarding(true);
-      }
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const handleOnboard = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError("");
-    setBusy(true);
-    try {
-      await bootstrap({ name, settle_currency: settleCurrency });
-      onReady();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create account");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  if (!needsOnboarding) return null;
-
-  return (
-    <div className="min-h-screen text-ink flex items-center justify-center p-6">
-      <div className="w-full max-w-md space-y-8">
-        <div>
-          <h1 className="font-display text-3xl font-bold">Conduit Dashboard</h1>
-          <p className="text-ink-dim text-sm mt-1">First time here — set up your account.</p>
-        </div>
-        <form onSubmit={handleOnboard} className="space-y-3 border border-border p-4">
-          <input
-            className="w-full bg-surface border border-border px-3 py-2 text-sm"
-            placeholder="Business name"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            required
-          />
-          <select
-            className="w-full bg-surface border border-border px-3 py-2 text-sm"
-            value={settleCurrency}
-            onChange={(e) => setSettleCurrency(e.target.value)}
-          >
-            {SETTLE_CURRENCIES.map((c) => (
-              <option key={c} value={c}>{settleCurrencyLabel(c)}</option>
-            ))}
-          </select>
-          <button
-            type="submit"
-            disabled={busy}
-            className="w-full bg-signal text-signal-ink font-medium py-2 text-sm disabled:opacity-50"
-          >
-            {busy ? "Creating..." : "Create account"}
-          </button>
-        </form>
-        {error && <p className="text-danger text-sm">{error}</p>}
-      </div>
-    </div>
-  );
-}
+// LoginGate and AccountGate lived here and were Privy-only. Both are gone with
+// Privy; CircleLoginGate and CircleOnboarding below are their replacements.
+//
+// Worth recording what AccountGate had to do that the Circle path does not.
+// Privy's embedded wallet was not reliably present on `user` the instant
+// `authenticated` flipped true -- creation could still be in flight -- so it
+// carried an ensureLoginWallet() that called createWallet() and swallowed the
+// rejection that meant "one already exists". A Circle session cannot exist
+// without its wallets: restoreSession() resolves them before the session is
+// published, so `address` is always real by the time anything reads it.
 
 // The dashboard chrome, with no identity provider in it.
 //
@@ -355,65 +231,18 @@ function DashboardChrome({
   );
 }
 
-// Privy identity. Unchanged behaviour; it just renders the shared chrome now.
-function PrivyDashboard({ children }: { children: React.ReactNode }) {
-  const { ready, authenticated, logout, getAccessToken } = usePrivy();
-  const queryClient = useQueryClient();
-  const [accountReady, setAccountReady] = useState(false);
-  const refreshing = useRef(false);
-
-  // Keep the stored bearer token fresh with Privy's own (short-lived,
-  // auto-rotated) access token for as long as the merchant stays on a
-  // dashboard page -- every existing API call in this app reads it via
-  // getSessionToken(), so this is the only place that needs to know Privy
-  // issues the token.
-  useEffect(() => {
-    if (!authenticated) return;
-    const refresh = async () => {
-      if (refreshing.current) return;
-      refreshing.current = true;
-      try {
-        const token = await getAccessToken();
-        if (token) setSessionToken(token);
-      } finally {
-        refreshing.current = false;
-      }
-    };
-    refresh();
-    const interval = setInterval(refresh, 5 * 60 * 1000);
-    return () => clearInterval(interval);
-  }, [authenticated, getAccessToken]);
-
-  useEffect(() => {
-    if (!authenticated) setAccountReady(false);
-  }, [authenticated]);
-
-  if (!ready) return null;
-  if (!authenticated) return <LoginGate />;
-  if (!accountReady) return <AccountGate onReady={() => setAccountReady(true)} />;
-
-  const signOut = async () => {
-    clearSessionToken();
-    // Drop every cached query too. Without this, a second merchant signing
-    // in on the same machine could be served the previous merchant's cached
-    // data before their own request resolves.
-    queryClient.clear();
-    try {
-      localStorage.removeItem("conduit.lastMerchant");
-    } catch {}
-    await logout();
-  };
-  return <DashboardChrome signOut={signOut}>{children}</DashboardChrome>;
-}
-
+// PrivyDashboard stood here. It did one thing CircleDashboard does not have to:
+// re-fetch Privy's short-lived access token every five minutes and store it as
+// the bearer, because verifying it meant a network call to Privy on every API
+// request. The Conduit session token replaced that -- minted once at sign-in,
+// HMAC-verified locally, no refresh loop.
 
 // The sign-in screen for a Circle merchant.
 //
-// A separate component from LoginGate rather than a flag inside it: LoginGate
-// calls Privy's useLogin(), and under the Circle flag there is no Privy
-// provider mounted for that hook to reach. It does not throw -- it simply
-// returns a login() that does nothing, so the button rendered fine and clicked
-// into the void.
+// This began as a separate component from Privy's LoginGate, because that one
+// called useLogin() and, with no Privy provider mounted, the hook did not throw
+// -- it returned a login() that did nothing, so the button rendered perfectly
+// and clicked into the void. Now the only sign-in screen there is.
 function CircleLoginGate() {
   const { connect, connectors, isPending } = useConnect();
   const [error, setError] = useState("");
@@ -584,18 +413,8 @@ function CircleOnboarding({ address, onDone }: { address: string; onDone: () => 
   );
 }
 
-// Which identity provider the dashboard runs on. Defaults to privy, so an
-// unset variable leaves the merchant experience byte-for-byte unchanged.
-//
-// A switch rather than a choice made per-component: the two cannot share a
-// wagmi config (see app/providers.tsx), so the whole dashboard runs on one or
-// the other.
-// From lib/auth-provider, not read here: this used `=== "circle"`, which is
-// false when the variable is unset, while providers.tsx applied a default. Two
-// readings of one flag is how the dashboard ends up on a different provider
-// than the tree above it.
-
+// One identity provider, so no branch. This chose between PrivyDashboard and
+// CircleDashboard on NEXT_PUBLIC_AUTH_PROVIDER until Phase 7.
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
-  if (CIRCLE_AUTH) return <CircleDashboard>{children}</CircleDashboard>;
-  return <PrivyDashboard>{children}</PrivyDashboard>;
+  return <CircleDashboard>{children}</CircleDashboard>;
 }

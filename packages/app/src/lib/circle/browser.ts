@@ -519,7 +519,32 @@ export async function startGoogleSignIn(): Promise<void> {
   // is not found", one hop away from the cause.
   note("asking Circle for a device id…");
   const bootstrap = await ensureSdk({ appSettings: { appId: cfg.appId } }, () => {});
-  const deviceId = await bootstrap.getDeviceId();
+  // getDeviceId() is answered by Circle's own iframe on pw-auth.circle.com, not
+  // by any endpoint of ours -- so it is the first thing a content blocker,
+  // strict tracking protection or blocked third-party frames breaks, and the
+  // SDK reports that as the bare string "Failed to receive deviceId". That
+  // names the symptom and nothing a user can act on, and it looks identical to
+  // Circle being down (it usually isn't: our own /v1/auth/circle/device call
+  // is server-to-server and keeps working, which is what makes this confusing
+  // to diagnose from the API log).
+  //
+  // The timeout exists because a blocked frame never rejects; it just never
+  // answers, and the button sits on "Signing in…" until its own 45s budget.
+  let deviceId: string;
+  try {
+    deviceId = await Promise.race([
+      bootstrap.getDeviceId(),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("timed out")), 12_000)
+      ),
+    ]);
+  } catch {
+    throw new Error(
+      "Couldn't reach Circle's sign-in frame (pw-auth.circle.com). " +
+        "An ad blocker, privacy extension or blocked third-party cookies will do this. " +
+        "Allow that domain, or try a window with extensions disabled."
+    );
+  }
   const dev = await api("/v1/auth/circle/device", {
     method: "POST",
     body: JSON.stringify({ device_id: deviceId }),

@@ -207,10 +207,35 @@ export function CircleWalletGate({ children }: { children: React.ReactNode }) {
   // session is adopted would flip this back to "not settled".
   const [pendingAtLoad] = useState(() => hasPendingResume() || hasPersistedSession());
 
+  // Whether a session is still expected, re-read on every change.
+  //
+  // pendingAtLoad alone was a bug with a nasty shape. It answers "was a session
+  // coming when this page loaded", which is the right question at load and the
+  // WRONG one afterwards: signing out clears the session but cannot change a
+  // value captured at mount, so `settled` stayed false forever and every
+  // surface gated on it -- the whole nav, both Connect Wallet buttons --
+  // rendered null and never came back. The only way out was a reload.
+  //
+  // hasPendingResume() is a module-scope one-shot and stays true for the life
+  // of the page, so it belongs here: during a redirect return there IS a
+  // session coming even though neither of the other two is true yet.
+  const [sessionExpected, setSessionExpected] = useState(
+    () => hasPendingResume() || !!currentSession() || hasPersistedSession()
+  );
+  useEffect(() => {
+    const recompute = () =>
+      setSessionExpected(hasPendingResume() || !!currentSession() || hasPersistedSession());
+    const unsubscribe = onCircleChange(recompute);
+    // A resume that fails calls clearCircleSession(), which emits, so the
+    // failure path settles through the same subscription rather than hanging.
+    return unsubscribe;
+  }, []);
+
   // Nothing to wait for when no Circle session is coming back. Otherwise the
   // address is final only once the Circle connector is actually the connected
   // one.
-  const settled = !pendingAtLoad || connector?.id === CIRCLE_CONNECTOR_ID;
+  const settled =
+    !pendingAtLoad || connector?.id === CIRCLE_CONNECTOR_ID || !sessionExpected;
 
   const value = useMemo(() => ({ ...outer, walletSettled: settled }), [outer, settled]);
   return <WalletGateContext.Provider value={value}>{children}</WalletGateContext.Provider>;

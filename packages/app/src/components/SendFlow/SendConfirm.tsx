@@ -11,6 +11,7 @@ import { ReceiptCard } from "@/components/Shared/ReceiptCard";
 import { FxReceiptCard } from "@/components/Shared/FxReceiptCard";
 import { StepProgress } from "@/components/Shared/StepProgress";
 import { motion, AnimatePresence } from "framer-motion";
+import { Rocket } from "@/components/Shared/Rocket";
 
 interface SendConfirmProps {
   recipient: string;
@@ -163,8 +164,7 @@ export function SendConfirm({
             animate={{ opacity: 1, scale: 1 }}
             className="text-center py-16 space-y-4"
           >
-            <div className="w-16 h-16 border-2 border-signal border-t-transparent
-                            animate-spin mx-auto" />
+            <Rocket size={72} />
             <p className="text-ink font-mono">
               {isCrossCurrency ? fxStage || "Preparing the payment…" : "Settling on-chain..."}
             </p>
@@ -183,6 +183,7 @@ export function SendConfirm({
             animate={{ opacity: 1, y: 0 }}
             className="space-y-4"
           >
+            <Rocket state="launch" size={72} />
             <FxReceiptCard
               payAmount={fxPaid}
               receiveAmount={formatAmount(parsedAmount, recipientCurrency)}
@@ -208,6 +209,7 @@ export function SendConfirm({
             animate={{ opacity: 1, y: 0 }}
             className="space-y-4"
           >
+            <Rocket state="launch" size={72} />
             <ReceiptCard receipt={receipt} />
             <button
               onClick={onReset}

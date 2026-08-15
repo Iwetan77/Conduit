@@ -11,6 +11,7 @@ import { QuotePreview } from "./QuotePreview";
 import { motion, AnimatePresence } from "framer-motion";
 import { WalletConnectCompact } from "@/components/Shared/WalletConnect";
 import { useAccount } from "wagmi";
+import { Rocket } from "@/components/Shared/Rocket";
 
 interface PayConfirmProps {
   declaration: PaymentDeclaration;
@@ -105,10 +106,7 @@ export function PayConfirm({ declaration, openAmount }: PayConfirmProps) {
           animate={{ opacity: 1, scale: 1 }}
           className="text-center py-12 space-y-4"
         >
-          <div
-            className="w-14 h-14 border-2 border-signal border-t-transparent
-                          animate-spin mx-auto"
-          />
+          <Rocket size={64} />
           <p className="text-ink font-mono">Settling on Arc...</p>
           <p className="text-ink-dim text-sm font-mono">Sub-second finality</p>
         </motion.div>

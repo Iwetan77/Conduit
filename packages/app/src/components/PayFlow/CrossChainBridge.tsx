@@ -51,6 +51,7 @@ import {
 import { ChainIcon } from "@/components/PayFlow/ChainIcon";
 import { CIRCLE_CONNECTOR_ID } from "@/lib/circle/connector";
 import { chainByEvmId } from "@/lib/circle/chains";
+import { Rocket } from "@/components/Shared/Rocket";
 
 interface CrossChainBridgeProps {
   intentId: string;
@@ -605,7 +606,7 @@ export function CrossChainBridge({ intentId, intent }: CrossChainBridgeProps) {
   if (phase === "connecting" || phase === "checking_balance") {
     return (
       <div className="text-center py-8 space-y-3">
-        <div className="w-10 h-10 border-2 border-signal border-t-transparent animate-spin mx-auto" />
+        <Rocket size={56} />
         <p className="text-ink font-mono text-sm">
           {phase === "connecting" ? "Connecting your wallet…" : "Reading your USDC across chains…"}
         </p>
@@ -745,7 +746,7 @@ export function CrossChainBridge({ intentId, intent }: CrossChainBridgeProps) {
   if (phase === "spending") {
     return (
       <div className="text-center py-8 space-y-3">
-        <div className="w-10 h-10 border-2 border-signal border-t-transparent animate-spin mx-auto" />
+        <Rocket size={56} />
         <p className="text-ink font-mono text-sm">{fxNote || "Confirm in your wallet…"}</p>
       </div>
     );
@@ -765,6 +766,7 @@ export function CrossChainBridge({ intentId, intent }: CrossChainBridgeProps) {
         </ol>
         {phase === "settled" && (
           <div className="space-y-3">
+            <Rocket state="launch" size={56} />
             <p className="text-signal font-mono">Settled. Thank you.</p>
             {mintTx && (
               <a

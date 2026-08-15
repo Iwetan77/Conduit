@@ -12,6 +12,7 @@ import { RoutePreview } from "@/components/SendFlow/RoutePreview";
 import { ReceiptCard } from "@/components/Shared/ReceiptCard";
 import { FxReceiptCard } from "@/components/Shared/FxReceiptCard";
 import { WalletConnectCompact } from "@/components/Shared/WalletConnect";
+import { Rocket } from "@/components/Shared/Rocket";
 
 // The single place a payer chooses what to pay with and settles, shared by the
 // settlement-intent surface (si_) and the payment-link surface (pl_). Extracted
@@ -174,7 +175,7 @@ export function ArcSettlePanel({
   if (step === "pending") {
     return (
       <div className="text-center py-10 space-y-4">
-        <div className="w-12 h-12 border-2 border-signal border-t-transparent animate-spin mx-auto" />
+        <Rocket size={64} />
         <p className="text-ink font-mono text-sm">{fxStage || "Settling on-chain…"}</p>
         {payerCurrency !== settleToken && (
           <p className="text-ink-dim text-xs font-mono max-w-xs mx-auto">

@@ -54,3 +54,13 @@ errorcodes.md
 
 # Migration working notes — local planning record, not product docs.
 privy-removal.md
+
+# Build-process records, not documentation.
+#
+# STATUS.md is a gate-by-gate report of how the product was built, with pasted
+# shell output; docs/cctp-capability.md is a point-in-time "can Circle do X"
+# investigation that ends in a devnet faucet being empty. Both were useful while
+# the work was happening and neither is something a new engineer should read to
+# understand this codebase. Kept locally, out of the repo.
+STATUS.md
+docs/cctp-capability.md

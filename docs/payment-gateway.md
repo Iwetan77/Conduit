@@ -189,7 +189,7 @@ route so you don't have to:
   [FX timing](./fx-timing.md).
 - **Cross-chain** (they hold USDC on Solana, Base, Polygon, and 9 more): bridged
   in via Circle Gateway, then settled to you on Arc. See
-  [CCTP capability](./cctp-capability.md). The buyer needs no Arc wallet.
+  [CCTP integration](./cctp-integration.md). The buyer needs no Arc wallet.
 
 In every case you receive exactly `amount` in `settle_currency` at
 `settle_address`, and get one `settlement.succeeded` webhook.

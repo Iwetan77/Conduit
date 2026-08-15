@@ -93,11 +93,10 @@ conduit/
 │   ├── contracts/   # Solidity (Foundry) — ConduitRouter, AtomicSettler, StableFXAdapter, DeclarationRegistry
 │   ├── api/         # Go — the settlement engine: accounts, payment links, settlement intents,
 │   │                #   StableFX FX, Circle Gateway funding, Circle auth, webhooks. Postgres.
-│   ├── sdk/         # TypeScript — @conduit/sdk (bigint amounts, never number)
-│   ├── app/         # Next.js — merchant dashboard (Circle Wallets) + payer checkout (/pay). app.conduit.xyz
-│   ├── docs/        # Next.js — renders repo-root docs/*.md as a site
-│   └── marketing/   # Next.js static — conduit.xyz
-├── docs/            # Source-of-truth markdown (quickstart, errors, webhooks, currencies, fx, ubk, …)
+│   ├── sdk/         # TypeScript — @conduit/sdk, for browsers and on-chain calls (bigint amounts, never number)
+│   ├── node/        # TypeScript — @conduit/node, the server-side API client (webhook verification, typed calls)
+│   └── app/         # Next.js — landing, merchant dashboard, payer checkout (/pay) and the docs site, in one app
+├── docs/            # Source-of-truth markdown, rendered at /docs/guides by the app
 └── package.json     # pnpm workspaces
 ```
 
@@ -217,7 +216,7 @@ cd packages/contracts && forge test --fork-url https://rpc.testnet.arc.network -
 
 - `AtomicSettler` uses `ReentrancyGuard` — full revert on failure, no partial states.
 - Contracts are immutable in v1 (no upgradability); protocol params behind `Ownable`, intended for multisig on mainnet.
-- The API's CORS is a testnet wildcard — tighten to an explicit allowlist before any mainnet deploy.
+- The API's CORS defaults to a wildcard for local/testnet use. Set `CONDUIT_ALLOWED_ORIGINS` (comma-separated) on any public deployment; bearer tokens are sent in a header and credentials are never sent implicitly, but a deployment should still name its origins.
 - Cross-currency and cross-chain flows are **not** atomic and are never described as such; the payer UI shows real, polled progress, not a timed animation.
 
 ---

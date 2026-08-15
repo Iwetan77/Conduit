@@ -6,7 +6,7 @@ referenced below is a real transaction with a real hash.
 
 ## Domains and contracts
 
-From `docs/cctp-capability.md` (Phase 0's live-verified facts, cross-checked against this
+From the earlier CCTP investigation (live-verified facts, cross-checked against this
 repo's own pre-existing `CCTPAdapter.sol`):
 
 - **Arc testnet** — CCTP V2 domain **26**. `TokenMessengerV2 =

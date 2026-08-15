@@ -5,7 +5,7 @@ CCTP V2 cross-chain funding pre-stage. A settlement intent with
 state machine (`state.go`) before the existing quote/settle engine ever sees
 it. This is NOT atomic -- it's an honest burn → attestation → mint sequence,
 observed at ~14s on a real Solana devnet → Arc testnet Fast Transfer in
-Phase 0 (see `docs/cctp-capability.md`), with CCTP's documented 8-30s window
+investigation (see `docs/cctp-integration.md`), with CCTP's documented 8-30s window
 as the general expectation.
 
 ## Ordering: bridge fully, THEN quote FX, THEN settle

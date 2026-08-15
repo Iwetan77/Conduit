@@ -44,15 +44,18 @@ type CircleAuth struct {
 
 // upstream renders a failed Circle call.
 //
-// E(CodeInternal, …) puts the detail in `param` and serves the registry's
-// "An internal error occurred." as the message, so a client that reads
-// `message` — every client — sees nothing about the cause. Nothing logged it
-// either, which left a failing Circle call with no observable cause anywhere:
-// not in the response, not in the API log. Log it here so the server always
-// knows what Circle actually said.
+// The error text goes to the log and only to the log. `param` is serialised
+// into the response body (see errors.Error), and every /v1/auth/circle/* route
+// is unauthenticated, so anything put there is readable by anyone who can
+// reach the API — this previously passed err.Error(), which handed back
+// whatever Circle had said verbatim.
+//
+// `op` is a fixed string chosen at the call site, so it names which call
+// failed without carrying anything from upstream. That is enough to correlate
+// a client report with the log line that has the detail.
 func (h *CircleAuth) upstream(w http.ResponseWriter, op string, err error) {
 	log.Printf("circle: %s failed: %v", op, err)
-	writeErr(w, apierrors.E(apierrors.CodeInternal, err.Error()))
+	writeErr(w, apierrors.E(apierrors.CodeInternal, op))
 }
 
 func (h *CircleAuth) available(w http.ResponseWriter) bool {

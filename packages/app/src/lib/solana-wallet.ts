@@ -137,6 +137,9 @@ export function listSolanaWallets(): SolanaWalletOption[] {
       );
     });
     if (!match) continue;
+    // A wallet that registered twice, or two builds of the same wallet, must
+    // not produce two rows with the same key.
+    if (out.some((w) => w.id === name.toLowerCase())) continue;
     used.add(match.provider);
     out.push({
       id: name.toLowerCase(),
@@ -147,22 +150,38 @@ export function listSolanaWallets(): SolanaWalletOption[] {
     });
   }
 
-  // Anything injected that did not register, or that we could not pair. Named
-  // from its own flag when it has one, so an unregistered wallet still shows up
-  // as something a payer recognises rather than being dropped.
-  for (const { key, provider } of injected) {
-    if (used.has(provider)) continue;
-    const flag = Object.keys(provider).find(
-      (k) => k.startsWith("is") && (provider as unknown as Record<string, unknown>)[k] === true
-    );
-    const raw = flag ? flag.slice(2) : key === "solana" ? "" : key;
-    const label = raw ? raw.charAt(0).toUpperCase() + raw.slice(1) : "Injected Solana wallet";
-    out.push({
-      id: (raw || key).toLowerCase(),
-      label,
-      provider,
-      gatewayCapable: !CANNOT_SIGN_GATEWAY.some((re) => re.test(label)),
-    });
+  // The registry is AUTHORITATIVE whenever it answered.
+  //
+  // Falling back to the raw window scan alongside it produced a mess: OKX
+  // injects itself under several keys as distinct objects, so identity dedupe
+  // did not catch it and the sheet listed "OKExWallet" four times underneath
+  // the properly registered "OKX Wallet" -- four duplicate React keys and one
+  // wallet shown five times. A wallet that registers is already in the list
+  // above, under the name and icon it chose for itself, so scanning for it
+  // again can only produce noise.
+  //
+  // The scan therefore only runs when the registry gave us nothing at all, for
+  // an older wallet that injects without registering. That is a real case, just
+  // not one that should be allowed to corrupt the normal one.
+  if (out.length === 0) {
+    for (const { key, provider } of injected) {
+      if (used.has(provider)) continue;
+      const flag = Object.keys(provider).find(
+        (k) => k.startsWith("is") && (provider as unknown as Record<string, unknown>)[k] === true
+      );
+      const raw = flag ? flag.slice(2) : key === "solana" ? "" : key;
+      const label = raw ? raw.charAt(0).toUpperCase() + raw.slice(1) : "Injected Solana wallet";
+      const id = (raw || key).toLowerCase();
+      // Same wallet reached through two window keys: keep the first.
+      if (out.some((w) => w.id === id)) continue;
+      used.add(provider);
+      out.push({
+        id,
+        label,
+        provider,
+        gatewayCapable: !CANNOT_SIGN_GATEWAY.some((re) => re.test(label)),
+      });
+    }
   }
 
   return out;

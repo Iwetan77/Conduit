@@ -23,62 +23,168 @@ interface SolanaProvider {
   signMessage(message: Uint8Array, encoding?: string): Promise<{ signature: Uint8Array }>;
 }
 
-// Every injected Solana wallet the browser actually has, so the payer can
-// CHOOSE one.
+// Every Solana wallet the browser actually has, discovered rather than guessed.
 //
-// This used to be a single getSolanaProvider() that picked with a fixed
-// preference order (solflare ?? backpack ?? window.solana) and returned it.
-// That is wrong for the same reason it would be wrong on the EVM side: the
-// payer owns the decision about which of their wallets spends their money, and
-// a payer with two installed got whichever one our ordering happened to favour,
-// with no way to switch and no way to disconnect.
+// Two earlier versions of this were wrong in the same way. The first picked one
+// wallet by a fixed preference order (solflare ?? backpack ?? window.solana)
+// and returned it, so a payer with two installed got whichever our ordering
+// favoured. The second listed those same three by name, which is no better: it
+// silently excludes Glow, Coinbase, Trust, and anything shipped next month.
 //
-// The Phantom note is still worth carrying, because it is not a preference but
-// a hard limitation: Circle Gateway authorises a burn intent via signMessage on
-// a transaction-shaped payload, and PHANTOM SPECIFICALLY refuses that ("you
-// cannot sign solana transactions using sign message"). The block lives in the
-// Phantom extension, so it cannot be patched here or in any library we ship.
-// Solflare and Backpack do not apply it. Hence `gatewayCapable` below: Phantom
-// is offered, because hiding a wallet someone has installed is its own kind of
-// broken, but it is labelled rather than silently chosen and then failed on.
+// The right answer is the one wagmi already gives us on the EVM side. EIP-6963
+// is how an EVM wallet announces itself instead of fighting over
+// window.ethereum; the Solana ecosystem's equivalent is the Wallet Standard,
+// where each wallet registers itself and reports its own name, icon, chains and
+// features. Ask the registry and the list is whatever the payer actually has,
+// with no names hardcoded anywhere.
+//
+// Circle's adapter still wants a legacy injected provider object
+// (createSolanaAdapterFromProvider({ provider: window.solana })), not a
+// Wallet Standard wallet, so the registry is used for DISCOVERY and each entry
+// is paired with the injected object that wallet also exposes. The window scan
+// that does the pairing is generic: it looks for the provider SHAPE rather than
+// for known keys, so a wallet at window.glow or window.trustwallet is found
+// without being named here.
 export interface SolanaWalletOption {
-  id: "solflare" | "backpack" | "phantom";
+  /** Stable key for React lists. The wallet's own name, lowercased. */
+  id: string;
   label: string;
+  /** Data URI from the wallet itself, when it registered one. */
+  icon?: string;
   provider: SolanaProvider;
   /** False for wallets that refuse Circle Gateway's signMessage payload. */
   gatewayCapable: boolean;
 }
 
-export function listSolanaWallets(): SolanaWalletOption[] {
-  if (typeof window === "undefined") return [];
-  const w = window as unknown as {
-    solana?: SolanaProvider;
-    solflare?: SolanaProvider;
-    backpack?: SolanaProvider;
-  };
-  const signs = (p?: SolanaProvider) => !!p && typeof p.signTransaction === "function";
+// Phantom refuses to signMessage a transaction-shaped payload ("you cannot sign
+// solana transactions using sign message"), which is exactly how Circle Gateway
+// authorises a burn intent. That block lives in the Phantom extension, so it
+// cannot be patched here or in any library we ship.
+//
+// This is a known-limitation ANNOTATION, not the enumeration. Phantom is listed
+// like everything else and simply labelled, so a payer who has it sees why it
+// will not work instead of picking it and failing at the signature. Any wallet
+// not on this list is assumed to work, which is the right default: the failure
+// is loud and recoverable, whereas hiding wallets is silent.
+const CANNOT_SIGN_GATEWAY = [/phantom/i];
 
-  const out: SolanaWalletOption[] = [];
-  if (signs(w.solflare)) {
-    out.push({ id: "solflare", label: "Solflare", provider: w.solflare!, gatewayCapable: true });
-  }
-  if (signs(w.backpack)) {
-    out.push({ id: "backpack", label: "Backpack", provider: w.backpack!, gatewayCapable: true });
-  }
-  // window.solana is whichever wallet won the injection race, which is usually
-  // Phantom but is not guaranteed to be. Only add it when it is not already
-  // listed above under its own name.
-  const generic = w.solana;
-  if (signs(generic) && generic !== w.solflare && generic !== w.backpack) {
-    const isPhantom = !!generic!.isPhantom;
-    out.push({
-      id: "phantom",
-      label: isPhantom ? "Phantom" : "Injected Solana wallet",
-      provider: generic!,
-      gatewayCapable: !isPhantom,
-    });
+function looksLikeProvider(v: unknown): v is SolanaProvider {
+  const p = v as SolanaProvider | undefined;
+  return (
+    !!p &&
+    typeof p === "object" &&
+    typeof p.connect === "function" &&
+    typeof p.signTransaction === "function"
+  );
+}
+
+// Injected provider objects anywhere on window, found by shape.
+//
+// Wallets expose these under their own key (window.solflare, window.backpack),
+// under window.solana if they won the injection race, or nested one level down
+// (window.phantom.solana). Scanning beats a key list because the key list is
+// exactly what keeps being incomplete.
+function injectedProviders(): { key: string; provider: SolanaProvider }[] {
+  const out: { key: string; provider: SolanaProvider }[] = [];
+  const seen = new Set<unknown>();
+  const add = (key: string, v: unknown) => {
+    if (looksLikeProvider(v) && !seen.has(v)) {
+      seen.add(v);
+      out.push({ key, provider: v });
+    }
+  };
+
+  for (const key of Object.keys(window)) {
+    let value: unknown;
+    try {
+      value = (window as unknown as Record<string, unknown>)[key];
+    } catch {
+      // Some window properties throw on access (cross-origin frames). Skip.
+      continue;
+    }
+    add(key, value);
+    // One level down, for the window.phantom.solana / window.glow.solana shape.
+    if (value && typeof value === "object" && !looksLikeProvider(value)) {
+      const nested = (value as Record<string, unknown>).solana;
+      if (nested) add(key, nested);
+    }
   }
   return out;
+}
+
+export function listSolanaWallets(): SolanaWalletOption[] {
+  if (typeof window === "undefined") return [];
+
+  const injected = injectedProviders();
+  const used = new Set<SolanaProvider>();
+  const out: SolanaWalletOption[] = [];
+
+  // Registered wallets first: they carry a real name and icon, straight from
+  // the wallet rather than inferred by us.
+  for (const wallet of registeredSolanaWallets()) {
+    const name = wallet.name;
+    // Pair by the wallet's own flags (isPhantom, isSolflare, ...) or by its key
+    // on window, both matched against the registered name. A wallet that
+    // registers but injects nothing cannot be handed to Circle's adapter, so it
+    // is skipped rather than listed and then failing on selection.
+    const match = injected.find(({ key, provider }) => {
+      if (used.has(provider)) return false;
+      const flag = `is${name.replace(/\s+/g, "")}`.toLowerCase();
+      const flags = Object.keys(provider).filter((k) => k.startsWith("is"));
+      return (
+        key.toLowerCase() === name.toLowerCase().replace(/\s+/g, "") ||
+        flags.some((f) => f.toLowerCase() === flag)
+      );
+    });
+    if (!match) continue;
+    used.add(match.provider);
+    out.push({
+      id: name.toLowerCase(),
+      label: name,
+      icon: wallet.icon,
+      provider: match.provider,
+      gatewayCapable: !CANNOT_SIGN_GATEWAY.some((re) => re.test(name)),
+    });
+  }
+
+  // Anything injected that did not register, or that we could not pair. Named
+  // from its own flag when it has one, so an unregistered wallet still shows up
+  // as something a payer recognises rather than being dropped.
+  for (const { key, provider } of injected) {
+    if (used.has(provider)) continue;
+    const flag = Object.keys(provider).find(
+      (k) => k.startsWith("is") && (provider as unknown as Record<string, unknown>)[k] === true
+    );
+    const raw = flag ? flag.slice(2) : key === "solana" ? "" : key;
+    const label = raw ? raw.charAt(0).toUpperCase() + raw.slice(1) : "Injected Solana wallet";
+    out.push({
+      id: (raw || key).toLowerCase(),
+      label,
+      provider,
+      gatewayCapable: !CANNOT_SIGN_GATEWAY.some((re) => re.test(label)),
+    });
+  }
+
+  return out;
+}
+
+// The Wallet Standard registry, read lazily so the package is only pulled into
+// the bundle where cross-chain pay is actually used.
+function registeredSolanaWallets(): { name: string; icon?: string }[] {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { getWallets } = require("@wallet-standard/app") as {
+      getWallets: () => { get: () => readonly { name: string; icon?: string; chains: readonly string[] }[] };
+    };
+    return getWallets()
+      .get()
+      .filter((w) => w.chains.some((c) => c.startsWith("solana:")))
+      .map((w) => ({ name: w.name, icon: w.icon }));
+  } catch {
+    // No registry (older wallets, or the package failed to load): the injected
+    // scan below still finds everything that matters.
+    return [];
+  }
 }
 
 /** The wallet the payer picked, for this page's lifetime. */

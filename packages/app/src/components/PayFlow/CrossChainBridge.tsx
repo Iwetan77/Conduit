@@ -131,7 +131,16 @@ function WalletSheet({
                     className="w-full px-4 py-3.5 flex items-center justify-between text-left
                                border-b border-border/60 hover:bg-signal/5 transition-colors"
                   >
-                    <span className="font-mono text-sm text-ink">{w.label}</span>
+                    <span className="flex items-center gap-3">
+                      {/* The wallet's own icon, when it registered one. */}
+                      {w.icon ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={w.icon} alt="" className="w-5 h-5 shrink-0" />
+                      ) : (
+                        <span className="w-5 h-5 shrink-0" aria-hidden />
+                      )}
+                      <span className="font-mono text-sm text-ink">{w.label}</span>
+                    </span>
                     {/* Phantom is listed but cannot finish a Gateway deposit --
                         it refuses to signMessage a transaction-shaped payload.
                         Saying so here beats letting someone pick it and fail at
@@ -166,7 +175,7 @@ function WalletSheet({
 
         {isSolana && solanaWallets.length === 0 && (
           <p className="px-4 py-6 text-sm text-ink-dim">
-            No Solana wallet found. Install Solflare or Backpack to pay from Solana.
+            No Solana wallet found in this browser. Install one, then reopen this page.
           </p>
         )}
       </div>

@@ -70,6 +70,17 @@ type Phase =
 
 const POLL_INTERVAL_MS = 3000;
 
+// Circle's Gateway API exhausting its own retries, told plainly.
+//
+// The SDK surfaces "Gateway API error: Maximum retry attempts (10) exceeded:
+// Request timed out", which reads like our bug and offers the payer nothing to
+// act on. Their testnet Gateway does flap: measured answering in 0.7s, then
+// failing to connect twice in a row, then healthy again.
+function gatewayUnavailable(err: unknown): boolean {
+  const raw = err instanceof Error ? err.message : String(err ?? "");
+  return /maximum retry attempts|request timed out|gateway api error/i.test(raw);
+}
+
 type SolanaChoice = ReturnType<typeof listSolanaWallets>[number];
 type EvmChoice = { connector: Connector };
 
@@ -340,9 +351,22 @@ export function CrossChainBridge({ intentId, intent }: CrossChainBridgeProps) {
       // wallet portion is deposited on demand at spend time, so counting only
       // the deposited balance falsely reported "found 0" for a payer who holds
       // USDC in their wallet but hasn't pre-deposited into Gateway.
+      // The Gateway balance read is allowed to fail.
+      //
+      // It reports what the payer has ALREADY deposited into Circle Gateway,
+      // which is usually nothing: spendUsdcToArc deposits from the wallet on
+      // demand, so the wallet balance below is what actually funds the payment.
+      // Circle's testnet Gateway API flaps -- observed answering in 0.7s, then
+      // failing to connect twice in a row -- and the SDK gives up after ten
+      // retries with "Maximum retry attempts (10) exceeded". Letting that kill
+      // the whole screen stranded a payer whose USDC was sitting right there in
+      // their wallet, readable without Circle being involved at all.
       const [plan, deposited, wallet] = await Promise.all([
         getBridgePlan(intentId),
-        getUnifiedUsdc(payer),
+        getUnifiedUsdc(payer).catch((err) => {
+          console.warn("circle gateway balance unavailable, using wallet balance only:", err);
+          return {} as UnifiedUsdc;
+        }),
         getWalletUsdc(payer),
       ]);
       const bal = mergeUsdc(deposited, wallet);
@@ -370,12 +394,16 @@ export function CrossChainBridge({ intentId, intent }: CrossChainBridgeProps) {
     } catch (err) {
       const notAvailable =
         err instanceof ConduitApiError && err.code === "not_available";
+      // Circle's own retry exhaustion, verbatim, tells the payer nothing they
+      // can act on and reads like our bug.
+      const raw = err instanceof Error ? err.message : "";
+      const gatewayDown = gatewayUnavailable(err);
       setError(
         notAvailable
           ? "Cross-chain payments aren't enabled on this deployment yet. Pay on Arc instead."
-          : err instanceof Error
-            ? err.message
-            : "Could not connect wallet"
+          : gatewayDown
+            ? "Circle's bridge isn't responding right now. Wait a moment and try again, or pay on Arc instead."
+            : raw || "Could not connect wallet"
       );
       setPhase("choose_source");
     }
@@ -448,8 +476,13 @@ export function CrossChainBridge({ intentId, intent }: CrossChainBridgeProps) {
       setPhase("bridging");
       startPolling();
     } catch (err) {
-      const message =
-        err instanceof ConduitApiError ? err.message : err instanceof Error ? err.message : "Payment failed to start";
+      const message = gatewayUnavailable(err)
+        ? "Circle's bridge isn't responding right now. Nothing has left your wallet — wait a moment and try again."
+        : err instanceof ConduitApiError
+          ? err.message
+          : err instanceof Error
+            ? err.message
+            : "Payment failed to start";
       setError(message);
       setPhase("error");
     }

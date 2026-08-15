@@ -38,6 +38,8 @@ Migrations run automatically at startup via golang-migrate.
 | Variable | Enables |
 |---|---|
 | `CIRCLE_API_KEY` | Merchant login (Circle Wallets). Without it, only `sk_`/`pk_` API-key auth works — the dashboard cannot be signed into. Server-side only; it never reaches the browser. |
+| `CONDUIT_SESSION_SECRET` | Signs dashboard session tokens. **Set this.** Unset, the API generates a random secret per boot, so every deploy signs every merchant out and sessions can never work across more than one instance. Any 32-byte hex value. |
+| `CONDUIT_TRUSTED_PROXY` | Set to any non-empty value when the API sits behind a proxy or load balancer (Render, Fly, Cloud Run all do). Rate limiting then identifies clients by `X-Forwarded-For` instead of the proxy's own address. Leave unset if the server is directly exposed — the header is caller-supplied, and trusting it without a proxy in front lets anyone bypass the limit. |
 | `ARC_RELAYER_KEY` | Cross-chain (Solana → Arc) funding via Circle Gateway. Without it the bridge routes simply aren't registered. |
 | `SOLANA_RPC` | Solana endpoint for the above. Defaults to public devnet. |
 

@@ -42,6 +42,17 @@ services:
       - key: CIRCLE_API_KEY
         sync: false
 
+      # Signs dashboard session tokens. Without it the API mints a random
+      # secret per boot, so every deploy signs every merchant out.
+      - key: CONDUIT_SESSION_SECRET
+        generateValue: true
+
+      # Render terminates TLS in front of the service, so the client IP arrives
+      # in X-Forwarded-For. Rate limiting needs this to tell callers apart
+      # rather than seeing every request as coming from the proxy.
+      - key: CONDUIT_TRUSTED_PROXY
+        value: "1"
+
       # ── Optional: cross-chain funding (signs only, holds no gas) ───────
       - key: ARC_RELAYER_KEY
         sync: false

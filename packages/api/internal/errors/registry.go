@@ -28,6 +28,7 @@ const (
 	CodeUnauthorized          Code = "unauthorized"
 	CodeForbidden             Code = "forbidden"
 	CodeInternal              Code = "internal_error"
+	CodeRateLimited           Code = "rate_limited"
 
 	CodeLinkExpired           Code = "payment_link_expired"
 	CodeLinkVoided            Code = "payment_link_voided"
@@ -53,6 +54,7 @@ var registry = map[Code]entry{
 	CodeFxInvalidAmount:       {http.StatusUnprocessableEntity, "Amount is too small to convert — it must be worth at least about 1.00 USD. Try a larger amount."},
 	CodeFxProviderUnavailable: {http.StatusServiceUnavailable, "The FX provider is temporarily unavailable."},
 	CodeCurrencyNotSupported:  {http.StatusUnprocessableEntity, "This currency is not currently supported."},
+	CodeRateLimited:           {http.StatusTooManyRequests, "Too many requests. Slow down and try again shortly."},
 	CodeIntentExpired:         {http.StatusConflict, "This settlement intent has expired."},
 	CodeIntentAlreadySettled:  {http.StatusConflict, "This settlement intent has already settled."},
 	CodeIdempotencyKeyReuse:   {http.StatusConflict, "This idempotency key was already used with a different request body."},

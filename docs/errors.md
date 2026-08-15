@@ -35,3 +35,15 @@ failure is translated through this registry first.
 | `unauthorized` | 401 | Missing or invalid API key. | Check the `Authorization: Bearer` header. |
 | `forbidden` | 403 | Your key is valid but isn't allowed to do this — e.g. a `pk_` key calling an `sk_`-only endpoint, or a cross-tenant `Conduit-Account` header. | Use the right key type / account. |
 | `internal_error` | 500 | Something broke on our end. | Retry with backoff; if it persists, report it — this code intentionally carries no detail because a raw internal error should never leak to a client. |
+
+## `rate_limited` (429)
+
+The public payer routes are rate limited per client: **5 requests/second sustained,
+burst 20**. Loading a pay page, polling its status, and requesting a quote sit
+comfortably inside that; a script looping over a link URL does not.
+
+The response carries `Retry-After: 1`. Back off and retry rather than tightening the
+loop — the budget refills continuously, so a client that waits recovers within a second.
+
+Authenticated routes (`sk_`/`pk_` keys, dashboard sessions) are not limited this way:
+a key is already a credential and can be revoked.

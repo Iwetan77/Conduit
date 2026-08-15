@@ -2,7 +2,9 @@
 
 **Stablecoin settlement for businesses.**
 
-A business chooses one currency to be paid in. Whoever pays them uses whatever stablecoin they already hold, on whatever chain they already hold it. Conversion, routing, and cross-chain funding happen in between, and the merchant receives what they asked for. Same-currency payments settle in about a second.
+Conduit is a pipe. A payer sends whatever stablecoin they hold, on whatever chain they hold it; the merchant receives the currency they chose to settle in. FX conversion, route selection, and cross-chain funding happen in between.
+
+Same-currency payments on Arc settle in about a second. Cross-currency and cross-chain take longer, and the product reports real progress rather than claiming to be instant.
 
 [App](https://useconduit-app.vercel.app) · [Docs](https://useconduit-app.vercel.app/docs) · Arc Testnet, chain ID 5042002
 

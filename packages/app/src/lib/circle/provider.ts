@@ -283,10 +283,17 @@ export function createCircleProvider(config: CircleProviderConfig) {
       // Confirm it is ours and not something else the wallet did in the
       // meantime. Contract address is the strongest signal available — the
       // list carries no calldata to compare.
-      const mine =
-        fresh.find(
-          (t) => t.contract_address?.toLowerCase() === tx.to!.toLowerCase()
-        ) ?? fresh[0];
+      //
+      // No fallback to "whichever new transaction turned up". A hash returned
+      // from here is the hash we hand to /record, put on the receipt and write
+      // into the merchant's books, so returning some other transaction's hash
+      // is worse in every way than returning none: the payment looks settled
+      // against an unrelated transfer and nothing downstream can tell. If
+      // nothing matches yet, say so and let waitForHash keep polling until the
+      // match appears or the deadline names what went wrong.
+      const mine = fresh.find(
+        (t) => t.contract_address?.toLowerCase() === tx.to!.toLowerCase()
+      );
       return mine ?? { found: false };
     }, `wallet ${walletId}`);
   };

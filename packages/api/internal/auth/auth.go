@@ -80,27 +80,64 @@ func FromContext(ctx context.Context) (Principal, bool) {
 	return p, ok
 }
 
-// pkAllowedPaths: pk_ keys may only reach the hosted-checkout calls. Matched
-// by (method, path-prefix) since these run unauthenticated-adjacent, in a
-// browser, and must not be able to touch anything else.
-var pkAllowedPrefixes = []struct {
-	method string
-	prefix string
-}{
-	{http.MethodGet, "/v1/settlement_intents/"},  // GET /:id (suffix must be exactly the id, checked by caller)
-	{http.MethodPost, "/v1/settlement_intents/"}, // /:id/quote, /:id/prepare, /:id/confirm
+// pk_ keys may only reach the hosted-checkout actions on an intent that already
+// exists: quote, prepare, confirm, record. That is the documented contract --
+// "can drive an existing charge, never create one" (docs/payment-gateway.md) --
+// and it is the whole of it.
+//
+// Matched on the ACTION, not on a path prefix. The previous implementation
+// compared only the method and never read the prefix field it stored, so it
+// reduced to "any GET or POST under /v1/settlement_intents/". Two authenticated
+// routes live there, and a pk_ key is by design pasted into a public web page:
+//
+//	GET  /v1/settlement_intents/{id}         the PRIVATE view -- settle_address,
+//	                                         reference, metadata. The /public
+//	                                         variant exists precisely to withhold
+//	                                         those, so granting this defeated it.
+//	POST /v1/settlement_intents/{id}/cancel  cancel any of that merchant's
+//	                                         checkouts, at will.
+//
+// Both are now denied. cancel is called out by name below so that a future
+// action added to this list can never quietly re-admit it.
+//
+// Note that quote/prepare/confirm/record are currently registered in the PUBLIC
+// route group, so auth.Middleware does not run on them and this allowlist is
+// not what admits a pk_ key to them today. It is kept as the statement of
+// policy: if those routes are ever moved behind auth, the pk_ key keeps working
+// and nothing else opens up with it.
+var pkAllowedActions = map[string]bool{
+	"quote":   true,
+	"prepare": true,
+	"confirm": true,
+	"record":  true,
 }
 
+// pkDeniedActions can never be admitted, whatever else changes above.
+var pkDeniedActions = map[string]bool{
+	"cancel": true,
+}
+
+const intentPathPrefix = "/v1/settlement_intents/"
+
 func isPkAllowed(method, path string) bool {
-	if !strings.HasPrefix(path, "/v1/settlement_intents/") {
+	// Only POST, and only under the intents prefix. A bare GET of an intent is
+	// the private view; the payer surface has /{id}/public for that.
+	if method != http.MethodPost || !strings.HasPrefix(path, intentPathPrefix) {
 		return false
 	}
-	for _, a := range pkAllowedPrefixes {
-		if a.method == method {
-			return true
-		}
+
+	rest := strings.TrimPrefix(path, intentPathPrefix)
+	// Expect exactly "{id}/{action}" -- two segments, nothing deeper. This is
+	// what keeps /{id}/bridge/report_spend and any future nested route out
+	// without needing to enumerate them.
+	id, action, found := strings.Cut(rest, "/")
+	if !found || id == "" || action == "" || strings.Contains(action, "/") {
+		return false
 	}
-	return false
+	if pkDeniedActions[action] {
+		return false
+	}
+	return pkAllowedActions[action]
 }
 
 // Middleware validates the Authorization: Bearer <key> header. The bearer value

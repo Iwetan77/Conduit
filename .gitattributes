@@ -1,0 +1,16 @@
+# What GitHub's language bar should measure.
+#
+# packages/contracts/lib/ is Foundry's dependency directory: OpenZeppelin and
+# forge-std, vendored by `forge install`, not written here. Left unmarked, they
+# dominate the repo by bytes and GitHub reports the project as 59% Solidity and
+# 25% JavaScript -- almost all of it OpenZeppelin's library and its tooling.
+# What this codebase actually is, by the code in it, is TypeScript and Go.
+#
+# linguist-vendored excludes them from that calculation without hiding them from
+# the repo, which matters: the contracts genuinely depend on those sources and
+# they must stay checked in for a reproducible `forge build`.
+packages/contracts/lib/** linguist-vendored
+
+# Generated, not authored. Counting a lockfile as source makes every dependency
+# bump look like a large change in the diff stats.
+pnpm-lock.yaml linguist-generated

@@ -69,6 +69,22 @@ func userToken(r *http.Request) string {
 	return strings.TrimSpace(r.Header.Get("X-Circle-User-Token"))
 }
 
+// offendingBlockchain finds which chain Circle complained about.
+//
+// Circle's rejection names the identifier it did not accept, so the retry can
+// remove exactly that one rather than guessing or giving up on all of them.
+// Matching on the identifiers WE sent, not on parsing Circle's message
+// structure: the message wording is theirs to change, but a chain id we asked
+// for either appears in it or it does not.
+func offendingBlockchain(errText string, sent []string) string {
+	for _, c := range sent {
+		if strings.Contains(errText, c) {
+			return c
+		}
+	}
+	return ""
+}
+
 // StartLogin is POST /v1/auth/circle/device — step one of Google sign-in.
 // Returns the device token the Web SDK needs to run the OAuth flow.
 func (h *CircleAuth) StartLogin(w http.ResponseWriter, r *http.Request) {
@@ -107,12 +123,41 @@ func (h *CircleAuth) Initialize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	challengeID, err := h.Client.InitializeUser(r.Context(), token, h.Blockchains)
-	if err != nil && len(h.FallbackBlockchains) > 0 {
-		// Never let a chain list break sign-in. Retry with the minimum that
-		// must work, and say loudly which chains were lost — cross-chain pay
-		// will be unavailable for this user until it is fixed.
-		log.Printf("circle: initialize with %v failed (%v); retrying with %v", h.Blockchains, err, h.FallbackBlockchains)
-		challengeID, err = h.Client.InitializeUser(r.Context(), token, h.FallbackBlockchains)
+	if err != nil {
+		// Never let a chain list break sign-in.
+		//
+		// This used to collapse straight to FallbackBlockchains, which is Arc
+		// alone -- so ONE blockchain identifier Circle would not accept cost
+		// that user every other chain, and with them the whole cross-chain
+		// payment path, silently and permanently. The blast radius of a typo,
+		// or of Circle retiring a testnet, was "this account can only ever pay
+		// on Arc".
+		//
+		// Drop chains one at a time instead. Circle names the offending
+		// identifier in its error, so the retry is targeted rather than
+		// scattergun, and a user loses exactly the chain that failed.
+		remaining := append([]string(nil), h.Blockchains...)
+		for len(remaining) > 1 && err != nil {
+			bad := offendingBlockchain(err.Error(), remaining)
+			if bad == "" {
+				break // Not a chain problem; the fallback below is the last resort.
+			}
+			log.Printf("circle: initialize rejected %s (%v); retrying without it", bad, err)
+			filtered := remaining[:0:0]
+			for _, c := range remaining {
+				if c != bad {
+					filtered = append(filtered, c)
+				}
+			}
+			remaining = filtered
+			challengeID, err = h.Client.InitializeUser(r.Context(), token, remaining)
+		}
+		if err != nil && len(h.FallbackBlockchains) > 0 {
+			// Still failing, and we no longer know why. Retry with the minimum
+			// that must work, and say loudly which chains were lost.
+			log.Printf("circle: initialize with %v failed (%v); retrying with %v", h.Blockchains, err, h.FallbackBlockchains)
+			challengeID, err = h.Client.InitializeUser(r.Context(), token, h.FallbackBlockchains)
+		}
 	}
 	if err != nil {
 		h.upstream(w, "initialize user", err)

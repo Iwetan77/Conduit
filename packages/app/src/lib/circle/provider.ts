@@ -342,10 +342,18 @@ export function createCircleProvider(config: CircleProviderConfig) {
       case "eth_accounts":
       case "eth_requestAccounts":
         return [address()];
+      // The chain we are ACTUALLY on, not the one we settle on.
+      //
+      // Both of these answered Arc unconditionally. That is a lie the moment
+      // wallet_switchEthereumChain moves the signing wallet to Base for a
+      // Gateway deposit: every library checks the chain before it signs, and
+      // one that is told Arc while the wallet is on Base either refuses, or
+      // builds the transaction for the wrong network. Reads already went to
+      // activeChain.rpc, so these two were the only places still claiming Arc.
       case "eth_chainId":
-        return `0x${arcTestnet.id.toString(16)}`;
+        return `0x${activeChain.id.toString(16)}`;
       case "net_version":
-        return String(arcTestnet.id);
+        return String(activeChain.id);
       case "eth_sendTransaction":
         return sendTransaction((params[0] ?? {}) as TxRequest);
       case "eth_signTypedData_v4":

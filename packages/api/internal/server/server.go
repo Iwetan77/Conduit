@@ -76,8 +76,15 @@ func New(cfg Config) http.Handler {
 		// offers as a source. Sonic, World Chain, Sei and HyperEVM appear in
 		// that flow but Circle cannot hold a wallet on them, so a Circle user
 		// simply cannot pay from those — a real gap, not an omission here.
+		//
+		// Adding to this list is safe now: Initialize drops a chain Circle
+		// rejects and retries without it, so an identifier that turns out to be
+		// wrong costs that one chain rather than every chain. It used to
+		// collapse to Arc alone, which is why ETH-SEPOLIA sat out until the
+		// retry was fixed.
 		Blockchains: []string{
 			"ARC-TESTNET",
+			"ETH-SEPOLIA",
 			"BASE-SEPOLIA",
 			"MATIC-AMOY",
 			"AVAX-FUJI",

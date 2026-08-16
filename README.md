@@ -67,13 +67,30 @@ The Circle token is verified once, at login, and exchanged for a Conduit session
 | Cross-currency | payer token differs from settle token | Circle StableFX RFQ: quote, trade, fund |
 | Cross-chain | payer's USDC is on another chain | Circle Gateway deposit and burn intent, forwarder mints on Arc, then one of the paths above |
 
+## The Circle stack
+
+Conduit is built on four Circle products, each doing one job. They are named here because the boundary matters: what Conduit is responsible for, and what it is not.
+
+| Product | Job | Where |
+|---|---|---|
+| **Circle Wallets** | Merchant identity. MPC user-controlled wallets behind Google sign-in, so Conduit never holds a key. | `packages/app/src/lib/circle/` |
+| **StableFX** | Cross-currency. Off-chain RFQ quote, Circle's maker delivers the settle currency via Permit2. | `packages/api/internal/fx/` |
+| **Gateway / Unified Balance Kit** | Cross-chain. Deposit-then-spend on CCTP rails; the payer signs a burn intent, Circle's forwarder mints on Arc. | `packages/app/src/lib/unified-balance.ts` |
+| **Arc** | The settlement network. Gas is paid in USDC, which is why a payment can settle without the payer holding a separate gas token. | chain ID 5042002 |
+
+**Circle Wallets** is an authentication and signing surface, not a custody one — the key is MPC and the merchant's, and Conduit holds no share of it. See [Authentication](#authentication) for how it reaches the app.
+
+**StableFX** supplies the liquidity Conduit does not hold: the quote, the maker and the delivery are Circle's. Coverage is hub-and-spoke through USDC — every quote has USDC on one leg — which is why the currency list below is "what quotes against USDC" rather than a fixed set.
+
+**Gateway** moves the payer's USDC to Arc without a per-payment bridge burn. The payer deposits into Gateway on their source chain, signs an off-chain burn intent, and Circle's forwarder submits the mint. Gas therefore falls in three places: the payer pays the deposit in their source chain's native token, the burn intent is free, and Circle covers the Arc mint and recovers it in the spend fee. A payment draws from **one** source chain, chosen by the payer.
+
 ### What is Conduit's and what is Circle's
 
 Same-currency payments move through Conduit's own on-chain contracts. That path is entirely ours.
 
-Cross-currency does **not** put Conduit in custody and does not swap on-chain. Circle StableFX produces a signed quote off-chain, and Circle's maker delivers the settle currency to the recipient through a Permit2 transfer. Conduit orchestrates and signs on the payer's behalf after their authorising signature; the liquidity and the delivery are Circle's.
+Cross-currency and cross-chain do **not** put Conduit in custody, and neither swaps on-chain. Conduit's own contracts never hold a payer's funds on those paths; it orchestrates and signs on the payer's behalf after their authorising signature.
 
-Cross-chain uses Circle Gateway, a deposit-then-spend model on CCTP rails rather than a bridge that burns per payment. The payer signs an off-chain burn intent and Circle's forwarder submits the mint on Arc. Conduit runs a `bridge_transfers` state machine with orphan recovery, so a process that dies mid-funding resumes rather than losing the transfer.
+What Conduit owns on those paths is the state machine. `bridge_transfers` tracks a cross-chain funding through deposit, mint and handoff, with orphan recovery, so a process that dies mid-funding resumes rather than losing the transfer. Nothing about that is Circle's to do.
 
 FX is quoted **after** funds land on Arc, never before, so a cross-chain payer is never quoted against liquidity that has not arrived.
 

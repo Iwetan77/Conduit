@@ -434,4 +434,102 @@ contract ConduitRouterTest is Test {
         bytes32 receiptId = router.execute(instruction);
         assertNotEq(receiptId, bytes32(0));
     }
+
+    // ── Payer authorization ───────────────────────────────────────────────────
+    //
+    // `payer` is a field of a caller-supplied struct. The only thing that ever
+    // stood behind it was the ERC-20 allowance, and the SDK made that
+    // unlimited and permanent on first use, so every wallet that had paid once
+    // was reachable by anyone who read an Approval event off the chain.
+    //
+    // Every pre-existing test here pranks as PAYER before calling, so the
+    // question these ask -- what happens when someone else calls -- had never
+    // been put to the contract.
+    //
+    // executeWithFX is deliberately not covered: Permit2 verifies the payer's
+    // signature there, which is the authorization, and the contract's own
+    // comment explains why a msg.sender check would be strictly worse.
+
+    function test_execute_revertsWhenCallerIsNotPayer() public {
+        address attacker = makeAddr("attacker");
+        uint256 victimBalance = usdc.balanceOf(PAYER);
+
+        // The state the SDK actually left every payer in: unlimited, permanent.
+        vm.prank(PAYER);
+        usdc.approve(address(router), type(uint256).max);
+
+        IConduitRouter.PaymentInstruction memory instruction = IConduitRouter.PaymentInstruction({
+            payer:         PAYER,
+            recipient:     attacker,
+            payerToken:    address(usdc),
+            recipientToken: address(usdc),
+            amount:        victimBalance,
+            deadline:      block.timestamp + 1 hours,
+            declarationId: bytes32(0)
+        });
+
+        vm.prank(attacker);
+        vm.expectRevert(bytes("not payer"));
+        router.execute(instruction);
+
+        assertEq(usdc.balanceOf(PAYER), victimBalance, "payer balance must be untouched");
+        assertEq(usdc.balanceOf(attacker), 0, "attacker must receive nothing");
+    }
+
+    function test_executeWithAmm_revertsWhenCallerIsNotPayer() public {
+        address attacker = makeAddr("attacker");
+        uint256 victimBalance = usdc.balanceOf(PAYER);
+
+        MockUniswapV2Router amm = new MockUniswapV2Router();
+        eurc.mint(address(amm), 1_000 * 1e6);
+
+        vm.prank(PAYER);
+        usdc.approve(address(router), type(uint256).max);
+
+        IConduitRouter.PaymentInstruction memory instruction = IConduitRouter.PaymentInstruction({
+            payer:         PAYER,
+            recipient:     attacker,
+            payerToken:    address(usdc),
+            recipientToken: address(eurc),
+            amount:        10 * 1e6,
+            deadline:      block.timestamp + 1 hours,
+            declarationId: bytes32(0)
+        });
+
+        address[] memory path = new address[](2);
+        path[0] = address(usdc);
+        path[1] = address(eurc);
+
+        vm.prank(attacker);
+        vm.expectRevert(bytes("not payer"));
+        router.executeWithAmm(instruction, path, victimBalance, address(amm));
+
+        assertEq(usdc.balanceOf(PAYER), victimBalance, "payer balance must be untouched");
+    }
+
+    /// The guard must not cost the payer their own payment.
+    function test_execute_stillWorksForPayer() public {
+        uint256 sendAmount = 10 * 1e6;
+
+        vm.prank(PAYER);
+        usdc.approve(address(router), sendAmount);
+
+        IConduitRouter.PaymentInstruction memory instruction = IConduitRouter.PaymentInstruction({
+            payer:         PAYER,
+            recipient:     RECIPIENT,
+            payerToken:    address(usdc),
+            recipientToken: address(usdc),
+            amount:        sendAmount,
+            deadline:      block.timestamp + 1 hours,
+            declarationId: bytes32(0)
+        });
+
+        uint256 recipientBefore = usdc.balanceOf(RECIPIENT);
+
+        vm.prank(PAYER);
+        bytes32 receiptId = router.execute(instruction);
+
+        assertNotEq(receiptId, bytes32(0));
+        assertEq(usdc.balanceOf(RECIPIENT) - recipientBefore, sendAmount);
+    }
 }

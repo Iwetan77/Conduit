@@ -8,7 +8,7 @@
 //
 // Uses swapTokensForExactTokens — recipient always receives the exact declared
 // amount. Payer's max input = getAmountsIn(amountOut) * 1.01 (1% slippage cap).
-// AMM router approval is MaxUint256 so it only happens on first-ever use.
+// AMM router approval is per-swap, sized to that swap's maximum input.
 
 import { ethers } from "ethers";
 import type { Currency } from "./types.js";
@@ -94,12 +94,22 @@ async function executeSwap(
   const { router: bestRouter, requiredIn } = await getBestRouter(provider, amountOut, path);
   const amountInMax = requiredIn * 101n / 100n;
 
-  // Approve router MaxUint256 on first use — skipped on every subsequent payment
+  // Approve exactly this swap's maximum input, not MaxUint256.
+  //
+  // An unlimited approval to an AMM router is a standing authority over the
+  // payer's whole balance of the input token, granted once and never
+  // withdrawn. Approving per swap costs a transaction when the allowance is
+  // short and keeps the authority scoped to the swap it was granted for.
   const tokenContract = new ethers.Contract(currencyToAddress(tokenIn), ERC20_ABI, signer);
   const signerAddr = await signer.getAddress();
   const currentAllowance: bigint = await tokenContract.allowance(signerAddr, bestRouter.address);
   if (currentAllowance < amountInMax) {
-    const approveTx = await tokenContract.approve(bestRouter.address, ethers.MaxUint256);
+    // Cleared first for tokens that reject a non-zero-to-non-zero change.
+    if (currentAllowance > 0n) {
+      const reset = await tokenContract.approve(bestRouter.address, 0n);
+      await reset.wait();
+    }
+    const approveTx = await tokenContract.approve(bestRouter.address, amountInMax);
     await approveTx.wait();
   }
 

@@ -94,6 +94,16 @@ contract ConduitRouter is IConduitRouter, ReentrancyGuard, Ownable2Step {
         returns (bytes32 receiptId)
     {
         _validateInstruction(instruction);
+        // `payer` is a field of a caller-supplied struct, so without this the
+        // only thing behind it is the ERC-20 allowance -- and an allowance is a
+        // spending limit, not a statement of who may spend it. Anyone could
+        // name someone else as payer and send that person's balance wherever
+        // they liked.
+        //
+        // executeWithFX deliberately has no equivalent check; see the comment
+        // there. Permit2 verifies the payer's signature on that path, which is
+        // a stronger authorization than msg.sender and survives relaying.
+        require(msg.sender == instruction.payer, "not payer");
         require(
             instruction.payerToken == instruction.recipientToken,
             "use executeWithFX for cross-currency"
@@ -261,6 +271,9 @@ contract ConduitRouter is IConduitRouter, ReentrancyGuard, Ownable2Step {
         address ammRouter
     ) external nonReentrant returns (bytes32 receiptId) {
         _validateInstruction(instruction);
+        // Same reasoning as execute(): without this, the pull below is
+        // authorized by the payer's allowance alone and anyone may trigger it.
+        require(msg.sender == instruction.payer, "not payer");
         require(
             instruction.payerToken != instruction.recipientToken,
             "use execute() for same-currency"

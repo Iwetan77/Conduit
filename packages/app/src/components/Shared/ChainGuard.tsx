@@ -19,12 +19,32 @@ const SUPPORTED_EXTERNAL_CHAINS: Record<number, string> = {
 
 export function ChainGuard({ children }: ChainGuardProps) {
   const pathname = usePathname();
-  const { chain, isConnected } = useAccount();
+  // chainId, not chain.
+  //
+  // wagmi only resolves `chain` to an object when the connected network is one
+  // of the configured chains, and the only configured chain is Arc. So on
+  // Ethereum -- or any network not in the config -- `chain` is undefined, the
+  // "not connected" branch below returned early, and this guard passed the
+  // wallet straight through to a send it could not complete. It caught only
+  // the chains already known to the config, which are the ones least likely to
+  // be a problem.
+  //
+  // `chainId` is the raw number the wallet reports, whatever it is, and wagmi
+  // keeps it current by listening for the wallet's own chainChanged event, so
+  // switching networks re-renders this without a reload.
+  const { chain, chainId, isConnected } = useAccount();
   const { switchChain } = useSwitchChain();
 
-  // Pay page is public-facing — payers may be on any chain.
-  // They need to see the declaration before being asked to connect.
-  // Chain enforcement is handled inside PayConfirm.tsx instead.
+  // Pay page is public-facing — payers may be on any chain, and paying from
+  // one is a feature rather than a mistake (see CrossChainBridge), so this
+  // must not gate it. A payer also needs to read the declaration before being
+  // asked to connect anything.
+  //
+  // This used to say enforcement happened inside PayConfirm instead. It does
+  // not -- PayConfirm has no chain check of any kind. Left accurate rather
+  // than reassuring: the same-currency Arc settle path on this page still
+  // needs its own guard at send time, which is a separate piece of work to
+  // the one that fixed this component.
   if (pathname.startsWith("/pay/")) return <>{children}</>;
 
   // Dashboard work — creating payment links, viewing settlements/
@@ -38,13 +58,16 @@ export function ChainGuard({ children }: ChainGuardProps) {
   }
 
   // Not connected — let the page handle its own connect state
-  if (!isConnected || !chain) return <>{children}</>;
+  if (!isConnected || !chainId) return <>{children}</>;
 
   // Correct chain — render normally
-  if (chain.id === arcTestnet.id) return <>{children}</>;
+  if (chainId === arcTestnet.id) return <>{children}</>;
 
-  const chainName = SUPPORTED_EXTERNAL_CHAINS[chain.id] ?? chain.name;
-  const isCCTPSupported = chain.id in SUPPORTED_EXTERNAL_CHAINS;
+  // `chain?.name` is only there for configured chains; for everything else fall
+  // back to the id, so the message says which network rather than "undefined".
+  const chainName =
+    SUPPORTED_EXTERNAL_CHAINS[chainId] ?? chain?.name ?? `chain ${chainId}`;
+  const isCCTPSupported = chainId in SUPPORTED_EXTERNAL_CHAINS;
 
   return (
     <div className="min-h-screen flex items-center justify-center px-4">

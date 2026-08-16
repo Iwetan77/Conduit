@@ -10,8 +10,6 @@ import { motion } from 'framer-motion'
 import { QRCodeSVG } from 'qrcode.react'
 import { DEFAULT_APP_URL } from '@conduit/sdk/lite'
 
-const FORMSPREE_ID = 'mzdwlelo'
-
 // The panels used to print "app.conduit.xyz" and "conduit.xyz" as though they
 // were ours. They aren't — that placeholder is the same one that sent scanned
 // QRs to a stranger's site.
@@ -28,60 +26,6 @@ function useAppUrl() {
   const [url, setUrl] = useState(CONFIGURED_APP_URL)
   useEffect(() => setUrl(DEFAULT_APP_URL), [])
   return url
-}
-
-function WaitlistForm() {
-  const [email, setEmail] = useState('')
-  const [status, setStatus] = useState<'idle' | 'loading' | 'done' | 'error'>('idle')
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!email || status === 'loading' || status === 'done') return
-    setStatus('loading')
-    try {
-      const res = await fetch(`https://formspree.io/f/${FORMSPREE_ID}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({ email }),
-      })
-      setStatus(res.ok ? 'done' : 'error')
-    } catch {
-      setStatus('error')
-    }
-  }
-
-  if (status === 'done') {
-    return (
-      <div className="flex items-center gap-3 px-5 py-3 border border-signal/30 bg-signal/5">
-        <span className="w-2 h-2 bg-signal" />
-        <span className="font-mono text-[12px] text-signal">You&apos;re on the list. We&apos;ll reach out.</span>
-      </div>
-    )
-  }
-
-  return (
-    <form onSubmit={handleSubmit} className="flex items-center gap-2 w-full max-w-sm">
-      <input
-        id="waitlist-input"
-        type="email"
-        required
-        value={email}
-        onChange={e => setEmail(e.target.value)}
-        placeholder="your@email.com"
-        className="flex-1 px-4 py-3 bg-surface border border-border
-                   font-mono text-[12px] text-ink placeholder-ink-dim
-                   focus:outline-none focus:border-signal transition-colors"
-      />
-      <button
-        type="submit"
-        disabled={status === 'loading'}
-        className="px-5 py-3 font-mono font-bold text-[12px] bg-signal text-signal-ink
-                   disabled:opacity-60 whitespace-nowrap hover:bg-signal/90 transition-colors"
-      >
-        {status === 'loading' ? '...' : 'Join Waitlist'}
-      </button>
-    </form>
-  )
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -177,9 +121,7 @@ export function Hero() {
           </Link>
         </div>
 
-        {/* Waitlist form */}
         <div className="flex flex-col items-center gap-4 mb-16 w-full">
-          <WaitlistForm />
           <Link
             href="/docs"
             className="font-mono text-[11px] text-ink-dim hover:text-signal transition-colors uppercase tracking-widest"
@@ -440,31 +382,6 @@ export function HowItWorks() {
             </div>
           ))}
         </div>
-      </div>
-    </section>
-  )
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// WAITLIST SECTION (second CTA before footer)
-// ─────────────────────────────────────────────────────────────────────────────
-
-export function WaitlistSection() {
-  return (
-    <section className="relative z-10 py-32 px-4 border-t border-border text-center">
-      <div className="max-w-xl mx-auto flex flex-col items-center gap-6">
-        <p className="font-mono text-[10px] text-signal uppercase tracking-[0.18em]">Early Access</p>
-        <h2
-          className="font-display font-bold text-ink leading-tight"
-          style={{ fontSize: 'clamp(1.8rem, 4vw, 2.6rem)' }}
-        >
-          Be first on Arc.
-        </h2>
-        <p className="font-body text-[0.9rem] text-ink-dim leading-[1.75]">
-          Conduit is live on Arc Testnet. Mainnet access is invite-only. Drop your email and we&apos;ll
-          reach out when it&apos;s your turn.
-        </p>
-        <WaitlistForm />
       </div>
     </section>
   )

@@ -68,3 +68,6 @@ docs/cctp-capability.md
 # Progress record for the security hardening pass: phase, change, gate output.
 # Same reasoning as STATUS.md -- it is how the work went, not what the code is.
 whereistopped.md
+
+# Patch files from local review and rebase work.
+*.patch

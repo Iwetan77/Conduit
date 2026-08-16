@@ -438,9 +438,9 @@ async function erc20BalanceOf(rpcUrl: string, token: string, owner: string): Pro
 }
 
 // Combine already-deposited Gateway balance with spendable wallet balance into
-// one per-chain view, so planAllocations sizes against everything the payer can
-// actually pay with. spendUsdcToArc() then deposits any wallet portion at spend
-// time (its deposit-if-needed loop covers the shortfall between the two).
+// one per-chain view, so the funding check sizes against everything the payer
+// can actually pay with. spendUsdcToArc() then deposits any wallet portion at
+// spend time (its deposit-if-needed loop covers the shortfall between the two).
 export function mergeUsdc(deposited: UnifiedUsdc, wallet: ChainUsdc[]): UnifiedUsdc {
   const minorByChain = new Map<string, bigint>();
   for (const c of [...deposited.byChain, ...wallet]) {
@@ -463,31 +463,18 @@ export function chainToSourceSlug(chain: string): SourceKind | null {
   return null;
 }
 
-// Greedily pick source allocations from the payer's per-chain balances to cover
-// `requiredMinor` USDC. Returns null if the unified balance can't cover it.
-export function planAllocations(
-  unified: UnifiedUsdc,
-  requiredMinor: bigint
-): { allocations: Array<{ chain: string; amountMinor: bigint }>; primary: SourceKind } | null {
-  const sorted = [...unified.byChain]
-    .map((c) => ({ chain: c.chain, minor: usdcHumanToMinor(c.confirmed) }))
-    .filter((c) => c.minor > 0n && chainToSourceSlug(c.chain) !== null)
-    .sort((a, b) => (b.minor > a.minor ? 1 : -1));
+// planAllocations -- a greedy plan spreading one payment across several source
+// chains -- was removed.
+//
+// Nothing could execute it. spendUsdcToArc deposits the full amount on a single
+// chain and spends it there, so a multi-chain plan was only ever a claim the
+// spend could not honour: it let the confirm screen accept a payment that then
+// failed in the deposit wait with a message about timing.
+//
+// It is a feature, not a bug fix, and a costly one -- a deposit transaction per
+// source chain, each needing that chain's own native gas. Worth building
+// deliberately if it is ever wanted, rather than left half-present.
 
-  const allocations: Array<{ chain: string; amountMinor: bigint }> = [];
-  let remaining = requiredMinor;
-  for (const c of sorted) {
-    if (remaining <= 0n) break;
-    const take = c.minor < remaining ? c.minor : remaining;
-    allocations.push({ chain: c.chain, amountMinor: take });
-    remaining -= take;
-  }
-  if (remaining > 0n || allocations.length === 0) return null;
-
-  const primary = chainToSourceSlug(allocations[0].chain);
-  if (!primary) return null;
-  return { allocations, primary };
-}
 
 export interface SpendToArcResult {
   txHash: string;

@@ -36,7 +36,6 @@ import {
   getWalletUsdc,
   mergeUsdc,
   spendUsdcToArc,
-  planAllocations,
   usdcMinorToHuman,
   usdcDisplay,
   chainLabel,
@@ -435,7 +434,16 @@ export function CrossChainBridge({ intentId, intent }: CrossChainBridgeProps) {
       // cover the amount on its own — the confirm screen then shows what can.
       const pickedFunded = picked ? funded.find((c) => c.chain === picked && c.minor >= need) : undefined;
       setSourceChain(pickedFunded?.chain ?? payable?.chain ?? null);
-      if (payable || planAllocations(bal, need)) {
+      // One chain has to cover the whole amount.
+      //
+      // A payment draws from a single source chain -- spendUsdcToArc deposits
+      // the full amount on one and spends it there. This used to also accept a
+      // greedy plan spread ACROSS chains, so a payer holding 30 on Base and 30
+      // on Polygon owing 50 reached the confirm screen, and the spend then
+      // tried to pull all 50 from Base. It failed in the deposit-confirm wait
+      // as "still confirming, wait ~30s" -- a timing message for a problem
+      // that was never about timing.
+      if (payable) {
         setPhase("confirm");
       } else {
         setPhase("insufficient");
@@ -464,12 +472,15 @@ export function CrossChainBridge({ intentId, intent }: CrossChainBridgeProps) {
     setPhase("spending");
     try {
       const need = BigInt(requiredUSDC);
-      // Honour the payer's chosen chain; fall back to the greedy plan only when
-      // nothing was picked (single-chain case).
-      const chosen = sourceChain
-        ? { allocations: [{ chain: sourceChain, amountMinor: need }], primary: chainToSourceSlug(sourceChain) }
-        : planAllocations(unified, need);
-      if (!chosen?.primary) throw new Error("Balance changed — not enough USDC across your chains.");
+      // The chain the payer chose, and only that. There is no fallback to a
+      // plan spread across chains: the spend cannot execute one, so accepting
+      // it here would only defer the failure to somewhere less legible.
+      if (!sourceChain) throw new Error("Choose the chain to pay from.");
+      const chosen = {
+        allocations: [{ chain: sourceChain, amountMinor: need }],
+        primary: chainToSourceSlug(sourceChain),
+      };
+      if (!chosen.primary) throw new Error("Balance changed — no single chain holds enough USDC.");
 
       // Depositing from an EVM chain requires the wallet to BE on that chain —
       // the payer is normally sitting on Arc, so without this the SDK rejects
@@ -673,12 +684,22 @@ export function CrossChainBridge({ intentId, intent }: CrossChainBridgeProps) {
             {adapter?.address ? `${adapter.address.slice(0, 5)}…${adapter.address.slice(-4)}` : "—"}
           </span>
         </div>
+        {/* Per chain, not the total.
+            A payment is funded from ONE chain, so a total across chains is the
+            wrong number to show here: it can exceed the amount owed while no
+            single chain covers it, which reads as Conduit refusing money the
+            payer plainly has. Name the largest chain instead, so the gap shown
+            is the gap that actually has to be closed. */}
         <p className="text-danger text-sm">
-          You need {usdcDisplay(BigInt(requiredUSDC ?? "0"))} USDC, but Conduit found only{" "}
-          {usdcDisplay(
-            (unified ? fundedChains(unified) : []).reduce((sum, c) => sum + c.minor, 0n)
-          )}{" "}
-          USDC across your chains. Add USDC and try again.
+          You need {usdcDisplay(BigInt(requiredUSDC ?? "0"))} USDC on one chain.{" "}
+          {(() => {
+            const funded = unified ? fundedChains(unified) : [];
+            const best = funded[0];
+            return best
+              ? `Your largest balance is ${usdcDisplay(best.minor)} USDC on ${chainLabel(best.chain)}.`
+              : "Conduit found no USDC on any supported chain.";
+          })()}{" "}
+          A payment draws from a single chain, so topping one up is what unblocks this.
         </p>
         {unified && fundedChains(unified).length > 0 && (
           <p className="text-ink-dim text-xs font-mono">

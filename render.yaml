@@ -33,6 +33,12 @@ services:
       - key: CONDUIT_APP_BASE_URL
         sync: false
 
+      # Conduit's own router on Arc testnet. The settlement indexer watches it
+      # for PaymentSettled, so leaving it unset silently disables that path.
+      # Not a secret -- it is a public contract address.
+      - key: CONDUIT_ROUTER_ADDRESS
+        value: "0x2F728Dd86099d1AE39dD7377505539179CeC7C6F"
+
       # ── Merchant login: Circle Wallets ─────────────────────────────────
       # The API key is a server-side secret and never reaches the browser;
       # the app calls /v1/auth/circle/* to mint device and user tokens.
@@ -53,6 +59,10 @@ services:
       - key: CONDUIT_TRUSTED_PROXY
         value: "1"
 
-      # ── Optional: cross-chain funding (signs only, holds no gas) ───────
+      # ── Optional: cross-chain funding ──────────────────────────────────
+      # This wallet BROADCASTS transactions -- it pays the merchant out of its
+      # own USDC once a bridged transfer mints. It needs both a USDC float and
+      # gas, and it runs dry silently. The comment here used to read "signs
+      # only, holds no gas", which would size it at zero.
       - key: ARC_RELAYER_KEY
         sync: false

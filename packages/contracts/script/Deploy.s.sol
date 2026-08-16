@@ -127,10 +127,16 @@ contract Deploy is Script {
         vm.serializeAddress(json, "zaru", ZARU);
         string memory finalJson = vm.serializeAddress(json, "krw1", KRW1);
 
-        // Foundry's fs_permissions check is a literal path-prefix match — it does not
-        // canonicalize ".." segments — so this must be the real absolute path, not
-        // projectRoot() + "/../..". Matches fs_permissions in foundry.toml.
-        string memory outPath = "/home/iwetan/conduit/deployments/arc-testnet.json";
+        // Derived from projectRoot so this runs on any checkout. It was an
+        // absolute path under one developer's home directory, which made the
+        // deploy unreproducible anywhere else, CI included.
+        //
+        // fs_permissions in foundry.toml grants "../../deployments" relative to
+        // the same root, so the two stay in step.
+        string memory outPath = string.concat(
+            vm.projectRoot(),
+            "/../../deployments/arc-testnet.json"
+        );
         vm.writeJson(finalJson, outPath);
         console2.log("");
         console2.log("Wrote", outPath);

@@ -2,7 +2,6 @@ export { ConduitClient } from "./client.js";
 export { DeclarationClient } from "./declaration.js";
 export { RouterClient } from "./router.js";
 export { ReceiptClient } from "./receipt.js";
-export { swap, swapWithBrowserWallet, estimateRequiredIn } from "./swap.js";
 export { toHumanAmount, fromHumanAmount } from "./amount.js";
 export { resolveCurrency, currencyToAddress, currencyDecimals, addressToCurrency, CURRENCIES } from "./currency.js";
 export { arcTestnet } from "./chains.js";
@@ -22,4 +21,3 @@ export type {
   FulfillOptions,
   GetHistoryOptions,
 } from "./types.js";
-export type { SwapResult } from "./swap.js";

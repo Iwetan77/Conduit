@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.24;
+pragma solidity 0.8.24;
 
 /// @title IConduitRouter
 /// @notice The single execution surface for all Conduit payments.
@@ -40,6 +40,12 @@ interface IConduitRouter {
     event StableFXAdapterSet(address indexed adapter);
     event AtomicSettlerSet(address indexed settler);
     event SettlementPreferenceRegistrySet(address indexed registry);
+    /// @notice Emitted when the protocol fee changes. Every other admin action
+    ///         announced itself; a fee change — the one that alters what every
+    ///         payer is charged — did not, so it was invisible to any indexer.
+    event ProtocolFeeSet(uint256 bps);
+    /// @notice Emitted when accumulated fees are withdrawn.
+    event FeesWithdrawn(address indexed token, address indexed to, uint256 amount);
 
     // ── Core Functions ────────────────────────────────────────────────────────
 

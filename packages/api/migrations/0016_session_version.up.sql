@@ -1,0 +1,15 @@
+-- Make dashboard sessions revocable.
+--
+-- A cs_ token was a signed (account id, expiry) pair and nothing else, held in
+-- localStorage for 12 hours. There was no way to invalidate one: no session id,
+-- no version, no deny list. Signing out cleared the browser's copy and left the
+-- token itself valid until it expired on its own.
+--
+-- This counter is included in the signed payload and compared on every request.
+-- Bumping it invalidates every token issued for the account, which is what
+-- makes sign-out mean something and gives an operator a way to cut off a
+-- session that should not continue.
+--
+-- Existing tokens carry no version and stop verifying, so everyone signed in
+-- when this deploys signs in again once. That is the intended cost.
+ALTER TABLE accounts ADD COLUMN session_version INTEGER NOT NULL DEFAULT 0;

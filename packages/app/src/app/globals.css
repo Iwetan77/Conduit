@@ -114,6 +114,20 @@ body {
   .toast-in { animation: none; }
 }
 
+/* The chain picker slides up from the bottom of the screen — this is usually
+   a phone, and that is where the thumb already is. Matches toast-in's timing
+   so the app has one motion language rather than two. */
+@keyframes sheet-up {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+.sheet-up {
+  animation: sheet-up 180ms ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .sheet-up { animation: none; }
+}
+
 /* Scrollbar */
 ::-webkit-scrollbar {
   width: 4px;
@@ -181,3 +195,42 @@ input[type="number"]::-webkit-outer-spin-button {
 .prose-conduit ul li::before { content: '→'; position: absolute; left: 0; color: var(--signal); }
 .prose-conduit strong { color: var(--ink); font-weight: 600; }
 .prose-conduit hr { border: none; border-top: 1px solid var(--border); margin: 2rem 0; }
+
+/* Payment in flight. Replaces the generic spinner on every settle screen —
+   see components/Shared/Rocket.tsx for why.
+
+   The hover is deliberately slow and small: a payment is not frantic, and a
+   fast bob would read as panic. The flame flickers on a much shorter cycle so
+   the rocket looks like it is burning fuel while it holds position. */
+@keyframes rocket-hover {
+  0%, 100% { transform: translateY(2px); }
+  50%      { transform: translateY(-3px); }
+}
+@keyframes rocket-flame {
+  0%, 100% { transform: scaleY(1);    opacity: 1; }
+  50%      { transform: scaleY(0.72); opacity: 0.75; }
+}
+/* Launch: slow off the pad, then gone. ease-in (not ease-out) is what makes it
+   accelerate away rather than drift, and it is the difference between "it
+   left" and "it floated off". */
+@keyframes rocket-launch {
+  0%   { transform: translateY(0);      opacity: 1; }
+  25%  { transform: translateY(6px);    opacity: 1; }
+  100% { transform: translateY(-180px); opacity: 0; }
+}
+
+.rocket-hover { animation: rocket-hover 1900ms ease-in-out infinite; }
+.rocket-flame {
+  transform-origin: 24px 44px;
+  animation: rocket-flame 260ms ease-in-out infinite;
+}
+.rocket-launch {
+  animation: rocket-launch 900ms cubic-bezier(0.5, 0, 0.9, 0.4) forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Still show the rocket, just hold it still. The shape carries the meaning;
+     the motion is decoration. */
+  .rocket-hover, .rocket-flame, .rocket-launch { animation: none; }
+  .rocket-launch { opacity: 1; }
+}

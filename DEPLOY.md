@@ -37,7 +37,9 @@ Migrations run automatically at startup via golang-migrate.
 
 | Variable | Enables |
 |---|---|
-| `PRIVY_APP_ID` + `PRIVY_VERIFICATION_KEY` | Merchant login. Without both, only `sk_`/`pk_` API-key auth works — the dashboard cannot be signed into. |
+| `CIRCLE_API_KEY` | Merchant login (Circle Wallets). Without it, only `sk_`/`pk_` API-key auth works — the dashboard cannot be signed into. Server-side only; it never reaches the browser. |
+| `CONDUIT_SESSION_SECRET` | Signs dashboard session tokens. **Set this.** Unset, the API generates a random secret per boot, so every deploy signs every merchant out and sessions can never work across more than one instance. Any 32-byte hex value. |
+| `CONDUIT_TRUSTED_PROXY` | Set to any non-empty value when the API sits behind a proxy or load balancer (Render, Fly, Cloud Run all do). Rate limiting then identifies clients by `X-Forwarded-For` instead of the proxy's own address. Leave unset if the server is directly exposed — the header is caller-supplied, and trusting it without a proxy in front lets anyone bypass the limit. |
 | `ARC_RELAYER_KEY` | Cross-chain (Solana → Arc) funding via Circle Gateway. Without it the bridge routes simply aren't registered. |
 | `SOLANA_RPC` | Solana endpoint for the above. Defaults to public devnet. |
 
@@ -64,7 +66,7 @@ the standard `next build`.
 | Variable | Notes |
 |---|---|
 | `NEXT_PUBLIC_CONDUIT_API_URL` | Public URL of the API above. **Must be set at build time** — Next inlines `NEXT_PUBLIC_*` into the browser bundle, so changing it later requires a rebuild, not just a restart. |
-| `NEXT_PUBLIC_PRIVY_APP_ID` | Must match the API's `PRIVY_APP_ID`. |
+| `NEXT_PUBLIC_CIRCLE_APP_ID` + `NEXT_PUBLIC_GOOGLE_CLIENT_ID` | Google sign-in. Both required together; without them the Google button is hidden and only wallet connection works. |
 | `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` | From cloud.walletconnect.com. **Without it mobile wallets cannot connect at all** — only browser-extension wallets and Google sign-in work. |
 | `NEXT_PUBLIC_CONDUIT_ROUTER`, `NEXT_PUBLIC_DECLARATION_REGISTRY`, `NEXT_PUBLIC_STABLEFX_ADAPTER`, `NEXT_PUBLIC_ATOMIC_SETTLER`, `NEXT_PUBLIC_CURRENCY_REGISTRY`, `NEXT_PUBLIC_SETTLEMENT_PREFERENCE_REGISTRY` | Deployed contract addresses. The SDK refuses to guess these — pages error visibly rather than silently using a wrong address. |
 | `NEXT_PUBLIC_ARC_RPC`, `NEXT_PUBLIC_CHAIN_ID`, `NEXT_PUBLIC_EXPLORER` | Chain config. |
@@ -74,17 +76,24 @@ There is no `NEXT_PUBLIC_DOCS_URL` any more — docs are `/docs` in this app.
 
 ---
 
-## 3. Privy (do this or every login breaks)
+## 3. Circle Wallets + Google (do this or every login breaks)
 
-Privy **requires HTTPS in production**; `http://localhost` is the only
-exception it allows. In the Privy dashboard:
+Merchant login is Circle user-controlled wallets with Google sign-in. This
+replaced Privy; if you are looking for the Privy section, it was removed in
+Phase 7 of that migration along with `PRIVY_APP_ID` and
+`PRIVY_VERIFICATION_KEY`.
 
-1. Add the deployed origin (e.g. `https://conduit.vercel.app`) to **allowed
-   origins / domains**. Privy silently rejects OAuth from unlisted origins —
-   the symptom is a Google button that appears to do nothing.
-2. Confirm **Google** is enabled under login methods.
-3. `PRIVY_VERIFICATION_KEY` is the ES256 **public** key from the dashboard.
-   The API verifies access-token JWTs against it directly, not via JWKS.
+Three things must agree, and a mismatch in any of them fails at Google rather
+than anywhere that names Conduit:
+
+1. **Google Cloud console** — the OAuth client needs the deployed origin as an
+   authorised **JavaScript origin**, and `<origin>/auth/circle/callback` as an
+   authorised **redirect URI**. Circle's SDK navigates the whole tab to Google,
+   so a missing redirect URI surfaces as `redirect_uri_mismatch`.
+2. **Circle console** — the app id (`NEXT_PUBLIC_CIRCLE_APP_ID`) and the Google
+   client id registered against it.
+3. **API** — `CIRCLE_API_KEY`, server-side only. It never reaches the browser:
+   device and user tokens are minted through `/v1/auth/circle/*`.
 
 Every port or domain change needs step 1 repeated.
 
@@ -96,7 +105,8 @@ Every port or domain change needs step 1 repeated.
 2. Deploy the API. Confirm `GET /healthz` returns 200 and
    `GET /v1/currencies` returns the currency table.
 3. Deploy the app with `NEXT_PUBLIC_CONDUIT_API_URL` pointing at it.
-4. Add the app's origin to Privy, and to the API's
+4. Add the app's origin to the Google OAuth client (plus the
+   `/auth/circle/callback` redirect URI), and to the API's
    `CONDUIT_ALLOWED_ORIGINS`. Redeploy the API.
 5. Walk it end to end: sign in as a merchant → create a payment link → open
    the link in a private window → pay it.

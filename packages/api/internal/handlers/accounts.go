@@ -13,8 +13,8 @@ import (
 )
 
 type Accounts struct {
-	Pool          *pgxpool.Pool
-	PrivyVerifier *auth.PrivyVerifier
+	Pool           *pgxpool.Pool
+	CircleVerifier *auth.CircleVerifier
 }
 
 type createAccountRequest struct {
@@ -86,13 +86,22 @@ func (h *Accounts) Create(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-type createFromPrivyRequest struct {
+// Named for the job, not the provider. These were createFromPrivyRequest and
+// privyAccountResponse; the shapes never had anything to do with Privy, which
+// is why the Circle bootstrap reused them verbatim and why the names outlived
+// their accuracy by a whole migration.
+type bootstrapAccountRequest struct {
 	Name           string `json:"name"`
 	SettleCurrency string `json:"settle_currency"`
 	SettleAddress  string `json:"settle_address"` // defaults to LoginWallet if empty
-	LoginWallet    string `json:"login_wallet"`   // the payer's Privy embedded wallet address
+	LoginWallet    string `json:"login_wallet"`   // the signed-in user's wallet address
 }
-type privyAccountResponse struct {
+type bootstrapAccountResponse struct {
+	// SessionToken is Conduit's own dashboard session, issued here so the
+	// identity provider is not on the hot path. Without it every subsequent
+	// request re-verifies with the provider -- for Circle that is a network
+	// call, measured between 280ms and 7.6s on a polling dashboard.
+	SessionToken   string  `json:"session_token,omitempty"`
 	ID             string  `json:"id"`
 	Name           string  `json:"name"`
 	LogoURL        *string `json:"logo_url,omitempty"`
@@ -102,38 +111,69 @@ type privyAccountResponse struct {
 	Livemode       bool    `json:"livemode"`
 }
 
-// CreateFromPrivy is POST /v1/accounts/privy -- the dashboard's login
-// bootstrap. Verifies the Privy access token itself (this route is NOT
-// behind auth.Middleware, since a brand-new Privy user has no account yet
-// for the middleware to resolve against). Idempotent: a merchant who
-// already onboarded just gets their existing account back, not a
-// duplicate -- the frontend calls this on every login, not only the first.
-func (h *Accounts) CreateFromPrivy(w http.ResponseWriter, r *http.Request) {
-	authHeader := r.Header.Get("Authorization")
-	if !strings.HasPrefix(authHeader, "Bearer ") {
-		writeErr(w, apierrors.E(apierrors.CodeUnauthorized, ""))
+// CreateFromPrivy stood here, serving POST /v1/accounts/privy. Removed in
+// Phase 7 along with the route and PrivyVerifier. CreateFromCircle below is
+// the like-for-like replacement -- same bootstrapAccount, same idempotency,
+// different credential.
+
+// CreateFromCircle is POST /v1/accounts/circle -- the same bootstrap for a
+// Circle login. The Circle user token comes in its own header rather than as a
+// Bearer token: it is Circle's credential, not a Conduit key, and must never
+// be resolvable by the same path that resolves sk_/pk_ keys.
+//
+// Verification is a call to Circle, because unlike a Privy JWT this token is
+// opaque to us. That cost is acceptable here precisely because this is the
+// authentication boundary and runs once per login.
+func (h *Accounts) CreateFromCircle(w http.ResponseWriter, r *http.Request) {
+	if h.CircleVerifier == nil {
+		writeErr(w, apierrors.E(apierrors.CodeNotFound, "circle auth is not configured"))
 		return
 	}
-	token := strings.TrimPrefix(authHeader, "Bearer ")
-	privyUserID, err := h.PrivyVerifier.Verify(token)
+	token := strings.TrimSpace(r.Header.Get("X-Circle-User-Token"))
+	if token == "" {
+		writeErr(w, apierrors.E(apierrors.CodeUnauthorized, "X-Circle-User-Token"))
+		return
+	}
+	circleUserID, err := h.CircleVerifier.Verify(r.Context(), token)
 	if err != nil {
 		writeErr(w, apierrors.E(apierrors.CodeUnauthorized, ""))
 		return
 	}
+	h.bootstrapAccount(w, r, auth.ProviderCircle, circleUserID)
+}
 
+// bootstrapAccount is the shared login bootstrap, once the caller has proven
+// which (provider, subject) they are.
+//
+// Shared rather than copied per provider on purpose. The two flows differ only
+// in how the subject is established; everything after that -- idempotency, the
+// required fields, the settle-address default, which columns get written -- is
+// identical, and a second copy would drift. The provider is passed in because
+// it is half the identity key, never defaulted.
+//
+// Idempotent: a merchant who already onboarded gets their existing account
+// back, not a duplicate. The frontend calls this on every login, not only the
+// first.
+func (h *Accounts) bootstrapAccount(w http.ResponseWriter, r *http.Request, provider, subject string) {
 	ctx := r.Context()
 
 	// Already onboarded -- return the existing account, don't re-create.
-	var existing privyAccountResponse
+	var existing bootstrapAccountResponse
 	var loginWallet *string
-	err = h.Pool.QueryRow(ctx,
-		`SELECT id, name, logo_url, settle_currency, settle_address, login_wallet, livemode FROM accounts WHERE privy_user_id = $1`,
-		privyUserID,
-	).Scan(&existing.ID, &existing.Name, &existing.LogoURL, &existing.SettleCurrency, &existing.SettleAddress, &loginWallet, &existing.Livemode)
+	var sessionVersion int
+	err := h.Pool.QueryRow(ctx,
+		`SELECT id, name, logo_url, settle_currency, settle_address, login_wallet, livemode, session_version
+		 FROM accounts WHERE auth_provider = $1 AND auth_subject = $2`,
+		provider, subject,
+	).Scan(&existing.ID, &existing.Name, &existing.LogoURL, &existing.SettleCurrency, &existing.SettleAddress, &loginWallet, &existing.Livemode, &sessionVersion)
 	if err == nil {
 		if loginWallet != nil {
 			existing.LoginWallet = *loginWallet
 		}
+		// Signed at the account's CURRENT version, so a token minted by this
+		// login survives while every token from before the last sign-out does
+		// not.
+		existing.SessionToken = auth.NewSessionToken(existing.ID, sessionVersion)
 		writeJSON(w, http.StatusOK, existing)
 		return
 	}
@@ -143,7 +183,7 @@ func (h *Accounts) CreateFromPrivy(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// First login -- onboard.
-	var req createFromPrivyRequest
+	var req bootstrapAccountRequest
 	if decodeErr := json.NewDecoder(r.Body).Decode(&req); decodeErr != nil {
 		writeErr(w, apierrors.E(apierrors.CodeInvalidRequest, "body"))
 		return
@@ -158,18 +198,25 @@ func (h *Accounts) CreateFromPrivy(w http.ResponseWriter, r *http.Request) {
 	}
 
 	accountID := models.NewID("acct")
+	// privy_user_id is not written at all any more -- nothing can produce a
+	// Privy identity. The column still exists (old rows carry it, and migration
+	// 0014's rollback reads it), so new rows leave it NULL, which is exactly
+	// what the personal-account predicate in settlement_intents.go expects:
+	// "no identity" means BOTH privy_user_id and auth_subject are NULL.
 	_, err = h.Pool.Exec(ctx,
-		`INSERT INTO accounts (id, name, settle_currency, settle_address, privy_user_id, login_wallet, livemode)
-		 VALUES ($1,$2,$3,$4,$5,$6,false)`,
-		accountID, req.Name, req.SettleCurrency, settleAddress, privyUserID, req.LoginWallet,
+		`INSERT INTO accounts (id, name, settle_currency, settle_address, auth_provider, auth_subject, login_wallet, livemode)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,false)`,
+		accountID, req.Name, req.SettleCurrency, settleAddress, provider, subject, req.LoginWallet,
 	)
 	if err != nil {
 		writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, privyAccountResponse{
-		ID: accountID, Name: req.Name, SettleCurrency: req.SettleCurrency,
+	writeJSON(w, http.StatusCreated, bootstrapAccountResponse{
+		// A new account starts at version 0, the column default.
+		SessionToken: auth.NewSessionToken(accountID, 0),
+		ID:           accountID, Name: req.Name, SettleCurrency: req.SettleCurrency,
 		SettleAddress: settleAddress, LoginWallet: req.LoginWallet, Livemode: false,
 	})
 }
@@ -210,6 +257,40 @@ func (h *Accounts) Me(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// Logout revokes every session token issued for the calling account.
+//
+// Clearing the browser's copy of a token is not revocation: the token stays
+// valid for the rest of its 12 hours wherever else it has reached. Bumping the
+// account's session_version invalidates all of them at once, since the version
+// is inside the signed payload and compared on every request.
+//
+// Deliberately all sessions and not just this one. There is no per-session id
+// to revoke individually, and the case that matters -- signing out because a
+// device or a token may be in someone else's hands -- is the case where ending
+// only the session you are holding is no use.
+//
+// Restricted to session callers. An sk_ key has no session to end, and letting
+// a leaked key sign the merchant's dashboard out would hand an attacker a
+// denial of service against the account's own owner.
+func (h *Accounts) Logout(w http.ResponseWriter, r *http.Request) {
+	principal, _ := auth.FromContext(r.Context())
+	if principal.KeyType != auth.KeyTypeSession {
+		writeErr(w, apierrors.E(apierrors.CodeForbidden, "session required"))
+		return
+	}
+
+	if _, err := h.Pool.Exec(r.Context(),
+		`UPDATE accounts SET session_version = session_version + 1 WHERE id = $1`,
+		principal.AccountID,
+	); err != nil {
+		// Must not report success on a failed bump: the caller would believe
+		// the session was ended when it is still live.
+		writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 type updateAccountRequest struct {

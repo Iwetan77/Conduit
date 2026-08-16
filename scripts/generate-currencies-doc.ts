@@ -1,5 +1,5 @@
 // Generates docs/currencies.md from a live GET /v1/currencies call — per spec,
-// this page must never be hand-written, since routability changes as StableFX/AMM
+// this page must never be hand-written, since routability changes as StableFX
 // coverage changes. Requires packages/api's devserver running on localhost:8080.
 //
 // Usage: pnpm tsx scripts/generate-currencies-doc.ts
@@ -26,7 +26,7 @@ async function main() {
   lines.push("");
   lines.push(
     `Generated from a live \`GET /v1/currencies\` call — this is what's actually routable ` +
-    `right now (registered in \`CurrencyRegistry\` on-chain, confirmed against StableFX/AMM ` +
+    `right now (registered in \`CurrencyRegistry\` on-chain, confirmed against StableFX ` +
     `coverage), not a static list someone forgot to update. Re-run ` +
     `\`scripts/generate-currencies-doc.ts\` to refresh.`
   );
@@ -40,7 +40,7 @@ async function main() {
   lines.push(
     "Not every pair above is routable against every other — see " +
     "[docs/fx-capability.md](./fx-capability.md) for the hub-and-spoke constraint " +
-    "(StableFX quotes go through USDC on one leg) and current AMM fallback coverage."
+    "(StableFX quotes go through USDC on one leg)."
   );
 
   const outPath = resolve(__dirname, "../docs/currencies.md");

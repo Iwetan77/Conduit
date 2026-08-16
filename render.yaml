@@ -33,12 +33,36 @@ services:
       - key: CONDUIT_APP_BASE_URL
         sync: false
 
-      # ── Optional: merchant login (both required, or neither) ───────────
-      - key: PRIVY_APP_ID
-        sync: false
-      - key: PRIVY_VERIFICATION_KEY
+      # Conduit's own router on Arc testnet. The settlement indexer watches it
+      # for PaymentSettled, so leaving it unset silently disables that path.
+      # Not a secret -- it is a public contract address.
+      - key: CONDUIT_ROUTER_ADDRESS
+        value: "0x80f996e86C003AF309635B67A53dC6e63e623318"
+
+      # ── Merchant login: Circle Wallets ─────────────────────────────────
+      # The API key is a server-side secret and never reaches the browser;
+      # the app calls /v1/auth/circle/* to mint device and user tokens.
+      # Optional in the same way PRIVY_APP_ID / PRIVY_VERIFICATION_KEY were
+      # before Phase 7 removed them: without it those routes report
+      # "not configured" and only sk_/pk_ key auth works.
+      - key: CIRCLE_API_KEY
         sync: false
 
-      # ── Optional: cross-chain funding (signs only, holds no gas) ───────
+      # Signs dashboard session tokens. Without it the API mints a random
+      # secret per boot, so every deploy signs every merchant out.
+      - key: CONDUIT_SESSION_SECRET
+        generateValue: true
+
+      # Render terminates TLS in front of the service, so the client IP arrives
+      # in X-Forwarded-For. Rate limiting needs this to tell callers apart
+      # rather than seeing every request as coming from the proxy.
+      - key: CONDUIT_TRUSTED_PROXY
+        value: "1"
+
+      # ── Optional: cross-chain funding ──────────────────────────────────
+      # This wallet BROADCASTS transactions -- it pays the merchant out of its
+      # own USDC once a bridged transfer mints. It needs both a USDC float and
+      # gas, and it runs dry silently. The comment here used to read "signs
+      # only, holds no gas", which would size it at zero.
       - key: ARC_RELAYER_KEY
         sync: false

@@ -3,9 +3,16 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { usePrivy, useLogin, useCreateWallet } from "@privy-io/react-auth";
 import { useQueryClient } from "@tanstack/react-query";
-import { clearSessionToken, createAccountFromPrivy, setSessionToken } from "@/lib/conduit-api";
+import { useAccount, useConnect, useDisconnect } from "wagmi";
+import {
+  clearSessionToken,
+  createAccountFromCircle,
+  logout,
+  setSessionToken,
+} from "@/lib/conduit-api";
+import { CIRCLE_CONNECTOR_ID } from "@/lib/circle/connector";
+import { clearCircleSession, currentSession } from "@/lib/circle/browser";
 import { SETTLE_CURRENCIES, settleCurrencyLabel } from "@/lib/currencies";
 import { Logo } from "@/components/Shared/Logo";
 import { PaymentToasts } from "@/components/Dashboard/PaymentToasts";
@@ -79,192 +86,39 @@ function MerchantIdentity() {
   );
 }
 
-// Opens Privy's own login modal (configured with loginMethods: ['email',
-// 'google'] in the root Providers) rather than a custom in-page form --
-// this is what actually gives merchants a choice between Google (skips the
-// OTP step entirely) and email OTP in one place, themed dark/green via the
-// same `appearance` config. Account bootstrap happens separately in
-// AccountGate once `authenticated` flips true.
-function LoginGate() {
-  const { login } = useLogin();
 
-  return (
-    <div className="min-h-screen text-ink flex items-center justify-center p-6">
-      <div className="w-full max-w-md space-y-8 text-center">
-        <div>
-          <h1 className="font-display text-3xl font-bold">Conduit Dashboard</h1>
-          <p className="text-ink-dim text-sm mt-1">Sign in to continue.</p>
-        </div>
-        <button
-          onClick={() => login()}
-          className="w-full bg-signal text-signal-ink font-medium py-2 text-sm"
-        >
-          Sign in
-        </button>
-      </div>
-    </div>
-  );
-}
+// LoginGate and AccountGate lived here and were Privy-only. Both are gone with
+// Privy; CircleLoginGate and CircleOnboarding below are their replacements.
+//
+// Worth recording what AccountGate had to do that the Circle path does not.
+// Privy's embedded wallet was not reliably present on `user` the instant
+// `authenticated` flipped true -- creation could still be in flight -- so it
+// carried an ensureLoginWallet() that called createWallet() and swallowed the
+// rejection that meant "one already exists". A Circle session cannot exist
+// without its wallets: restoreSession() resolves them before the session is
+// published, so `address` is always real by the time anything reads it.
 
-// Runs once Privy reports `authenticated`: resolves the Conduit account for
-// this Privy user (idempotent -- existing merchants just get their account
-// back). Falls back to an inline onboarding form only when the API reports
-// no account exists yet for this Privy user (first-ever login).
-function AccountGate({ onReady }: { onReady: () => void }) {
-  const { user, getAccessToken } = usePrivy();
-  const { createWallet } = useCreateWallet();
-  const [needsOnboarding, setNeedsOnboarding] = useState(false);
-  const [name, setName] = useState("");
-  const [settleCurrency, setSettleCurrency] = useState("EUR");
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-  const attempted = useRef(false);
-
-  // The embedded wallet from `embeddedWallets: { ethereum: { createOnLogin:
-  // 'users-without-wallets' } }` isn't always present on `user` the instant
-  // `authenticated` flips true -- creation can still be in flight. Try
-  // creating one explicitly; if it already exists, createWallet() rejects
-  // and the address is already on `user.wallet` by then.
-  const ensureLoginWallet = async (): Promise<string> => {
-    if (user?.wallet?.address) return user.wallet.address;
-    try {
-      const wallet = await createWallet();
-      return wallet.address;
-    } catch {
-      if (user?.wallet?.address) return user.wallet.address;
-      throw new Error("No embedded wallet on this Privy user yet");
-    }
-  };
-
-  const bootstrap = async (extra?: { name: string; settle_currency: string }) => {
-    const token = await getAccessToken();
-    if (!token) throw new Error("No Privy access token");
-    const loginWallet = await ensureLoginWallet();
-    await createAccountFromPrivy(token, { login_wallet: loginWallet, ...extra });
-    setSessionToken(token);
-  };
-
-  useEffect(() => {
-    if (attempted.current) return;
-    attempted.current = true;
-    (async () => {
-      try {
-        await bootstrap();
-        onReady();
-      } catch {
-        setNeedsOnboarding(true);
-      }
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const handleOnboard = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError("");
-    setBusy(true);
-    try {
-      await bootstrap({ name, settle_currency: settleCurrency });
-      onReady();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create account");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  if (!needsOnboarding) return null;
-
-  return (
-    <div className="min-h-screen text-ink flex items-center justify-center p-6">
-      <div className="w-full max-w-md space-y-8">
-        <div>
-          <h1 className="font-display text-3xl font-bold">Conduit Dashboard</h1>
-          <p className="text-ink-dim text-sm mt-1">First time here — set up your account.</p>
-        </div>
-        <form onSubmit={handleOnboard} className="space-y-3 border border-border p-4">
-          <input
-            className="w-full bg-surface border border-border px-3 py-2 text-sm"
-            placeholder="Business name"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            required
-          />
-          <select
-            className="w-full bg-surface border border-border px-3 py-2 text-sm"
-            value={settleCurrency}
-            onChange={(e) => setSettleCurrency(e.target.value)}
-          >
-            {SETTLE_CURRENCIES.map((c) => (
-              <option key={c} value={c}>{settleCurrencyLabel(c)}</option>
-            ))}
-          </select>
-          <button
-            type="submit"
-            disabled={busy}
-            className="w-full bg-signal text-signal-ink font-medium py-2 text-sm disabled:opacity-50"
-          >
-            {busy ? "Creating..." : "Create account"}
-          </button>
-        </form>
-        {error && <p className="text-danger text-sm">{error}</p>}
-      </div>
-    </div>
-  );
-}
-
-function DashboardShell({ children }: { children: React.ReactNode }) {
+// The dashboard chrome, with no identity provider in it.
+//
+// Extracted so Privy and Circle can share it. The alternative -- a second
+// copy of the sidebar, nav and mobile menu behind a flag -- would drift the
+// moment either one is edited, and the whole point of this migration is that
+// swapping the provider does not mean rewriting the app around it.
+function DashboardChrome({
+  children,
+  signOut,
+}: {
+  children: React.ReactNode;
+  signOut: () => void | Promise<void>;
+}) {
   const pathname = usePathname();
-  const { ready, authenticated, logout, getAccessToken } = usePrivy();
-  const queryClient = useQueryClient();
-  const [accountReady, setAccountReady] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
-  const refreshing = useRef(false);
 
   // Any navigation closes the mobile menu — otherwise it stayed open on top
   // of the page the merchant just tapped through to.
-  useEffect(() => { setMenuOpen(false); }, [pathname]);
-
-  // Keep the stored bearer token fresh with Privy's own (short-lived,
-  // auto-rotated) access token for as long as the merchant stays on a
-  // dashboard page -- every existing API call in this app reads it via
-  // getSessionToken(), so this is the only place that needs to know Privy
-  // issues the token.
   useEffect(() => {
-    if (!authenticated) return;
-    const refresh = async () => {
-      if (refreshing.current) return;
-      refreshing.current = true;
-      try {
-        const token = await getAccessToken();
-        if (token) setSessionToken(token);
-      } finally {
-        refreshing.current = false;
-      }
-    };
-    refresh();
-    const interval = setInterval(refresh, 5 * 60 * 1000);
-    return () => clearInterval(interval);
-  }, [authenticated, getAccessToken]);
-
-  useEffect(() => {
-    if (!authenticated) setAccountReady(false);
-  }, [authenticated]);
-
-  if (!ready) return null;
-  if (!authenticated) return <LoginGate />;
-  if (!accountReady) return <AccountGate onReady={() => setAccountReady(true)} />;
-
-  const signOut = async () => {
-    clearSessionToken();
-    // Drop every cached query too. Without this, a second merchant signing
-    // in on the same machine could be served the previous merchant's cached
-    // data before their own request resolves.
-    queryClient.clear();
-    try {
-      localStorage.removeItem("conduit.lastMerchant");
-    } catch {}
-    await logout();
-  };
+    setMenuOpen(false);
+  }, [pathname]);
 
   return (
     <div className="min-h-screen text-ink flex flex-col md:flex-row">
@@ -273,7 +127,9 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
       {/* Desktop sidebar — hidden below md, replaced by the hamburger bar below.
           The brand is the ⊙D logo mark, not the word "Conduit". */}
       <aside className="hidden md:flex w-60 border-r border-border p-4 flex-col shrink-0">
-        <Link href="/" className="inline-block mb-6"><Logo size="sm" /></Link>
+        {/* Logo renders its own <Link href="/">. Wrapping it in another one
+            nests <a> inside <a>, which is invalid HTML and fails hydration. */}
+        <div className="inline-block mb-6"><Logo size="sm" /></div>
         <MerchantIdentity />
         <nav className="flex flex-col gap-6">
           {NAV_GROUPS.map((group) => (
@@ -319,7 +175,7 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
           full-width panel below the bar. */}
       <div className="md:hidden flex flex-col border-b border-border shrink-0">
         <div className="flex items-center justify-between px-4 py-3">
-          <Link href="/" className="inline-block"><Logo size="sm" /></Link>
+          <div className="inline-block"><Logo size="sm" /></div>
           <button
             onClick={() => setMenuOpen((v) => !v)}
             aria-label={menuOpen ? "Close menu" : "Open menu"}
@@ -376,9 +232,202 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
   );
 }
 
-// PrivyProvider now lives at the root (app/providers.tsx) so payers can use
-// Google sign-in too; the dashboard keeps only its gates. Business
-// onboarding (AccountGate) still happens exclusively here.
+// PrivyDashboard stood here. It did one thing CircleDashboard does not have to:
+// re-fetch Privy's short-lived access token every five minutes and store it as
+// the bearer, because verifying it meant a network call to Privy on every API
+// request. The Conduit session token replaced that -- minted once at sign-in,
+// HMAC-verified locally, no refresh loop.
+
+// The sign-in screen for a Circle merchant.
+//
+// This began as a separate component from Privy's LoginGate, because that one
+// called useLogin() and, with no Privy provider mounted, the hook did not throw
+// -- it returned a login() that did nothing, so the button rendered perfectly
+// and clicked into the void. Now the only sign-in screen there is.
+function CircleLoginGate() {
+  const { connect, connectors, isPending } = useConnect();
+  const [error, setError] = useState("");
+  const circle = connectors.find((c) => c.id === CIRCLE_CONNECTOR_ID);
+
+  return (
+    <div className="min-h-screen text-ink flex items-center justify-center p-6">
+      <div className="w-full max-w-md space-y-8 text-center">
+        <div>
+          <h1 className="font-display text-3xl font-bold">Conduit Dashboard</h1>
+          <p className="text-ink-dim text-sm mt-1">Sign in to continue.</p>
+        </div>
+        <button
+          onClick={() => {
+            if (!circle) {
+              setError("Circle sign-in is not configured on this build.");
+              return;
+            }
+            connect({ connector: circle });
+          }}
+          // NOT disabled on isPending. connect() deliberately never settles --
+          // the page is navigating to Google -- so isPending stays true for the
+          // life of the document. Gating the button on it left the only way in
+          // permanently unclickable.
+          disabled={!circle}
+          className="w-full bg-signal text-signal-ink font-medium py-2 text-sm disabled:opacity-50"
+        >
+          {isPending ? "Opening Google…" : "Sign in with Google"}
+        </button>
+        {error && <p className="text-danger text-sm">{error}</p>}
+      </div>
+    </div>
+  );
+}
+
+// Circle identity, via the wagmi connector.
+//
+// Much shorter than the Privy version, and not because corners were cut: the
+// connector already carries the session, so there is no separate access token
+// to keep refreshing and no embedded wallet to wait on. The wallet address IS
+// the connected account.
+function CircleDashboard({ children }: { children: React.ReactNode }) {
+  const { address, isConnected, connector } = useAccount();
+  const { disconnectAsync } = useDisconnect();
+  const queryClient = useQueryClient();
+  const [accountReady, setAccountReady] = useState(false);
+  const [needsOnboarding, setNeedsOnboarding] = useState(false);
+  const onCircle = isConnected && connector?.id === CIRCLE_CONNECTOR_ID;
+
+  // Resolve (or create) the Conduit account for this Circle identity.
+  useEffect(() => {
+    if (!onCircle || !address) {
+      setAccountReady(false);
+      return;
+    }
+    const s = currentSession();
+    if (!s) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const account = await createAccountFromCircle(s.userToken, { login_wallet: address });
+        // From here on the app authenticates with Conduit's own session, not
+        // Circle's token — one local check per request instead of a round trip
+        // to Circle.
+        if (account.session_token) setSessionToken(account.session_token);
+        if (!cancelled) setAccountReady(true);
+      } catch {
+        // A first-ever login has no name/settle currency yet, which the server
+        // requires. That is onboarding, not an error.
+        if (!cancelled) setNeedsOnboarding(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [onCircle, address]);
+
+  const signOut = async () => {
+    // Revoke server-side FIRST, while the token is still there to authenticate
+    // the call. Clearing localStorage only drops this browser's copy -- the
+    // token stays valid for the rest of its 12 hours anywhere else it reached.
+    //
+    // A failure here must not strand the user on a dashboard they asked to
+    // leave, so the local sign-out proceeds either way. The cost of that is a
+    // token that outlives the click; the cost of the alternative is a sign-out
+    // button that can refuse to work.
+    try {
+      await logout();
+    } catch {}
+
+    clearSessionToken();
+    queryClient.clear();
+    try {
+      localStorage.removeItem("conduit.lastMerchant");
+    } catch {}
+    await disconnectAsync();
+    clearCircleSession();
+  };
+
+  if (!onCircle) return <CircleLoginGate />;
+  if (needsOnboarding) {
+    return (
+      <CircleOnboarding
+        address={address!}
+        onDone={() => {
+          setNeedsOnboarding(false);
+          setAccountReady(true);
+        }}
+      />
+    );
+  }
+  if (!accountReady) return null;
+  return <DashboardChrome signOut={signOut}>{children}</DashboardChrome>;
+}
+
+// First-login onboarding for a Circle merchant. Same required fields as the
+// Privy path -- the server rejects an account without them, and an account
+// with no settle currency is one nothing can be paid into.
+function CircleOnboarding({ address, onDone }: { address: string; onDone: () => void }) {
+  const [name, setName] = useState("");
+  const [settleCurrency, setSettleCurrency] = useState("USD");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    setError("");
+    try {
+      const s = currentSession();
+      if (!s) throw new Error("No Circle session");
+      const account = await createAccountFromCircle(s.userToken, {
+        name,
+        settle_currency: settleCurrency,
+        login_wallet: address,
+      });
+      if (account.session_token) setSessionToken(account.session_token);
+      onDone();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen flex items-center justify-center p-6">
+      <div className="w-full max-w-sm space-y-4">
+        <h1 className="font-display text-xl font-bold text-ink">Create your account</h1>
+        <form onSubmit={submit} className="space-y-3">
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Business name"
+            required
+            className="w-full bg-surface border border-border p-2 text-sm text-ink"
+          />
+          <select
+            value={settleCurrency}
+            onChange={(e) => setSettleCurrency(e.target.value)}
+            className="w-full bg-surface border border-border p-2 text-sm text-ink"
+          >
+            {SETTLE_CURRENCIES.map((c) => (
+              <option key={c} value={c}>
+                {settleCurrencyLabel(c)}
+              </option>
+            ))}
+          </select>
+          <button
+            type="submit"
+            disabled={busy}
+            className="w-full bg-signal text-signal-ink font-medium py-2 text-sm disabled:opacity-50"
+          >
+            {busy ? "Creating..." : "Create account"}
+          </button>
+        </form>
+        {error && <p className="text-danger text-sm">{error}</p>}
+      </div>
+    </div>
+  );
+}
+
+// One identity provider, so no branch. This chose between PrivyDashboard and
+// CircleDashboard on NEXT_PUBLIC_AUTH_PROVIDER until Phase 7.
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
-  return <DashboardShell>{children}</DashboardShell>;
+  return <CircleDashboard>{children}</CircleDashboard>;
 }

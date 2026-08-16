@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.24;
+pragma solidity 0.8.24;
 
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {IConduitRouter} from "./interfaces/IConduitRouter.sol";
@@ -12,18 +13,6 @@ import {AtomicSettler} from "./AtomicSettler.sol";
 import {StableFXAdapter} from "./StableFXAdapter.sol";
 import {SettlementPreferenceRegistry} from "./SettlementPreferenceRegistry.sol";
 
-/// @dev Minimal Uniswap V2-compatible router interface for the AMM fallback path.
-///      Same interface StableFXAdapter uses internally — declared again here so
-///      ConduitRouter.executeWithAmm doesn't depend on StableFXAdapter internals.
-interface IUniswapV2RouterMinimal {
-    function swapTokensForExactTokens(
-        uint256 amountOut,
-        uint256 amountInMax,
-        address[] calldata path,
-        address to,
-        uint256 deadline
-    ) external returns (uint256[] memory amounts);
-}
 
 /// @title ConduitRouter
 /// @notice The single execution surface for all Conduit payments.
@@ -40,7 +29,7 @@ interface IUniswapV2RouterMinimal {
 ///
 /// @dev All amounts: 6-decimal ERC-20 units. Never 18-decimal native gas values.
 ///      Protocol params owned by 2-of-3 multisig (Ownable in v1).
-contract ConduitRouter is IConduitRouter, ReentrancyGuard, Ownable {
+contract ConduitRouter is IConduitRouter, ReentrancyGuard, Ownable2Step {
     using SafeERC20 for IERC20;
 
     // ── Constants ─────────────────────────────────────────────────────────────
@@ -93,6 +82,16 @@ contract ConduitRouter is IConduitRouter, ReentrancyGuard, Ownable {
         returns (bytes32 receiptId)
     {
         _validateInstruction(instruction);
+        // `payer` is a field of a caller-supplied struct, so without this the
+        // only thing behind it is the ERC-20 allowance -- and an allowance is a
+        // spending limit, not a statement of who may spend it. Anyone could
+        // name someone else as payer and send that person's balance wherever
+        // they liked.
+        //
+        // executeWithFX deliberately has no equivalent check; see the comment
+        // there. Permit2 verifies the payer's signature on that path, which is
+        // a stronger authorization than msg.sender and survives relaying.
+        require(msg.sender == instruction.payer, "not payer");
         require(
             instruction.payerToken == instruction.recipientToken,
             "use executeWithFX for cross-currency"
@@ -242,64 +241,13 @@ contract ConduitRouter is IConduitRouter, ReentrancyGuard, Ownable {
         );
     }
 
-    // ── Path 3: Cross-currency execute via AMM fallback ───────────────────────
-
-    /// @notice Execute a cross-currency payment by routing through a Uniswap
-    ///         V2-compatible AMM. Fallback only — used for pairs StableFX
-    ///         refuses to quote (see docs/fx-capability.md for which pairs that
-    ///         is today). Provider selection happens off-chain in the Go API;
-    ///         this entry point just executes whichever route it picked.
-    /// @param path        [payerToken, ..., recipientToken] — validated at the ends only.
-    /// @param amountInMax Maximum payerToken the payer will spend (slippage cap,
-    ///                    computed off-chain via the router's getAmountsIn).
-    /// @param ammRouter   Uniswap V2-compatible router address (ArcSwap or UnitFlow).
-    function executeWithAmm(
-        PaymentInstruction calldata instruction,
-        address[] calldata path,
-        uint256 amountInMax,
-        address ammRouter
-    ) external nonReentrant returns (bytes32 receiptId) {
-        _validateInstruction(instruction);
-        require(
-            instruction.payerToken != instruction.recipientToken,
-            "use execute() for same-currency"
-        );
-        require(path.length >= 2, "invalid path");
-        require(path[0] == instruction.payerToken, "path must start at payerToken");
-        require(path[path.length - 1] == instruction.recipientToken, "path must end at recipientToken");
-
-        IERC20(instruction.payerToken).safeTransferFrom(instruction.payer, address(this), amountInMax);
-        IERC20(instruction.payerToken).approve(ammRouter, amountInMax);
-
-        uint256[] memory amounts = IUniswapV2RouterMinimal(ammRouter).swapTokensForExactTokens(
-            instruction.amount,
-            amountInMax,
-            path,
-            instruction.recipient,
-            instruction.deadline
-        );
-        uint256 actualIn = amounts[0];
-
-        uint256 leftover = amountInMax - actualIn;
-        if (leftover > 0) {
-            IERC20(instruction.payerToken).safeTransfer(instruction.payer, leftover);
-        }
-        IERC20(instruction.payerToken).approve(ammRouter, 0);
-
-        receiptId = _mintReceipt(instruction);
-
-        emit PaymentSettled(
-            receiptId,
-            instruction.payer,
-            instruction.recipient,
-            instruction.payerToken,
-            instruction.recipientToken,
-            actualIn,
-            instruction.amount,
-            instruction.declarationId,
-            block.timestamp
-        );
-    }
+    // Path 3 was a cross-currency AMM fallback (executeWithAmm), removed.
+    //
+    // It could never settle: Arc has no USDC/EURC pool, so the swap it depended
+    // on had no liquidity to execute against. Cross-currency goes through Circle
+    // StableFX. Nothing in this repo called it, while it stayed deployed and
+    // publicly callable, taking an unvalidated router address and approving that
+    // address over tokens this contract holds -- including accumulated fees.
 
     // ── Quote (view) ──────────────────────────────────────────────────────────
 
@@ -321,34 +269,48 @@ contract ConduitRouter is IConduitRouter, ReentrancyGuard, Ownable {
     // ── Admin ─────────────────────────────────────────────────────────────────
 
     function setDeclarationRegistry(address registry) external override onlyOwner {
+        require(registry != address(0), "zero: registry");
         declarationRegistry = DeclarationRegistry(registry);
         emit DeclarationRegistrySet(registry);
     }
 
     function setStableFXAdapter(address adapter) external override onlyOwner {
+        require(adapter != address(0), "zero: adapter");
         stableFXAdapter = StableFXAdapter(adapter);
         emit StableFXAdapterSet(adapter);
     }
 
     function setAtomicSettler(address settler) external override onlyOwner {
+        require(settler != address(0), "zero: settler");
         atomicSettler = AtomicSettler(settler);
         emit AtomicSettlerSet(settler);
     }
 
     function setSettlementPreferenceRegistry(address registry) external onlyOwner {
+        require(registry != address(0), "zero: preference registry");
         settlementPreferenceRegistry = SettlementPreferenceRegistry(registry);
         emit SettlementPreferenceRegistrySet(registry);
     }
 
+    /// @dev Emits ProtocolFeeSet. A fee change moves what every payer is
+    ///      charged, and it was previously the one admin action that left no
+    ///      trace an indexer could follow.
     function setProtocolFee(uint256 bps) external override onlyOwner {
         require(bps <= MAX_PROTOCOL_FEE_BPS, "fee too high");
         protocolFeeBps = bps;
+        emit ProtocolFeeSet(bps);
     }
 
+    /// @dev `to` is checked because safeTransfer to address(0) succeeds for
+    ///      most ERC-20s -- it is an ordinary balance update, not a revert --
+    ///      so a mistyped recipient burns the accumulated fees irreversibly
+    ///      after the balance has already been zeroed.
     function withdrawFees(address token, address to) external override onlyOwner {
+        require(to != address(0), "zero: to");
         uint256 amount = accumulatedFees[token];
         accumulatedFees[token] = 0;
         IERC20(token).safeTransfer(to, amount);
+        emit FeesWithdrawn(token, to, amount);
     }
 
     // ── Internal ──────────────────────────────────────────────────────────────

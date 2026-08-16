@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.24;
+pragma solidity 0.8.24;
 
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {IPermit2SignatureTransfer} from "./interfaces/IFxEscrow.sol";
@@ -21,7 +22,7 @@ import {StableFXAdapter} from "./StableFXAdapter.sol";
 ///        - Taker calls USDC.approve(PERMIT2, amount) — once
 ///        - SDK calls Circle StableFX API → quote → trade → presign
 ///        - SDK returns permit + witness + signature → passed through ConduitRouter → here
-contract AtomicSettler is ReentrancyGuard, Ownable {
+contract AtomicSettler is ReentrancyGuard, Ownable2Step {
     using SafeERC20 for IERC20;
 
     // ── State ─────────────────────────────────────────────────────────────────

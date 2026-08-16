@@ -1,4 +1,4 @@
-// Phase 0.3 — StableFX capability probe + AMM coverage probe.
+// Phase 0.3 — StableFX capability probe.
 //
 // Real network calls only: StableFX sandbox REST API and Arc testnet JSON-RPC.
 // No mocked quotes, no fabricated liquidity. Every number in docs/fx-capability.md
@@ -14,14 +14,6 @@ const RPC = "https://rpc.testnet.arc.network";
 const STABLEFX_BASE = "https://api-sandbox.circle.com"; // TEST_API_KEY prefix -> sandbox host
 const STABLEFX_QUOTES = `${STABLEFX_BASE}/v1/exchange/stablefx/quotes`;
 
-const AMM_FACTORIES = {
-  ArcSwap: "0x45dd35611179ae6663ae47791175d7d598ced086",
-  UnitFlow: "0xd67F63A4F26a497b364d1C82e6747Aec8B5743a5",
-} as const;
-const AMM_ROUTERS = {
-  ArcSwap: "0x48a9bd1644ac67fbef4183261c466bea3eb333fc",
-  UnitFlow: "0x4AA8c7Ac458479d9A4FA5c1481e03061ac76824A",
-} as const;
 
 // Base pair (given, already verified against Arc testnet in Phase 0.2) plus
 // candidate ISO-style codes for Circle Partner Stablecoins. Presence is decided
@@ -78,20 +70,12 @@ function selector(sig: string): string {
     "symbol()": "0x95d89b41",
     "name()": "0x06fdde03",
     "totalSupply()": "0x18160ddd",
-    "getPair(address,address)": "0xe6a43905",
   };
   const sel = known[sig];
   if (!sel) throw new Error(`unknown selector for ${sig}`);
   return sel;
 }
 
-function encodeAddress(addr: string): string {
-  return addr.toLowerCase().replace("0x", "").padStart(64, "0");
-}
-
-function decodeAddress(hex: string): string {
-  return "0x" + hex.slice(-40);
-}
 
 function decodeUint(hex: string): bigint {
   return BigInt(hex === "0x" ? "0x0" : hex);
@@ -242,25 +226,6 @@ async function main() {
     );
   }
 
-  // ── Step 3: AMM coverage for the same discovered currencies ──
-  console.log("\n=== AMM coverage probe ===");
-  const ammResults: { dex: string; a: string; b: string; pair: string; reserves?: [string, string] }[] = [];
-  const codes = Object.keys(discovered);
-  for (const dex of ["ArcSwap", "UnitFlow"] as const) {
-    for (let i = 0; i < codes.length; i++) {
-      for (let j = i + 1; j < codes.length; j++) {
-        const a = discovered[codes[i]].address;
-        const b = discovered[codes[j]].address;
-        const data = selector("getPair(address,address)") + encodeAddress(a) + encodeAddress(b);
-        const pairHex = await rpcCall(AMM_FACTORIES[dex], data);
-        const pair = decodeAddress(pairHex);
-        const exists = pair !== "0x0000000000000000000000000000000000000000";
-        console.log(`${dex} ${codes[i]}/${codes[j]}: ${exists ? "pool at " + pair : "no pool"}`);
-        ammResults.push({ dex, a: codes[i], b: codes[j], pair: exists ? pair : "" });
-      }
-    }
-  }
-
   // ── Write docs/fx-capability.md ──
   const routableStablefx = stablefxResults.filter((r) => r.quoted && r.from !== r.to);
   // Spec's named preference order ranks currency FAMILIES: JPY > BRL > PHP > EUR (EUR->USD
@@ -323,17 +288,11 @@ async function main() {
   lines.push("both legs are individually quotable against USDC. Treat this as a real routing constraint, not a");
   lines.push("permissions gap.");
   lines.push("");
-  lines.push("## AMM coverage (ArcSwap + UnitFlow)");
+  lines.push("## On-chain swap coverage (probed, then removed)");
   lines.push("");
-  lines.push("| DEX | Pair | Pool exists |");
-  lines.push("|---|---|---|");
-  for (const r of ammResults) {
-    lines.push(`| ${r.dex} | ${r.a}/${r.b} | ${r.pair ? "yes — " + r.pair : "no"} |`);
-  }
-  lines.push("");
-  lines.push("Only USDC/EURC has a live pool on either router (both ArcSwap and UnitFlow). No AMM fallback exists");
-  lines.push("today for BRLA, AUDF, MXNB, QCAD, or KRW1 — for those, StableFX is not just primary, it is the only");
-  lines.push("route. Do not seed liquidity to work around this (spec §VOID).");
+  lines.push("Both Arc DEXes were probed for pools across every currency above. Only USDC/EURC had one, so an");
+  lines.push("on-chain swap route could not settle the rest and seeding liquidity was ruled out (spec §VOID).");
+  lines.push("That code has since been removed; StableFX is the only cross-currency route. Kept as the record.");
   lines.push("");
   lines.push("## Recommendation");
   lines.push("");

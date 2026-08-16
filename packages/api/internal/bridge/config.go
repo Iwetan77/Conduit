@@ -4,7 +4,7 @@ package bridge
 // Values are transcribed from docs/ubk-capability.md's confirmed,
 // live-verified facts (pulled from the published npm package's own compiled
 // source, cross-checked against the raw CCTP addresses independently
-// confirmed in docs/cctp-capability.md) -- do not hardcode a domain id or
+// confirmed in docs/cctp-integration.md) -- do not hardcode a domain id or
 // contract address anywhere else in this package or its callers; import
 // these constants instead.
 const (

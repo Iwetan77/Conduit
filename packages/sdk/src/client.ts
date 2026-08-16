@@ -141,12 +141,9 @@ export class ConduitClient {
 
     if (payerToken !== recipientToken) {
       // Cross-currency FX is Circle StableFX, orchestrated by the Conduit
-      // API (settlement intents: quote -> prepare -> confirm). It is NOT an
-      // on-chain AMM swap: the old ArcSwap/UnitFlow path was pre-StableFX
-      // demo scaffolding and there is no USDC/EURC pool on Arc testnet, so
-      // it could only ever fail with "no AMM router could quote this swap".
-      // Failing loudly here is correct — silently routing money through a
-      // non-existent pool is worse than refusing.
+      // API (settlement intents: quote -> prepare -> confirm). Failing loudly
+      // here is correct -- silently routing a payment somewhere it cannot
+      // settle is worse than refusing it.
       throw new Error(
         "Cross-currency payments go through Circle StableFX via the Conduit API " +
         "(settlement intents), not through this client. Use a payment link or a " +

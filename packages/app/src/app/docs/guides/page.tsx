@@ -7,7 +7,7 @@ const GUIDES: { slug: string; title: string; description: string }[] = [
   { slug: "webhooks", title: "Webhook verification", description: "Node, Go, Python — all the same HMAC algorithm." },
   { slug: "currencies", title: "Currencies", description: "Generated from a live GET /v1/currencies call, not hand-written." },
   { slug: "fx-timing", title: "FX timing model", description: "Firm rate at payment time vs. indicative rate for pre-priced invoices." },
-  { slug: "fx-capability", title: "FX capability report", description: "What StableFX and the AMM fallback actually cover right now, and why." },
+  { slug: "fx-capability", title: "FX capability report", description: "What StableFX actually covers right now, and why." },
   { slug: "state-diagrams", title: "State diagrams", description: "The settlement intent lifecycle and the nested FX trade lifecycle." },
   { slug: "payment-links", title: "Payment links", description: "Amount modes, expiry, single vs multi-use, void — and cross-chain funding status." },
   { slug: "point-of-sale", title: "Point of sale", description: "A QR per bill, printed by the till — wiring a restaurant POS to a storefront." },

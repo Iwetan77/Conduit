@@ -19,7 +19,7 @@ import (
 // This does NOT prove full intent correlation (settlements/balance_transactions
 // creation) — that direct send had declarationId=0 (no declaration), and
 // SettlementIntents.Create() does not yet register an on-chain declaration for
-// the direct/AMM path (only StableFX-routed intents are fully wired end to
+// the direct path (only StableFX-routed intents are fully wired end to
 // end right now). That's a real, separate gap — see whereistopped.md. This
 // test proves the indexer's ABI/topic decoding is correct against real chain
 // data, which is the part that was actually risky to get wrong (topic

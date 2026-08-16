@@ -1,69 +1,87 @@
 # CONDUIT™
 
-**Stablecoin settlement for businesses on Arc.**
+**Stablecoin settlement for businesses.**
 
-Chain ID 5042002 · Arc Testnet
+Conduit is a pipe. A payer sends whatever stablecoin they hold, on whatever chain they hold it; the merchant receives the currency they chose to settle in. FX conversion, route selection, and cross-chain funding happen in between.
 
----
+Same-currency payments on Arc settle in about a second. Cross-currency and cross-chain take longer, and the product reports real progress rather than claiming to be instant.
 
-Conduit is a pipe. A payer sends in whatever stablecoin they hold; the merchant receives the currency they've chosen to settle in. FX conversion, route selection, and (when the payer's funds are on another chain) cross-chain funding happen in between. Same-currency payments on Arc settle in about a second; cross-currency and cross-chain payments take longer and the UI says so honestly — no "instant", no "atomic" claims on flows that aren't.
+[App](https://useconduit-app.vercel.app) · [Docs](https://useconduit-app.vercel.app/docs) · Arc Testnet, chain ID 5042002
 
 ```
-USDC ─────────────────────────────────────────────→ USDC        (direct, ~1s on Arc)
-EURC → [StableFX RFQ] → USDC ──────────────────────→ EURC        (cross-currency FX)
-USDC on Solana → [Circle Gateway] → USDC on Arc → [FX] → EURC     (cross-chain funding)
+USDC ────────────────────────────────────────────────→ USDC     direct, ~1s on Arc
+EURC → [StableFX] → USDC ────────────────────────────→ EURC     cross-currency
+USDC on Solana → [Gateway] → USDC on Arc → [StableFX] → EURC     cross-chain
 ```
 
-## Two surfaces, one settlement engine
+## This repository
 
-Conduit is not one app. It's a settlement engine (`packages/api`) with two separate front-end surfaces that never share auth or state:
+The monorepo the product is built in.
 
-- **Merchant** — authenticated, sticky. A business logs in with email (via **Privy**), sets the currency it wants to receive once, and creates payment links and QR codes with real lifecycle policy (fixed/open amounts, expiry, single-use vs reusable, void). This is the dashboard (`/dashboard/*`).
-- **Payer** — public, unauthenticated, the surface most people touch. Someone opens a link or scans a QR, sees the merchant's business name (not a bare hex address), and pays. No account, no jargon, mobile-first. This is `/pay/[id]`.
+```
+packages/contracts/   Solidity (Foundry): ConduitRouter, AtomicSettler,
+                      StableFXAdapter, DeclarationRegistry, SettlementPreferenceRegistry
+packages/api/         Go settlement engine: accounts, payment links, settlement
+                      intents, FX, cross-chain funding, webhooks. Postgres.
+packages/app/         Next.js: landing, merchant dashboard, payer checkout, docs site
+packages/sdk/         @conduit/sdk, browser and on-chain client
+packages/node/        @conduit/node, server-side API client with webhook verification
+docs/                 Source-of-truth markdown, rendered as the docs site
+```
 
-The dashboard is wrapped in Privy; the payer surface is deliberately **never** wrapped in Privy or any login. Keeping those two isolated is a hard product invariant.
+## What Conduit does
 
-### Merchant auth (Privy)
+**Get paid in one currency.** A merchant sets their settle currency once. Every payment arrives in it, whatever the payer sent.
 
-Human dashboard login is email OTP (or Google) through Privy embedded wallets. Server-side, the API verifies Privy's ES256 access-token JWTs against a static public key from the Privy dashboard. The existing `sk_`/`pk_` API-key system stays as the machine/programmatic-access path — Privy is layered on top for human login, not a replacement. **Privy requires HTTPS in production**; local development over `http://localhost` is the only exception Privy allows.
+**Payment links and QR codes** with real lifecycle policy: fixed or open amounts, expiry, single-use or reusable, void. A storefront gets a printed QR that never expires.
+
+**Pay from any chain.** A payer holding USDC on Solana, Base, Polygon, Ethereum, Avalanche, Optimism, Arbitrum, Unichain, Sonic, World Chain, Sei or HyperEVM can pay an invoice that settles on Arc. They pick where their money is; Conduit moves it.
+
+**Drop-in checkout.** One script tag and `Conduit.checkout({...})`, with the merchant's server keeping control of the amount.
+
+**An API and webhooks** for everything the dashboard can do, with `sk_`/`pk_` keys and HMAC-signed deliveries.
+
+## Two surfaces, one engine
+
+Conduit is a settlement engine with two front-ends that never share auth or state.
+
+**Merchant** — authenticated and sticky. Sign in with Google, set a settle currency, issue links and QR codes, reconcile. This is `/dashboard`.
+
+**Payer** — public and unauthenticated, the surface most people touch. Open a link or scan a QR, see the business name rather than a hex address, pay. No account. This is `/pay/[id]`.
+
+The payer surface is deliberately never behind a sign-in. Keeping the two isolated is a product invariant, not an implementation detail.
+
+## Authentication
+
+Merchant login is Google, through Circle **user-controlled** wallets: MPC and non-custodial, so Conduit never holds a key. Circle is exposed to the app as an EIP-1193 provider behind a wagmi connector (`packages/app/src/lib/circle/`), which is what lets every wallet-reading component and every signing path work against it unchanged.
+
+The Circle token is verified once, at login, and exchanged for a Conduit session token (`cs_`, HMAC-signed, 12 hours). Requests carry that rather than the provider's credential, so no identity provider sits on the request path.
+
+`sk_`/`pk_` API keys remain the programmatic path. Google login is layered on top for humans, not a replacement.
 
 ## Settlement paths
 
 | Path | Condition | Mechanism |
 |---|---|---|
-| Same-currency direct | payer token == settle token, both on Arc | On-chain via `ConduitRouter` / `AtomicSettler` — Conduit's own contracts, sub-second |
-| Cross-currency FX | payer token != settle token | Circle **StableFX** RFQ + `/fund` — see below |
-| Cross-chain funding | payer's USDC is on another chain (e.g. Solana) | Circle **Gateway** (Unified Balance Kit) deposit → burn intent → forwarder mint on Arc, then the FX/direct path above |
+| Same-currency direct | payer token equals settle token, both on Arc | Conduit's own contracts, `ConduitRouter` → `AtomicSettler`, sub-second |
+| Cross-currency | payer token differs from settle token | Circle StableFX RFQ: quote, trade, fund |
+| Cross-chain | payer's USDC is on another chain | Circle Gateway deposit and burn intent, forwarder mints on Arc, then one of the paths above |
 
-### What Conduit's contract does vs. what Circle does (the honest version)
+### What is Conduit's and what is Circle's
 
-For **same-currency direct** payments, Conduit's own on-chain contracts (`ConduitRouter` → `AtomicSettler`) move the funds. That path is fully Conduit's.
+Same-currency payments move through Conduit's own on-chain contracts. That path is entirely ours.
 
-For **cross-currency FX**, Conduit does **not** hold custody or perform the swap itself. The real mechanism is Circle StableFX: an off-chain RFQ produces a signed quote, and Circle's maker delivers the settle-currency to the recipient via a Permit2 `permitWitnessTransferFrom` on `FxEscrow` (an ERC-1967 proxy that acts as the Permit2 spender — it has no `swap()` function). Conduit orchestrates and, for relayer-completed flows, signs on the payer's behalf after their single authorizing signature — but the FX liquidity and delivery are Circle's.
+Cross-currency does **not** put Conduit in custody and does not swap on-chain. Circle StableFX produces a signed quote off-chain, and Circle's maker delivers the settle currency to the recipient through a Permit2 transfer. Conduit orchestrates and signs on the payer's behalf after their authorising signature; the liquidity and the delivery are Circle's.
 
-The real StableFX call sequence (`packages/api/internal/fx/stablefx.go`):
+Cross-chain uses Circle Gateway, a deposit-then-spend model on CCTP rails rather than a bridge that burns per payment. The payer signs an off-chain burn intent and Circle's forwarder submits the mint on Arc. Conduit runs a `bridge_transfers` state machine with orphan recovery, so a process that dies mid-funding resumes rather than losing the transfer.
 
-1. `POST /v1/exchange/stablefx/quotes` → quoteId + EIP-712 typed data
-2. payer signs the quote typed data
-3. `POST /v1/exchange/stablefx/trades` → contractTradeId
-4. `POST /v1/exchange/stablefx/signatures/funding/presign` → funding typed data
-5. payer signs the funding typed data
-6. `POST /v1/exchange/stablefx/fund` → Circle executes and delivers to the recipient
-7. poll `GET /v1/exchange/stablefx/trades/:id` until settled
+FX is quoted **after** funds land on Arc, never before, so a cross-chain payer is never quoted against liquidity that has not arrived.
 
-FX quotes are ordered **after** funds have actually landed on Arc (quote-after-mint), never before — so a cross-chain payer isn't quoted against liquidity that hasn't arrived yet.
+Cross-currency and cross-chain payments are not atomic and are never presented as though they were. The payer sees real polled progress.
 
-### Cross-chain funding (Circle Gateway / UBK)
+## Currency coverage
 
-When the payer's USDC is on another chain, Conduit uses Circle's **Gateway** (Unified Balance Kit) — a deposit-then-spend model on CCTP V2 rails, **not** a burn-per-payment bridge. The payer signs a **burn intent** (an off-chain signed message, ed25519 on Solana — not an on-chain transaction), and Circle's own forwarder relayer submits the destination-side mint on Arc automatically (Arc is a forwarder-supported destination). Conduit reuses a generalized `bridge_transfers` state machine with orphan-recovery: if the process dies mid-funding, a reconciler resumes exactly where a live session would have, because the burn is irreversible and the USDC will mint on Arc once attested.
-
-The payer surface is **balance-aware**: Conduit reads the payer's real Gateway balance and shows "paying with USDC" as a confirmed fact when they hold enough — it never presents a static list of currencies the payer doesn't own.
-
-See [`docs/ubk-capability.md`](docs/ubk-capability.md) for the byte-exact burn-intent encoding, the live-proven transaction hashes, and the deposit-then-spend mechanism.
-
-## Currency coverage (the reality)
-
-Conduit is **USDC-hub**: StableFX quotes route through USDC on one leg (hub-and-spoke), so coverage is "what quotes against USDC right now", not a static list. Live-probed against the current StableFX test key, these nine settle currencies quote successfully:
+Conduit is USDC-hub: StableFX routes through USDC on one leg, so coverage is what quotes against USDC rather than a fixed list. Currently quotable:
 
 | ISO | Token | Decimals |
 |---|---|---|
@@ -76,144 +94,104 @@ Conduit is **USDC-hub**: StableFX quotes route through USDC on one leg (hub-and-
 | GBP | GBPA | 6 |
 | ZAR | ZARU | 18 |
 | KRW | KRW1 | 18 |
+| CHF | CHFAU | 6 |
+| EURAU | EURAU | 6 |
 
-**JPY and PHP are not currently quotable on this key** (they return Circle error `3008 — invalid currency`). This is a key/coverage limitation to **re-probe**, not a permanent architectural dead end — the moment they quote against USDC they light up with no code change. `GET /v1/currencies` always reflects what's actually routable now; see [`docs/currencies.md`](docs/currencies.md) and [`docs/fx-capability.md`](docs/fx-capability.md) for the full live probe.
+`GET /v1/currencies` always reflects what is routable now. Token decimals differ; resolve them, never assume six.
 
-## Monorepo structure
+EURC and EURAU are both euro, from different issuers, so only one can hold the `EUR` code and the second is identified by its token symbol. Asking to settle in `EUR` pays EURC; asking for `EURAU` pays EURAU. Neither substitutes for the other.
 
-```
-conduit/
-├── packages/
-│   ├── contracts/   # Solidity (Foundry) — ConduitRouter, AtomicSettler, StableFXAdapter, DeclarationRegistry
-│   ├── api/         # Go — the settlement engine: accounts, payment links, settlement intents,
-│   │                #   StableFX FX, Circle Gateway funding, Privy auth, webhooks. Postgres.
-│   ├── sdk/         # TypeScript — @conduit/sdk (bigint amounts, never number)
-│   ├── app/         # Next.js — merchant dashboard (Privy) + payer checkout (/pay). app.conduit.xyz
-│   ├── docs/        # Next.js — renders repo-root docs/*.md as a site
-│   └── marketing/   # Next.js static — conduit.xyz
-├── docs/            # Source-of-truth markdown (quickstart, errors, webhooks, currencies, fx, ubk, …)
-└── package.json     # pnpm workspaces
-```
+## Network
 
-## Network configuration
-
-| Parameter | Value |
+| | |
 |---|---|
 | Network | Arc Testnet |
 | Chain ID | 5042002 |
-| RPC | https://rpc.testnet.arc.network |
-| WebSocket | wss://rpc.testnet.arc.network |
-| Explorer | https://testnet.arcscan.app |
-| Gas Token | USDC (18 decimals internally, 6 via ERC-20) |
+| RPC | `https://rpc.testnet.arc.network` |
+| Explorer | `https://testnet.arcscan.app` |
+| Gas token | USDC |
 
-## Contract addresses (Arc Testnet)
+### Contracts
 
-### Deployed by Circle / Arc (immutable)
+Deployed by Circle and Arc:
 
 | Contract | Address |
 |---|---|
 | USDC | `0x3600000000000000000000000000000000000000` |
 | EURC | `0x89B50855Aa3bE2F677cD6303Cec089B5F319D72a` |
 | StableFX FxEscrow | `0x867650F5eAe8df91445971f14d89fd84F0C9a9f8` |
-| Circle Gateway Wallet | `0x0077777d7EBA4688BDeF3E311b846F25870A19B9` |
-| Circle Gateway Minter | `0x0022222ABE238Cc2C7Bb1f21003F0a260052475B` |
+| Gateway Wallet | `0x0077777d7EBA4688BDeF3E311b846F25870A19B9` |
+| Gateway Minter | `0x0022222ABE238Cc2C7Bb1f21003F0a260052475B` |
 | Permit2 | `0x000000000022D473030F116dDEE9F6B43aC78BA3` |
-| Multicall3 | `0xcA11bde05977b3631167028862bE2a173976CA11` |
-| Gateway Domain (Arc) | `26` |
 
-### Deployed by Conduit
+Conduit's own contracts (`ConduitRouter`, `DeclarationRegistry`, `StableFXAdapter`, `AtomicSettler`, `SettlementPreferenceRegistry`) are deployed from `packages/contracts/script/Deploy.s.sol`. Addresses come from environment configuration and are never hardcoded.
 
-`ConduitRouter`, `DeclarationRegistry`, `StableFXAdapter`, `AtomicSettler` — addresses come from `packages/contracts/script/Deploy.s.sol` output; set them in `packages/app/.env.local` and the API's environment. Never hardcoded.
+## Running it
 
-## Getting started
-
-### Prerequisites
-
-- [pnpm](https://pnpm.io) v9+
-- [Go](https://go.dev) 1.22+ (for the API)
-- [Foundry](https://getfoundry.sh) (for contracts)
-- Node.js 18+
-- Testnet USDC from https://faucet.circle.com → Arc Testnet
-
-### Install
+Requires pnpm 9+, Go 1.22+, Foundry, and Node 18+. Testnet USDC from [faucet.circle.com](https://faucet.circle.com).
 
 ```bash
-git clone <repo>
-cd conduit
 pnpm install
 ```
 
-### Run the API (settlement engine)
+API:
 
 ```bash
 cd packages/api
-# Requires: DATABASE_URL (Postgres), STABLEFX_API_KEY.
-# Optional: ARC_RELAYER_KEY (enables cross-chain funding),
-#           PRIVY_APP_ID + PRIVY_VERIFICATION_KEY (enables merchant Privy login).
+# DATABASE_URL and STABLEFX_API_KEY required.
+# CIRCLE_API_KEY enables Google login; ARC_RELAYER_KEY enables cross-chain.
 go run ./cmd/api
-# Or, for a self-contained embedded Postgres (local dev / e2e):
+
+# Or, with an embedded Postgres for local development:
 go run ./cmd/devserver
 ```
 
-### Run the app (dashboard + payer surface)
+App:
 
 ```bash
 cd packages/app
-cp .env.example .env.local
-# Set NEXT_PUBLIC_CONDUIT_API_URL, the deployed contract addresses,
-# and NEXT_PUBLIC_PRIVY_APP_ID (must match the API's PRIVY_APP_ID).
+cp .env.example .env.local   # API URL, contract addresses, Circle and Google client ids
 pnpm dev
 ```
 
-## API surface (packages/api)
+## API
 
 | Area | Endpoints |
 |---|---|
-| Accounts | `POST /v1/accounts`, `POST /v1/accounts/privy`, `GET /v1/accounts/me`, `PATCH /v1/accounts/:id` |
-| Payment links | `POST/GET /v1/payment_links`, `GET /v1/payment_links/:id`, `POST /v1/payment_links/:id/void`, `GET /v1/payment_links/:id/public`, `POST /v1/payment_links/:id/pay` |
-| Settlement intents | `POST/GET /v1/settlement_intents`, `GET /v1/settlement_intents/:id`, `.../quote`, `.../prepare`, `.../confirm`, `.../public` |
-| Cross-chain funding | `POST /v1/settlement_intents/:id/bridge/initiate`, `GET .../bridge/status`, `GET .../bridge/balance` |
-| Reference / ops | `GET /v1/currencies`, `GET /v1/settlements`, `GET /v1/balance_transactions`, webhooks |
+| Accounts | `POST /v1/accounts`, `GET /v1/accounts/me`, `PATCH /v1/accounts/:id` |
+| Payment links | `POST/GET /v1/payment_links`, `POST /v1/payment_links/:id/void`, `GET /v1/payment_links/:id/public`, `POST /v1/payment_links/:id/pay` |
+| Settlement intents | `POST/GET /v1/settlement_intents`, `.../quote`, `.../prepare`, `.../confirm`, `.../public` |
+| Cross-chain | `POST /v1/settlement_intents/:id/bridge/initiate`, `GET .../bridge/status`, `GET .../bridge/plan` |
+| Reference | `GET /v1/currencies`, `GET /v1/settlements`, `GET /v1/balance_transactions` |
 
-Amounts are always integer minor units (bigint / Postgres `NUMERIC`), never floats. See [`docs/quickstart.md`](docs/quickstart.md), [`docs/errors.md`](docs/errors.md), and [`docs/webhooks.md`](docs/webhooks.md).
-
-## SDK usage
+Amounts are integer minor units everywhere, never floats. See [quickstart](docs/quickstart.md), [errors](docs/errors.md) and [webhooks](docs/webhooks.md).
 
 ```typescript
 import { ConduitClient } from "@conduit/sdk";
-import { ethers } from "ethers";
 
-const provider = new ethers.JsonRpcProvider("https://rpc.testnet.arc.network");
-const signer = new ethers.Wallet(PRIVATE_KEY, provider);
 const conduit = new ConduitClient({ signer });
-
-// Direct same-currency send (USDC → USDC), always bigint minor units
 await conduit.pay({ recipient: "0xRECIPIENT", amount: 10_000_000n, currency: "USDC" });
 ```
 
-**SDK rules:** all on-chain amounts are `bigint`, never `number`. Resolve each token's real decimals (USDC/EURC are 6; BRLA/ZARU/KRW1 are 18) — never assume 6.
-
 ## Testing
 
-Go API tests run against a real embedded Postgres and real Circle sandbox calls — no mocks:
+Tests run against a real embedded Postgres, live Circle sandbox calls, and a real Arc fork. Nothing is mocked.
 
 ```bash
-cd packages/api && go test ./... -short
+cd packages/api && go test ./...
+cd packages/contracts && forge test --fork-url https://rpc.testnet.arc.network
 ```
 
-Contract tests run against a real Arc Testnet fork:
+`scripts/e2e.sh` runs a full settlement end to end against live services.
 
-```bash
-cd packages/contracts && forge test --fork-url https://rpc.testnet.arc.network -vvv
-```
+## Security
 
-## Security & honesty notes
+No secrets are committed; configuration is environment-driven. `AtomicSettler` uses a reentrancy guard and reverts fully rather than leaving partial state. Contracts are immutable in v1, with protocol parameters behind `Ownable` and intended for multisig on mainnet. Public payer endpoints are rate limited per client, and API keys are bearer tokens sent in a header, never implicitly. Set `CONDUIT_ALLOWED_ORIGINS` on any public deployment.
 
-- `AtomicSettler` uses `ReentrancyGuard` — full revert on failure, no partial states.
-- Contracts are immutable in v1 (no upgradability); protocol params behind `Ownable`, intended for multisig on mainnet.
-- The API's CORS is a testnet wildcard — tighten to an explicit allowlist before any mainnet deploy.
-- Cross-currency and cross-chain flows are **not** atomic and are never described as such; the payer UI shows real, polled progress, not a timed animation.
+## License
+
+Proprietary. Copyright © 2026 Conduit. All rights reserved. The source is publicly viewable for evaluation and reference only; no use, copy, modification, distribution, or deployment is permitted without written permission. See [LICENSE](LICENSE). Third-party components, including OpenZeppelin Contracts and forge-std under `packages/contracts/lib`, retain their own licenses.
 
 ---
 
-*CONDUIT™ · Chain ID 5042002 · Arc Testnet*
+CONDUIT™ · Arc Testnet · Chain ID 5042002

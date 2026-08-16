@@ -1,9 +1,8 @@
 // Package indexer watches ConduitRouter's PaymentSettled event on Arc testnet
 // and turns it into settlements + balance_transactions rows.
 //
-// Scope note: this only matters for the same-currency (execute()) and AMM
-// (executeWithAmm()) paths, which actually call ConduitRouter and emit
-// PaymentSettled. StableFX-routed settlements never call our router at all
+// Scope note: this only matters for the same-currency (execute()) path, which
+// actually calls ConduitRouter and emits PaymentSettled. StableFX-routed settlements never call our router at all
 // (see internal/fx/stablefx.go's Submit doc comment — Circle's relayer calls
 // FxEscrow directly) and are already marked settled synchronously by the
 // POST /:id/confirm handler once Submit's polling confirms completion. This

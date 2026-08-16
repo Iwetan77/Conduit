@@ -10,7 +10,6 @@ import {StableFXAdapter} from "../src/StableFXAdapter.sol";
 import {IConduitRouter} from "../src/interfaces/IConduitRouter.sol";
 import {SettlementPreferenceRegistry} from "../src/SettlementPreferenceRegistry.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
-import {MockUniswapV2Router} from "./mocks/MockUniswapV2Router.sol";
 
 /// @dev Integration tests for ConduitRouter — uses MockERC20 because Arc
 ///      Testnet's USDC uses native precompiles (0x1800...) that Foundry cannot
@@ -55,6 +54,46 @@ contract ConduitRouterTest is Test {
         // Fund payer
         usdc.mint(PAYER, 1_000 * 1e6); // $1 000 USDC
         eurc.mint(PAYER, 500 * 1e6);   // 500 EURC
+    }
+
+    // ── Admin guards (SolidityScan: missing zero-address validation, events) ──
+
+    /// The constructor rejected zero for these three, but the setters that
+    /// REPLACE them did not — so the guard held at deploy time and then went
+    /// away for the rest of the contract's life. Setting any to address(0)
+    /// points the router at an address with no code.
+    function test_setters_rejectZeroAddress() public {
+        vm.startPrank(OWNER);
+        vm.expectRevert(bytes("zero: registry"));
+        router.setDeclarationRegistry(address(0));
+
+        vm.expectRevert(bytes("zero: adapter"));
+        router.setStableFXAdapter(address(0));
+
+        vm.expectRevert(bytes("zero: settler"));
+        router.setAtomicSettler(address(0));
+
+        vm.expectRevert(bytes("zero: preference registry"));
+        router.setSettlementPreferenceRegistry(address(0));
+        vm.stopPrank();
+    }
+
+    /// safeTransfer to address(0) is an ordinary balance update for most
+    /// ERC-20s, not a revert — so without this guard a mistyped recipient
+    /// burns the fees, and does it AFTER the balance has been zeroed.
+    function test_withdrawFees_rejectsZeroRecipient() public {
+        vm.prank(OWNER);
+        vm.expectRevert(bytes("zero: to"));
+        router.withdrawFees(address(usdc), address(0));
+    }
+
+    /// A fee change alters what every payer is charged and was the one admin
+    /// action leaving no trace an indexer could follow.
+    function test_setProtocolFee_emitsEvent() public {
+        vm.prank(OWNER);
+        vm.expectEmit(false, false, false, true);
+        emit IConduitRouter.ProtocolFeeSet(25);
+        router.setProtocolFee(25);
     }
 
     // ── Direct Send — Same Currency ───────────────────────────────────────────
@@ -213,69 +252,6 @@ contract ConduitRouterTest is Test {
         assertEq(q, 50 * 1e6);
     }
 
-    // ── executeWithAmm ────────────────────────────────────────────────────────
-
-    function test_executeWithAmm_swapsAndDeliversExactAmount() public {
-        MockUniswapV2Router amm = new MockUniswapV2Router();
-        amm.setRate(11, 10); // 1.1 usdc per eurc
-
-        uint256 amountOut = 50 * 1e6; // 50 EURC to recipient
-        uint256 amountInMax = 60 * 1e6; // slippage cap
-
-        vm.prank(PAYER);
-        usdc.approve(address(router), amountInMax);
-
-        address[] memory path = new address[](2);
-        path[0] = address(usdc);
-        path[1] = address(eurc);
-
-        IConduitRouter.PaymentInstruction memory instruction = IConduitRouter.PaymentInstruction({
-            payer: PAYER,
-            recipient: RECIPIENT,
-            payerToken: address(usdc),
-            recipientToken: address(eurc),
-            amount: amountOut,
-            deadline: block.timestamp + 1 hours,
-            declarationId: bytes32(0)
-        });
-
-        uint256 payerUsdcBefore = usdc.balanceOf(PAYER);
-
-        vm.prank(PAYER);
-        bytes32 receiptId = router.executeWithAmm(instruction, path, amountInMax, address(amm));
-
-        assertNotEq(receiptId, bytes32(0));
-        assertEq(eurc.balanceOf(RECIPIENT), amountOut);
-        // actualIn = 50 * 1.1 = 55 USDC; payer should be refunded the unused 5 USDC
-        uint256 expectedIn = (amountOut * 11) / 10;
-        assertEq(payerUsdcBefore - usdc.balanceOf(PAYER), expectedIn);
-    }
-
-    function test_executeWithAmm_revertsOnBadPathEnds() public {
-        MockUniswapV2Router amm = new MockUniswapV2Router();
-
-        vm.prank(PAYER);
-        usdc.approve(address(router), 100 * 1e6);
-
-        address[] memory badPath = new address[](2);
-        badPath[0] = address(eurc); // should be payerToken (usdc)
-        badPath[1] = address(eurc);
-
-        IConduitRouter.PaymentInstruction memory instruction = IConduitRouter.PaymentInstruction({
-            payer: PAYER,
-            recipient: RECIPIENT,
-            payerToken: address(usdc),
-            recipientToken: address(eurc),
-            amount: 10 * 1e6,
-            deadline: block.timestamp + 1 hours,
-            declarationId: bytes32(0)
-        });
-
-        vm.expectRevert("path must start at payerToken");
-        vm.prank(PAYER);
-        router.executeWithAmm(instruction, badPath, 100 * 1e6, address(amm));
-    }
-
     // ── Settlement preference override ──────────────────────────────────────
 
     function test_directSend_recipientPreferenceOverride_matchingTokenSucceeds() public {
@@ -393,5 +369,72 @@ contract ConduitRouterTest is Test {
         vm.prank(PAYER);
         bytes32 receiptId = router.execute(instruction);
         assertNotEq(receiptId, bytes32(0));
+    }
+
+    // ── Payer authorization ───────────────────────────────────────────────────
+    //
+    // `payer` is a field of a caller-supplied struct. The only thing that ever
+    // stood behind it was the ERC-20 allowance, and the SDK made that
+    // unlimited and permanent on first use, so every wallet that had paid once
+    // was reachable by anyone who read an Approval event off the chain.
+    //
+    // Every pre-existing test here pranks as PAYER before calling, so the
+    // question these ask -- what happens when someone else calls -- had never
+    // been put to the contract.
+    //
+    // executeWithFX is deliberately not covered: Permit2 verifies the payer's
+    // signature there, which is the authorization, and the contract's own
+    // comment explains why a msg.sender check would be strictly worse.
+
+    function test_execute_revertsWhenCallerIsNotPayer() public {
+        address attacker = makeAddr("attacker");
+        uint256 victimBalance = usdc.balanceOf(PAYER);
+
+        // The state the SDK actually left every payer in: unlimited, permanent.
+        vm.prank(PAYER);
+        usdc.approve(address(router), type(uint256).max);
+
+        IConduitRouter.PaymentInstruction memory instruction = IConduitRouter.PaymentInstruction({
+            payer:         PAYER,
+            recipient:     attacker,
+            payerToken:    address(usdc),
+            recipientToken: address(usdc),
+            amount:        victimBalance,
+            deadline:      block.timestamp + 1 hours,
+            declarationId: bytes32(0)
+        });
+
+        vm.prank(attacker);
+        vm.expectRevert(bytes("not payer"));
+        router.execute(instruction);
+
+        assertEq(usdc.balanceOf(PAYER), victimBalance, "payer balance must be untouched");
+        assertEq(usdc.balanceOf(attacker), 0, "attacker must receive nothing");
+    }
+
+    /// The guard must not cost the payer their own payment.
+    function test_execute_stillWorksForPayer() public {
+        uint256 sendAmount = 10 * 1e6;
+
+        vm.prank(PAYER);
+        usdc.approve(address(router), sendAmount);
+
+        IConduitRouter.PaymentInstruction memory instruction = IConduitRouter.PaymentInstruction({
+            payer:         PAYER,
+            recipient:     RECIPIENT,
+            payerToken:    address(usdc),
+            recipientToken: address(usdc),
+            amount:        sendAmount,
+            deadline:      block.timestamp + 1 hours,
+            declarationId: bytes32(0)
+        });
+
+        uint256 recipientBefore = usdc.balanceOf(RECIPIENT);
+
+        vm.prank(PAYER);
+        bytes32 receiptId = router.execute(instruction);
+
+        assertNotEq(receiptId, bytes32(0));
+        assertEq(usdc.balanceOf(RECIPIENT) - recipientBefore, sendAmount);
     }
 }

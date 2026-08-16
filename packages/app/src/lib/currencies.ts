@@ -1,10 +1,15 @@
 // Settle-currency choices offered across the dashboard (onboarding, request
 // payment, locations) — kept as one shared list + flag map since it was
 // previously duplicated verbatim in three places.
-export const SETTLE_CURRENCIES = ["EUR", "USD", "BRL", "AUD", "MXN", "CAD", "GBP", "ZAR", "KRW"] as const;
+// EURAU is listed by its token symbol rather than an ISO code, because EUR is
+// already EURC's. Two euro tokens from different issuers cannot share one code
+// (see packages/api/internal/currency/currency.go), so they are offered as two
+// choices — both flagged 🇪🇺, since both are euro.
+export const SETTLE_CURRENCIES = ["EUR", "EURAU", "USD", "BRL", "AUD", "MXN", "CAD", "GBP", "ZAR", "KRW", "CHF"] as const;
 
 const FLAGS: Record<string, string> = {
   EUR: "🇪🇺",
+  EURAU: "🇪🇺",
   USD: "🇺🇸",
   BRL: "🇧🇷",
   AUD: "🇦🇺",
@@ -13,6 +18,7 @@ const FLAGS: Record<string, string> = {
   GBP: "🇬🇧",
   ZAR: "🇿🇦",
   KRW: "🇰🇷",
+  CHF: "🇨🇭",
 };
 
 export function currencyFlag(iso: string): string {
@@ -33,6 +39,8 @@ const ISO_TO_TOKEN: Record<string, string> = {
   GBP: "GBPA",
   ZAR: "ZARU",
   KRW: "KRW1",
+  CHF: "CHFAU",
+  // EURAU is already the token symbol; isoToToken passes it through unchanged.
 };
 
 export function isoToToken(iso: string): string {

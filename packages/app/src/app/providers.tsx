@@ -3,21 +3,38 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { WagmiProvider } from "wagmi";
 import dynamic from "next/dynamic";
-import { usePathname } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { wagmiConfig } from "@/lib/wagmi";
-import {
-  GOOGLE_LOGIN_EVENT,
-  PrivyGateContext,
-  hasOAuthCallback,
-  hasPrivySession,
-} from "@/lib/privy-gate";
+import { WalletGateContext } from "@/lib/wallet-gate";
 
-const PRIVY_APP_ID = process.env.NEXT_PUBLIC_PRIVY_APP_ID ?? "";
-
-// ~700 kB of @privy-io/* kept out of the payer-page bundle: loaded only for
-// a returning Privy session, a dashboard route, or a Google sign-in click.
-const PrivyStack = dynamic(() => import("./privy-stack"), { ssr: false });
+// Identity is Circle Wallets. Privy was removed here in Phase 7 of the
+// migration; what it used to do and why none of it is needed now:
+//
+//   - A provider stack (<PrivyProvider>, <WagmiProvider> from @privy-io/wagmi)
+//     that had to wrap the whole app. Circle needs no provider tree at all: it
+//     is a wagmi connector, declared in lib/wagmi.ts alongside injected() and
+//     walletConnect(). One config, all connectors, no branch.
+//
+//   - Lazy-mounting that stack only when needed, because @privy-io/* is ~700 kB
+//     and a payer paying a link should never download it. The Circle SDK is
+//     lazily imported inside lib/circle/browser.ts at the point of use, so the
+//     payer bundle stays small without any mounting machinery.
+//
+//   - A hard rule that the two could never coexist: @privy-io/wagmi's
+//     createConfig does `connectors: e.connectors?.filter((o) => "mock" === o.type)`
+//     and disables EIP-6963 discovery, so wherever the Privy stack was mounted
+//     the Circle connector was absent from wagmi no matter what lib/wagmi
+//     declared. That constraint is what made this a switch rather than an
+//     addition — and it is gone with Privy.
+//
+// CircleStack is still dynamic, but only to keep the SDK import off the server
+// render path; it is mounted unconditionally now.
+const CircleStack = dynamic(() => import("./circle-stack"), { ssr: false });
+// Named export, so it needs its own dynamic wrapper.
+const CircleWalletGate = dynamic(
+  () => import("./circle-stack").then((m) => m.CircleWalletGate),
+  { ssr: false }
+);
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(
@@ -32,40 +49,26 @@ export function Providers({ children }: { children: React.ReactNode }) {
       })
   );
 
-  const pathname = usePathname();
-  const [wantPrivy, setWantPrivy] = useState(false);
-  const requestMount = useCallback(() => setWantPrivy(true), []);
-
-  useEffect(() => {
-    // hasOAuthCallback: we're returning from Google. Without this the stack
-    // stays unmounted, the callback is never consumed, and Google sign-in
-    // appears to do nothing on a first login.
-    if (hasPrivySession() || hasOAuthCallback()) setWantPrivy(true);
-    const onLoginRequest = () => setWantPrivy(true);
-    window.addEventListener(GOOGLE_LOGIN_EVENT, onLoginRequest);
-    return () => window.removeEventListener(GOOGLE_LOGIN_EVENT, onLoginRequest);
-  }, []);
-
-  // Dashboard always needs Privy (merchant auth). Checked in render so the
-  // stack starts loading on first client render, not after an effect tick.
-  const privyOn =
-    Boolean(PRIVY_APP_ID) && (wantPrivy || Boolean(pathname?.startsWith("/dashboard")));
-
-  if (!privyOn) {
-    return (
-      <PrivyGateContext.Provider value={{ mounted: false, requestMount, walletSettled: true }}>
-        <WagmiProvider config={wagmiConfig}>
-          <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-        </WagmiProvider>
-      </PrivyGateContext.Provider>
-    );
-  }
+  // Kept on the context because consumers call it, but it is now a no-op: there
+  // is no stack to ask for. Left in place rather than deleted so the gate's
+  // shape survives if a future provider needs mounting again — and so this
+  // phase changes no call sites, which was the rule for the whole migration.
+  const requestMount = useCallback(() => {}, []);
 
   return (
-    <PrivyGateContext.Provider value={{ mounted: true, requestMount, walletSettled: false }}>
-      <PrivyStack appId={PRIVY_APP_ID} queryClient={queryClient}>
-        {children}
-      </PrivyStack>
-    </PrivyGateContext.Provider>
+    <WalletGateContext.Provider value={{ mounted: true, requestMount, walletSettled: true }}>
+      <WagmiProvider config={wagmiConfig}>
+        <QueryClientProvider client={queryClient}>
+          {/* Translates the app's sign-in and sign-out events into connect /
+              disconnect on the Circle connector, and issues the Conduit session
+              token once a session exists. */}
+          <CircleStack />
+          {/* Holds back anything that displays an address until the Circle
+              session has been adopted — otherwise an auto-connected extension's
+              address shows first and then swaps. */}
+          <CircleWalletGate>{children}</CircleWalletGate>
+        </QueryClientProvider>
+      </WagmiProvider>
+    </WalletGateContext.Provider>
   );
 }

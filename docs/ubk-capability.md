@@ -137,7 +137,7 @@ work — do this before going live with real funds in Phase 1's implementation, 
 verification discipline used for those addresses previously). Arc's plain CCTP
 `TokenMessengerV2`/`MessageTransmitterV2` addresses embedded in this same package file
 are **byte-for-byte identical** to the ones independently confirmed in
-`docs/cctp-capability.md` from the earlier CCTP session — strong cross-confirmation this
+the earlier CCTP investigation — strong cross-confirmation this
 package's data is accurate, not stale or wrong.
 
 ## Integration approach for Phase 1.1

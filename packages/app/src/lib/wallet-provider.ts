@@ -8,7 +8,8 @@ import type { Connector } from "wagmi";
 // Every write path used to reach for `window.ethereum` directly, which is
 // wrong in two common cases:
 //
-//   1. Google sign-in provisions a Privy embedded wallet. It is not an
+//   1. Google sign-in provisions a Circle user-controlled wallet (a Privy
+//      embedded wallet, before Phase 7). It is not an
 //      extension and never injects `window.ethereum`, so the send failed
 //      with an opaque fetch/"Load failed" error before any transaction
 //      existed.

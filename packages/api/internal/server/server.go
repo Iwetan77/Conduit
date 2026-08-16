@@ -20,6 +20,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/kzn-labs/conduit/api/internal/auth"
 	bridgepkg "github.com/kzn-labs/conduit/api/internal/bridge"
+	"github.com/kzn-labs/conduit/api/internal/circle"
 	"github.com/kzn-labs/conduit/api/internal/fx"
 	"github.com/kzn-labs/conduit/api/internal/handlers"
 	"github.com/kzn-labs/conduit/api/internal/idempotency"
@@ -43,28 +44,56 @@ type Config struct {
 	ArcRelayerKey    string
 	BridgeStaleAfter time.Duration
 
-	// Privy merchant auth. Both optional -- if either is empty, Privy login
-	// is disabled and the dashboard falls back to sk_/pk_ key auth only
-	// (same opt-in pattern as the bridge feature above).
-	PrivyAppID           string
-	PrivyVerificationKey string // ES256 public key, PEM
+	// Circle Wallets. Optional on the same opt-in pattern: with no API key
+	// the /auth/circle routes report "not configured" rather than failing
+	// every call, so a deployment without it behaves exactly as before.
+	CircleAPIKey  string
+	CircleBaseURL string
+}
+
+// statusRecorder captures the status code so the request log can report it.
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (s *statusRecorder) WriteHeader(code int) {
+	s.status = code
+	s.ResponseWriter.WriteHeader(code)
 }
 
 func New(cfg Config) http.Handler {
 	stableFX := fx.NewStableFXProvider(cfg.StableFXBase, cfg.StableFXKey)
 	dispatcher := webhooks.NewDispatcher(cfg.Pool)
 
-	var privyVerifier *auth.PrivyVerifier
-	if cfg.PrivyAppID != "" && cfg.PrivyVerificationKey != "" {
-		var err error
-		privyVerifier, err = auth.NewPrivyVerifier(cfg.PrivyAppID, cfg.PrivyVerificationKey)
-		if err != nil {
-			log.Printf("auth: Privy login disabled: %v", err)
-		}
-	}
-
-	accountsH := &handlers.Accounts{Pool: cfg.Pool, PrivyVerifier: privyVerifier}
+	circleClient := circle.New(cfg.CircleBaseURL, cfg.CircleAPIKey)
+	circleVerifier := auth.NewCircleVerifier(circleClient)
+	accountsH := &handlers.Accounts{Pool: cfg.Pool, CircleVerifier: circleVerifier}
 	apiKeysH := &handlers.ApiKeys{Pool: cfg.Pool}
+	circleAuthH := &handlers.CircleAuth{
+		Client: circleClient,
+		// Arc plus every Circle-supported chain the cross-chain payer flow
+		// offers as a source. Sonic, World Chain, Sei and HyperEVM appear in
+		// that flow but Circle cannot hold a wallet on them, so a Circle user
+		// simply cannot pay from those — a real gap, not an omission here.
+		//
+		// Adding to this list is safe now: Initialize drops a chain Circle
+		// rejects and retries without it, so an identifier that turns out to be
+		// wrong costs that one chain rather than every chain. It used to
+		// collapse to Arc alone, which is why ETH-SEPOLIA sat out until the
+		// retry was fixed.
+		Blockchains: []string{
+			"ARC-TESTNET",
+			"ETH-SEPOLIA",
+			"BASE-SEPOLIA",
+			"MATIC-AMOY",
+			"AVAX-FUJI",
+			"ARB-SEPOLIA",
+			"OP-SEPOLIA",
+			"UNI-SEPOLIA",
+		},
+		FallbackBlockchains: []string{"ARC-TESTNET"},
+	}
 	// Server-side balance reads with a short cache. Keeps N browsers from
 	// each fanning out their own RPC calls and tripping Arc's rate limiter.
 	arcRPCForBalances := cfg.ArcRPC
@@ -88,6 +117,14 @@ func New(cfg Config) http.Handler {
 	if err != nil {
 		log.Printf("bridge: CCTP cross-chain inbound disabled: %v", err)
 	}
+
+	// One limiter for the whole process, so a client cannot reset its budget by
+	// moving between public routes.
+	publicLimiter := newRateLimiter(publicRatePerSecond, publicBurst)
+	// Only honour X-Forwarded-For when an operator confirms a proxy is in front.
+	// The header is caller-supplied; trusting it unconditionally would let
+	// anyone bypass the limit by inventing an IP per request.
+	trustProxyHeaders := os.Getenv("CONDUIT_TRUSTED_PROXY") != ""
 
 	r := chi.NewRouter()
 	// The app (packages/app) calls this API directly from browser JS on a
@@ -115,12 +152,49 @@ func New(cfg Config) http.Handler {
 		}
 	}
 	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   allowedOrigins,
-		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-		AllowedHeaders:   []string{"Authorization", "Content-Type", "Idempotency-Key", "Conduit-Account"},
+		AllowedOrigins: allowedOrigins,
+		// PATCH is here because /v1/accounts/{id} is a PATCH and was unreachable
+		// from the browser without it — the preflight answered without the
+		// method, so the browser never sent the request and Settings' "Business
+		// identity" could not be saved. Same failure mode as a missing header
+		// below: nothing in the API log, because nothing arrived.
+		AllowedMethods: []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
+		// X-Circle-User-Token is how the browser presents Circle's session on
+		// the /auth/circle/* routes. Leaving it off this list does not produce
+		// a 403 anywhere visible: the preflight answers 200 with no CORS
+		// headers, and the browser refuses to send the real request at all.
+		// The caller sees only "Failed to fetch", with nothing in the API log
+		// because the request never arrived.
+		AllowedHeaders:   []string{"Authorization", "Content-Type", "Idempotency-Key", "Conduit-Account", "X-Circle-User-Token"},
 		AllowCredentials: false,
 		MaxAge:           300,
 	}))
+	// Request log, on by default for the dev server and opt-in elsewhere.
+	//
+	// Added because a blank dashboard is indistinguishable from three different
+	// causes -- requests not being made, requests being rejected, or requests
+	// succeeding with no data -- and none of them were visible from either end.
+	// Guessing between them is exactly the loop this project keeps paying for.
+	if os.Getenv("CONDUIT_REQUEST_LOG") != "0" {
+		r.Use(func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				start := time.Now()
+				rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+				next.ServeHTTP(rec, req)
+				if strings.HasPrefix(req.URL.Path, "/v1/") {
+					auth := "none"
+					if req.Header.Get("X-Circle-User-Token") != "" {
+						auth = "circle"
+					} else if req.Header.Get("Authorization") != "" {
+						auth = "bearer"
+					}
+					log.Printf("%s %s -> %d (%s, auth=%s)",
+						req.Method, req.URL.Path, rec.status, time.Since(start).Round(time.Millisecond), auth)
+				}
+			})
+		})
+	}
+
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) })
 
 	// (deploy pipeline restored via deploy-api Action + Render Deploy Hook)
@@ -137,99 +211,143 @@ func New(cfg Config) http.Handler {
 	})
 
 	r.Route("/v1", func(r chi.Router) {
-		// Unauthenticated: GET /v1/currencies is public reference data; POST
-		// /v1/accounts is how you get your FIRST key (bootstrap) — the spec
-		// doesn't say how account #0 is created without already having a key,
-		// so this is a deliberate, documented choice: account creation is open,
-		// everything else needs the key that creates it. Subaccounts (spec's
-		// "Conduit-Account" header flow) still require an authenticated parent
-		// account key — this only covers creating a brand new top-level account.
-		r.Get("/currencies", currenciesH.List)
-		// Indicative FX rates, no state touched. Public so any payer surface can
-		// show "you'll receive ≈ X" — and whether the pair routes at all, and
-		// whether the amount clears the provider's minimum — BEFORE the payer
-		// commits to a checkout. See handlers.FxRates.
-		r.Get("/fx/rates", fxRatesH.Get)
-		// Public: a payer has no API key, and this is read-only chain data.
-		r.Get("/balances", balancesH.List)
-		// Public JSON-RPC relay to Arc (method-allowlisted, fixed upstream).
-		// No API key: reads are public chain data and a broadcast carries an
-		// already-signed transaction. See handlers.RPCProxy.
-		r.Post("/rpc", rpcProxyH.Handle)
-		r.Post("/accounts", accountsH.Create)
-		// Privy-authenticated account bootstrap: verifies the bearer token
-		// itself (not gated by auth.Middleware, since a brand-new Privy user
-		// has no account yet for the middleware to resolve) and upserts by
-		// privy_user_id. Registered only when Privy is configured.
-		if privyVerifier != nil {
-			r.Post("/accounts/privy", accountsH.CreateFromPrivy)
-		}
+		// Rate limiting, on the unauthenticated routes ONLY.
+		//
+		// Everything in the authenticated group below already costs an attacker
+		// an API key, and a key can be revoked. A payment link cannot: it is a
+		// URL meant to be opened by strangers. Several routes in here spend real
+		// money on our side -- a quote is a live StableFX call against our key --
+		// so an unthrottled loop over one link URL burns provider quota we pay
+		// for, whether or not it ever settles anything.
+		//
+		// Scoped as its own group rather than r.Use on /v1, which would have
+		// covered the authenticated routes too and throttled a whole office
+		// behind one NAT as if it were a single client. Scoping it structurally
+		// also means a bogus Authorization header cannot skip the limiter --
+		// which is what checking for one in the middleware would have allowed.
+		r.Group(func(r chi.Router) {
+			r.Use(rateLimit(publicLimiter, trustProxyHeaders))
 
-		// Public, minimal intent details for the payer surface (/pay/[id]) --
-		// a payer landing on a bare payment link has no API key. Deliberately
-		// exposes only amount/currency/status/source_chain/expiry, never
-		// account_id/settle_address/reference/metadata.
-		r.Get("/settlement_intents/{id}/public", intentsH.GetPublic)
+			// Unauthenticated: GET /v1/currencies is public reference data; POST
+			// /v1/accounts is how you get your FIRST key (bootstrap) — the spec
+			// doesn't say how account #0 is created without already having a key,
+			// so this is a deliberate, documented choice: account creation is open,
+			// everything else needs the key that creates it. Subaccounts (spec's
+			// "Conduit-Account" header flow) still require an authenticated parent
+			// account key — this only covers creating a brand new top-level account.
+			r.Get("/currencies", currenciesH.List)
+			// Indicative FX rates, no state touched. Public so any payer surface can
+			// show "you'll receive ≈ X" — and whether the pair routes at all, and
+			// whether the amount clears the provider's minimum — BEFORE the payer
+			// commits to a checkout. See handlers.FxRates.
+			r.Get("/fx/rates", fxRatesH.Get)
+			// Public: a payer has no API key, and this is read-only chain data.
+			r.Get("/balances", balancesH.List)
+			// Public JSON-RPC relay to Arc (method-allowlisted, fixed upstream).
+			// No API key: reads are public chain data and a broadcast carries an
+			// already-signed transaction. See handlers.RPCProxy.
+			r.Post("/rpc", rpcProxyH.Handle)
+			r.Post("/accounts", accountsH.Create)
+			// Login bootstrap: verifies the credential itself (not gated by
+			// auth.Middleware, since a brand-new user has no account yet for the
+			// middleware to resolve) and upserts by (auth_provider, auth_subject).
+			//
+			// Registered unconditionally, never behind an "is the provider
+			// configured" check. /accounts/privy used to be, and when this route
+			// was first added it was nested in that same block by mistake -- so the
+			// replacement for Privy existed only where Privy was configured, and
+			// 404'd on exactly the deployments that had finished migrating. The
+			// handler answers "not configured" itself when there is no Circle key.
+			r.Post("/accounts/circle", accountsH.CreateFromCircle)
 
-		// Payment links: same "no API key" reasoning as the settlement_intent
-		// public route above -- a payer opening a bare link/QR has no
-		// credentials. GetPublic and Pay are the two payer-facing calls.
-		r.Get("/payment_links/{id}/public", paymentLinksH.GetPublic)
-		r.Post("/payment_links/{id}/pay", paymentLinksH.Pay)
+			// Circle Wallets: the browser cannot hold the Circle API key, so device
+			// tokens and challenge ids are minted here. Unauthenticated for the same
+			// reason /accounts/circle is -- the identity being established is the
+			// point of the call.
+			//
+			// Registered unconditionally, NOT gated on a key being present. The
+			// handler reports "not configured" on its own when there is no Circle
+			// key.
+			r.Post("/auth/circle/device", circleAuthH.StartLogin)
+			r.Post("/auth/circle/initialize", circleAuthH.Initialize)
+			r.Get("/auth/circle/wallets", circleAuthH.Wallets)
+			r.Post("/auth/circle/sign_typed_data", circleAuthH.SignTypedData)
+			r.Post("/auth/circle/sign_message", circleAuthH.SignMessage)
+			r.Post("/auth/circle/contract_execution", circleAuthH.ContractExecution)
+			r.Get("/auth/circle/transactions", circleAuthH.FindTransaction)
+			r.Get("/auth/circle/transactions/{id}", circleAuthH.Transaction)
 
-		// Cross-currency FX for the payer surface. Same "no API key" reasoning
-		// as the routes above: a payer opening a link or QR has no
-		// credentials, and Circle StableFX is the ONLY working cross-currency
-		// path (the old on-chain AMM route had no USDC/EURC pool on Arc and
-		// could never settle). Scoped by intent ID, which is the capability.
-		// Authenticated callers are still restricted to their own account --
-		// see resolveIntentAccount. No funds move without the payer's own
-		// wallet signature on the quote and funding payloads.
-		// Direct send: a payer with a connected wallet and no account at all.
-		// Creating an intent moves no money -- the payer still signs both
-		// StableFX payloads themselves -- so this is open for the same reason
-		// the routes above are. See SettlementIntents.CreateDirect.
-		r.Post("/settlement_intents/direct", intentsH.CreateDirect)
+			// Public, minimal intent details for the payer surface (/pay/[id]) --
+			// a payer landing on a bare payment link has no API key. Deliberately
+			// exposes only amount/currency/status/source_chain/expiry, never
+			// account_id/settle_address/reference/metadata.
+			r.Get("/settlement_intents/{id}/public", intentsH.GetPublic)
 
-		r.Post("/settlement_intents/{id}/quote", intentsH.Quote)
-		r.Post("/settlement_intents/{id}/prepare", intentsH.Prepare)
-		r.Post("/settlement_intents/{id}/confirm", intentsH.Confirm)
-		// Same-currency direct pays settle on-chain in the payer's browser and
-		// have no server step to mark them settled (unlike /confirm above and
-		// the bridge path). This is that step: verifies the tx on Arc, records
-		// the settlement, and fires the settlement.succeeded webhook. Same
-		// "payer has no API key, intent id is the capability" reasoning.
-		r.Post("/settlement_intents/{id}/record", intentsH.RecordDirectSettlement)
+			// Payment links: same "no API key" reasoning as the settlement_intent
+			// public route above -- a payer opening a bare link/QR has no
+			// credentials. GetPublic and Pay are the two payer-facing calls.
+			r.Get("/payment_links/{id}/public", paymentLinksH.GetPublic)
+			r.Post("/payment_links/{id}/pay", paymentLinksH.Pay)
 
-		// A payer's own cross-currency history. Unauthenticated by API key for
-		// the same reason as the routes above -- a payer has none -- but gated
-		// by a wallet signature instead, since this reads that wallet's own
-		// settlement history rather than acting on their behalf. See
-		// handlers.WalletHistory's doc comment for why this can't come from
-		// an on-chain read the way same-currency history does.
-		r.Post("/wallet_settlements", walletHistoryH.List)
+			// Cross-currency FX for the payer surface. Same "no API key" reasoning
+			// as the routes above: a payer opening a link or QR has no
+			// credentials, and Circle StableFX is the ONLY working cross-currency
+			// path (an on-chain swap route was removed: Arc has no USDC/EURC
+			// pool, so it could never settle). Scoped by intent ID, which is the capability.
+			// Authenticated callers are still restricted to their own account --
+			// see resolveIntentAccount. No funds move without the payer's own
+			// wallet signature on the quote and funding payloads.
+			// Direct send: a payer with a connected wallet and no account at all.
+			// Creating an intent moves no money -- the payer still signs both
+			// StableFX payloads themselves -- so this is open for the same reason
+			// the routes above are. See SettlementIntents.CreateDirect.
+			r.Post("/settlement_intents/direct", intentsH.CreateDirect)
 
-		// Cross-chain bridge endpoints are deliberately unauthenticated: this
-		// is the payer surface (see spec), and a Solana-side payer has no
-		// Conduit API key or Arc wallet at all. Only registered when
-		// ArcRelayerKey is configured -- see newBridgeHandler.
-		if bridgeH != nil {
-			r.Post("/settlement_intents/{id}/bridge/initiate", bridgeH.Initiate)
-			r.Get("/settlement_intents/{id}/bridge/status", bridgeH.Status)
-			r.Get("/settlement_intents/{id}/bridge/balance", bridgeH.Balance)
-			// Client-side UBK spend path (option B): the browser drives Circle's
-			// SDK across any supported source chain, then reports the Gateway
-			// transfer id here for the server to poll + settle.
-			r.Get("/settlement_intents/{id}/bridge/plan", bridgeH.Plan)
-			r.Post("/settlement_intents/{id}/bridge/report_spend", bridgeH.ReportClientSpend)
-		}
+			r.Post("/settlement_intents/{id}/quote", intentsH.Quote)
+			r.Post("/settlement_intents/{id}/prepare", intentsH.Prepare)
+			r.Post("/settlement_intents/{id}/confirm", intentsH.Confirm)
+			// Same-currency direct pays settle on-chain in the payer's browser and
+			// have no server step to mark them settled (unlike /confirm above and
+			// the bridge path). This is that step: verifies the tx on Arc, records
+			// the settlement, and fires the settlement.succeeded webhook. Same
+			// "payer has no API key, intent id is the capability" reasoning.
+			r.Post("/settlement_intents/{id}/record", intentsH.RecordDirectSettlement)
+
+			// A payer's own cross-currency history. Unauthenticated by API key for
+			// the same reason as the routes above -- a payer has none -- but gated
+			// by a wallet signature instead, since this reads that wallet's own
+			// settlement history rather than acting on their behalf. See
+			// handlers.WalletHistory's doc comment for why this can't come from
+			// an on-chain read the way same-currency history does.
+			r.Post("/wallet_settlements", walletHistoryH.List)
+
+			// Cross-chain bridge endpoints are deliberately unauthenticated: this
+			// is the payer surface (see spec), and a Solana-side payer has no
+			// Conduit API key or Arc wallet at all. Only registered when
+			// ArcRelayerKey is configured -- see newBridgeHandler.
+			if bridgeH != nil {
+				r.Post("/settlement_intents/{id}/bridge/initiate", bridgeH.Initiate)
+				r.Get("/settlement_intents/{id}/bridge/status", bridgeH.Status)
+				r.Get("/settlement_intents/{id}/bridge/balance", bridgeH.Balance)
+				// Client-side UBK spend path (option B): the browser drives Circle's
+				// SDK across any supported source chain, then reports the Gateway
+				// transfer id here for the server to poll + settle.
+				r.Get("/settlement_intents/{id}/bridge/plan", bridgeH.Plan)
+				r.Post("/settlement_intents/{id}/bridge/report_spend", bridgeH.ReportClientSpend)
+			}
+
+		})
 
 		r.Group(func(r chi.Router) {
-			r.Use(auth.Middleware(cfg.Pool, privyVerifier))
+			r.Use(auth.Middleware(cfg.Pool, circleVerifier))
 			r.Use(idempotency.Middleware(cfg.Pool))
 
 			r.Get("/accounts", accountsH.List)
 			r.Get("/accounts/me", accountsH.Me)
+			// Ends every session for the account. Authenticated because it acts
+			// on the caller's own account, and only meaningful to a session
+			// caller -- see Accounts.Logout.
+			r.Post("/auth/logout", accountsH.Logout)
 			r.Get("/accounts/{id}", accountsH.Get)
 			r.Patch("/accounts/{id}", accountsH.Update)
 			r.Post("/accounts/sub", accountsH.CreateSub)

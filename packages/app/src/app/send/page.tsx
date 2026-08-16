@@ -84,7 +84,7 @@ export default function SendPage() {
     }
   };
 
-  // What this send actually costs in the payer's currency (AMM exact-out
+  // What this send actually costs in the payer's currency (exact-out
   // quote for cross-currency, 1:1 for same), checked against their real
   // balance BEFORE the confirm step so nobody walks into a revert.
   const required = useRequiredPayerAmount(payerCurrency, recipientCurrency, amount);

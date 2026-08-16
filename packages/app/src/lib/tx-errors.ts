@@ -44,6 +44,21 @@ export function classifyTxError(err: unknown): TxError {
     return { code: 403, message: "No wallet connected. Connect a wallet or sign in, then try again." };
   }
 
+  // 5xx — refused on purpose. Not a failure: the contract did what it was told.
+  //
+  // Kept above the 2xx network bucket, which matches on "revert" and would
+  // otherwise swallow this as "the network rejected this transaction" — true
+  // in the narrowest sense and useless to the payer, who can act on the real
+  // reason and cannot act on that one.
+  if (contains(raw, "preferencemismatch")) {
+    return {
+      code: 501,
+      message:
+        "This recipient only accepts a different currency — they've set a standing settlement preference. " +
+        "Pay in that currency instead.",
+    };
+  }
+
   // 3xx — FX / quote
   if (contains(raw, "quote has expired", "fx_quote_expired", "rate kept moving", "rate moved")) {
     return { code: 301, message: "The exchange rate moved before you approved. Please try again." };

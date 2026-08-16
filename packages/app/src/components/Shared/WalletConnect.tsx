@@ -2,53 +2,57 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useAccount, useConnect, useDisconnect } from "wagmi";
-import { usePrivy } from "@privy-io/react-auth";
 import {
-  usePrivyGate,
+  useWalletGate,
   requestGoogleLogin,
   requestSignOut,
   GOOGLE_LOGIN_ALREADY,
   GOOGLE_LOGIN_FAILED,
   GOOGLE_LOGIN_STARTED,
-} from "@/lib/privy-gate";
+} from "@/lib/wallet-gate";
 import { shortenAddress } from "@/lib/format";
 
-const PRIVY_ENABLED = Boolean(process.env.NEXT_PUBLIC_PRIVY_APP_ID);
+// Google sign-in exists when Circle is configured. There is no provider flag
+// any more: Privy was removed in Phase 7, so this is the only Google path and
+// there is nothing to choose between. A deployment without Circle credentials
+// simply shows wallet-only sign-in, which is the same graceful degradation the
+// WalletConnect connector already gets in lib/wagmi.ts.
+const CIRCLE_ENABLED = Boolean(process.env.NEXT_PUBLIC_CIRCLE_APP_ID);
 
 // Payers get two ways in: a real wallet (injected/WalletConnect) or a Google
-// sign-in that provisions a Privy embedded wallet. No business onboarding on
-// this path — that's the dashboard's AccountGate, not this component.
-// The button doesn't touch Privy hooks itself: it flags intent and lets
-// providers.tsx lazily mount the Privy stack (see lib/privy-gate.tsx), so
-// payer pages don't ship @privy-io/* until someone actually wants it.
+// sign-in that provisions a Circle user-controlled wallet. No business
+// onboarding on this path — that's the dashboard's AccountGate, not this
+// component.
+//
+// The button touches no SDK itself: it dispatches an event and lets
+// circle-stack.tsx do the work (see lib/wallet-gate.tsx). Under Privy that
+// indirection existed to keep ~700 kB of @privy-io/* out of the payer bundle;
+// it is kept because it is also what lets the button stay dumb while the
+// sign-in mechanism changes underneath it — which is exactly what just
+// happened.
 function GoogleSignIn({ fullWidth = false, short = false }: { fullWidth?: boolean; short?: boolean }) {
   const [starting, setStarting] = useState(false);
-  // "loading" = fetching/booting the Privy chunk; "opening" = initOAuth has
-  // been called and we're waiting on the redirect. Not shown to the user —
+  // "loading" = fetching the Circle SDK chunk and minting a device token;
+  // "opening" = the redirect to Google is under way. Not shown to the user —
   // it only selects which timeout budget applies (see below).
   const [stage, setStage] = useState<"loading" | "opening">("loading");
   const [error, setError] = useState("");
 
-  // A failed OAuth start (provider disabled on the Privy app, popup blocked)
-  // must reset the button — otherwise it reads as a permanent hang. The
-  // timeout covers failures that never surface an error at all.
+  // A failed sign-in start (Circle unreachable, device token refused, redirect
+  // blocked) must reset the button — otherwise it reads as a permanent hang.
+  // The timeout covers failures that never surface an error at all.
   //
   // The timeout is two-stage on purpose. A single flat 15s was itself a cause
   // of "sometimes it works, sometimes it errors out": clicking Google
-  // downloads a ~700 kB lazy chunk and boots Privy, which on mobile data
-  // routinely takes longer than that. The button then declared failure while
-  // the sign-in was still coming, and often redirected a moment later. So:
-  // a generous budget for boot, and a tight one once we know initOAuth has
-  // actually been called (from there a redirect should be near-immediate).
+  // downloads the SDK chunk and makes a server round trip for a device token,
+  // which on mobile data routinely takes longer than that. The button then
+  // declared failure while the sign-in was still coming, and often redirected
+  // a moment later. So: a generous budget for boot, and a tight one once the
+  // redirect is known to be under way (from there it should be near-immediate).
   // Listeners are registered ONCE on mount, never gated on `starting`.
   //
-  // Gating them on `starting` lost the answer outright. Clicking batches
-  // setStarting(true) here with setPending(true) in the Privy stack; React
-  // then runs effects for that commit in tree order, and StartGoogleOAuth
-  // sits above this button, so the stack dispatched its outcome BEFORE this
-  // effect had subscribed. When the outcome was "already authenticated" the
-  // event vanished and the button sat on its pending label until the 45s
-  // budget expired.
+  // Gating them on `starting` lost the answer outright: the stack can dispatch
+  // its outcome before this effect has subscribed, and the event vanishes.
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   useEffect(() => {
@@ -67,7 +71,7 @@ function GoogleSignIn({ fullWidth = false, short = false }: { fullWidth?: boolea
     const onAlready = () => {
       stop();
     };
-    // initOAuth has actually been called; from here a redirect should be
+    // The redirect to Google is actually under way; from here it should be
     // near-immediate, so the budget tightens.
     const onStarted = () => {
       setStage("opening");
@@ -96,8 +100,8 @@ function GoogleSignIn({ fullWidth = false, short = false }: { fullWidth?: boolea
         setError("");
         setStage("loading");
         setStarting(true);
-        // Budget for downloading and booting the lazy Privy chunk. Started
-        // here rather than in an effect so it can't race the outcome.
+        // Budget for downloading the SDK chunk and minting a device token.
+        // Started here rather than in an effect so it can't race the outcome.
         clearTimeout(timer.current);
         timer.current = setTimeout(() => {
           setStarting(false);
@@ -133,45 +137,24 @@ function GoogleSignIn({ fullWidth = false, short = false }: { fullWidth?: boolea
   );
 }
 
-// @privy-io/wagmi's createConfig STRIPS the injected/walletConnect
-// connectors (it only keeps Privy-synced wallets), so once the Privy stack
-// is mounted the wagmi connect buttons have nothing to connect with.
-// External wallets must go through Privy's own connect modal instead —
-// it handles MetaMask/WalletConnect and syncs the result back into wagmi.
-function PrivyConnectWallet({ fullWidth = false }: { fullWidth?: boolean }) {
-  const { connectWallet } = usePrivy();
-  return (
-    <button
-      onClick={() => connectWallet()}
-      className={`${fullWidth ? "w-full " : ""}px-4 py-2 text-scale-2 font-mono bg-signal text-signal-ink
-                 hover:bg-signal/90 transition-colors whitespace-nowrap`}
-    >
-      Connect Wallet
-    </button>
-  );
-}
-
-// Rendered only when the Privy stack is mounted (usePrivy throws otherwise).
-function PrivySignOut() {
-  const { authenticated } = usePrivy();
-  if (!authenticated) return null;
-  return (
-    <button
-      onClick={() => requestSignOut()}
-      className="ml-1 text-scale-2 font-mono text-ink-dim hover:text-danger transition-colors leading-none"
-      title="Sign out"
-      aria-label="Sign out"
-    >
-      ×
-    </button>
-  );
-}
-
+// Sign-out.
+//
+// Two components used to live here: one that called Privy's own connect modal
+// (@privy-io/wagmi stripped the injected/walletConnect connectors, so the
+// plain wagmi buttons had nothing to connect with while Privy was mounted) and
+// one that signed out of Privy. Both are gone with Privy. The Circle connector
+// sits alongside injected() and walletConnect() in one config, so the ordinary
+// wagmi buttons work for everyone and there is nothing to branch on.
+//
+// A bare wagmi disconnect is still not enough: the Circle session stays in
+// localStorage, the connector's isAuthorized() still says yes, and the next
+// page load silently signs the user back in. So sign-out goes through the
+// event, which CircleStack handles by disconnecting AND clearing the session.
 function DisconnectX() {
   const { disconnect } = useDisconnect();
   return (
     <button
-      onClick={() => disconnect()}
+      onClick={() => (CIRCLE_ENABLED ? requestSignOut() : disconnect())}
       className="ml-1 text-scale-2 font-mono text-ink-dim hover:text-danger transition-colors leading-none"
       title="Disconnect"
       aria-label="Disconnect"
@@ -182,8 +165,6 @@ function DisconnectX() {
 }
 
 function ConnectedChip({ address, compact = false }: { address: string; compact?: boolean }) {
-  const { mounted } = usePrivyGate();
-
   return (
     <div
       className={`inline-flex items-center ${compact ? "gap-1.5 px-3 py-1.5" : "gap-2 px-3 py-2"}
@@ -193,7 +174,7 @@ function ConnectedChip({ address, compact = false }: { address: string; compact?
       <span className={`${compact ? "text-scale-1" : "text-scale-2"} font-mono text-ink`}>
         {shortenAddress(address, compact ? 3 : 4)}
       </span>
-      {mounted ? <PrivySignOut /> : <DisconnectX />}
+      <DisconnectX />
     </div>
   );
 }
@@ -202,14 +183,15 @@ export function WalletConnect() {
   const [mounted, setMounted] = useState(false);
   const { address, isConnected } = useAccount();
   const { connect, connectors, isPending } = useConnect();
-  const { mounted: privyMounted, walletSettled } = usePrivyGate();
+  const { walletSettled } = useWalletGate();
 
   useEffect(() => { setMounted(true); }, []);
   if (!mounted) return null;
 
-  // Same reason as the nav: before Privy has booted, `address` may be whatever
-  // wallet an extension auto-connected rather than the one this user signed in
-  // with, and showing it invites acting on the wrong account.
+  // Same reason as the nav: before the Circle session has been adopted,
+  // `address` may be whatever wallet an extension auto-connected rather than
+  // the one this user signed in with, and showing it invites acting on the
+  // wrong account.
   if (!walletSettled) return null;
 
   if (isConnected && address) {
@@ -222,23 +204,17 @@ export function WalletConnect() {
     // nowrap: wrapping put Connect Wallet and Google on separate lines on
     // mobile, reading as two stacked competing CTAs.
     <div className="flex flex-nowrap items-center justify-center gap-2">
-      {privyMounted ? (
-        <PrivyConnectWallet />
-      ) : (
-        <>
-          {injected && (
-            <button
-              onClick={() => connect({ connector: injected })}
-              disabled={isPending}
-              className="px-4 py-2 text-scale-2 font-mono bg-signal text-signal-ink
-                         hover:bg-signal/90 transition-colors disabled:opacity-50 whitespace-nowrap"
-            >
-              {isPending ? "Connecting..." : "Connect Wallet"}
-            </button>
-          )}
-        </>
+      {injected && (
+        <button
+          onClick={() => connect({ connector: injected })}
+          disabled={isPending}
+          className="px-4 py-2 text-scale-2 font-mono bg-signal text-signal-ink
+                     hover:bg-signal/90 transition-colors disabled:opacity-50 whitespace-nowrap"
+        >
+          {isPending ? "Connecting..." : "Connect Wallet"}
+        </button>
       )}
-      {PRIVY_ENABLED && <GoogleSignIn />}
+      {CIRCLE_ENABLED && <GoogleSignIn />}
     </div>
   );
 }
@@ -247,7 +223,7 @@ export function WalletConnectCompact() {
   const [mounted, setMounted] = useState(false);
   const { address, isConnected } = useAccount();
   const { connect, connectors, isPending } = useConnect();
-  const { mounted: privyMounted, walletSettled } = usePrivyGate();
+  const { walletSettled } = useWalletGate();
 
   useEffect(() => { setMounted(true); }, []);
   if (!mounted) return null;
@@ -265,20 +241,16 @@ export function WalletConnectCompact() {
   return (
     <div className="flex flex-row gap-2 w-full">
       <div className="flex-1">
-        {privyMounted ? (
-          <PrivyConnectWallet fullWidth />
-        ) : (
-          <button
-            onClick={() => connector && connect({ connector })}
-            disabled={isPending || !connector}
-            className="px-4 py-2 text-scale-2 font-medium font-mono bg-signal text-signal-ink
-                       w-full hover:bg-signal/90 transition-colors disabled:opacity-50 whitespace-nowrap"
-          >
-            {isPending ? "Connecting..." : "Connect Wallet"}
-          </button>
-        )}
+        <button
+          onClick={() => connector && connect({ connector })}
+          disabled={isPending || !connector}
+          className="px-4 py-2 text-scale-2 font-medium font-mono bg-signal text-signal-ink
+                     w-full hover:bg-signal/90 transition-colors disabled:opacity-50 whitespace-nowrap"
+        >
+          {isPending ? "Connecting..." : "Connect Wallet"}
+        </button>
       </div>
-      {PRIVY_ENABLED && <GoogleSignIn short />}
+      {CIRCLE_ENABLED && <GoogleSignIn short />}
     </div>
   );
 }

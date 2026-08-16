@@ -1,14 +1,15 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.24;
+pragma solidity 0.8.24;
 
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 
 /// @title DeclarationRegistry
 /// @notice Registry for payment declarations. A declaration is a recipient's
 ///         expression of intent: "I want X amount of Y token." Anyone holding
 ///         the declarationId can fulfill it. Set amount = 0 for open amounts.
 /// @dev Standalone — no external protocol dependencies.
-contract DeclarationRegistry is Ownable {
+contract DeclarationRegistry is Ownable2Step {
     // ── Data Structures ───────────────────────────────────────────────────────
 
     struct PaymentDeclaration {

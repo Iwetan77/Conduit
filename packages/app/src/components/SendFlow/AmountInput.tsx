@@ -14,7 +14,7 @@ interface AmountInputProps {
   max?: bigint;
 }
 
-const SYMBOLS: Record<string, string> = { USDC: "$", EURC: "€", BRLA: "R$", AUDF: "A$", MXNB: "MX$", QCAD: "C$", GBPA: "£", ZARU: "R" };
+const SYMBOLS: Record<string, string> = { USDC: "$", EURC: "€", BRLA: "R$", AUDF: "A$", MXNB: "MX$", QCAD: "C$", GBPA: "£", ZARU: "R", CHFAU: "CHF", EURAU: "€" };
 
 export function AmountInput({
   value,

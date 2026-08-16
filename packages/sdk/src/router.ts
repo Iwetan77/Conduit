@@ -76,8 +76,22 @@ export class RouterClient {
     const signer = await signerProvider.getSigner();
     const tokenWithSigner = tokenContract.connect(signer) as ethers.Contract;
 
-    // Approve max to avoid repeated approvals
-    const tx = await tokenWithSigner.approve(spender, ethers.MaxUint256);
+    // Approve exactly what this payment needs, not MaxUint256.
+    //
+    // An unlimited approval saves one transaction on later payments and in
+    // exchange leaves a standing, permanent authority over the payer's entire
+    // balance of that token -- readable by anyone watching Approval events,
+    // and outliving the payment it was granted for by however long the wallet
+    // exists. The saved transaction is not worth that.
+    //
+    // Some tokens (USDT among them) reject a non-zero-to-non-zero change, so
+    // any stale partial allowance is cleared first.
+    if (currentAllowance > 0n) {
+      const reset = await tokenWithSigner.approve(spender, 0n);
+      await reset.wait();
+    }
+
+    const tx = await tokenWithSigner.approve(spender, amount);
     await tx.wait();
   }
 

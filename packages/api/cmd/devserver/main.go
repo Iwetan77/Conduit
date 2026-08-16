@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/kzn-labs/conduit/api/internal/auth"
 	"github.com/kzn-labs/conduit/api/internal/db"
 	"github.com/kzn-labs/conduit/api/internal/server"
 )
@@ -52,18 +53,33 @@ func main() {
 	}
 
 	cfg := server.Config{
-		Pool:                 pool,
-		StableFXKey:          loadStableFXKey(),
-		StableFXBase:         envOr("STABLEFX_BASE_URL", "https://api-sandbox.circle.com"),
-		AppBaseURL:           envOr("CONDUIT_APP_BASE_URL", "http://localhost:3000"),
-		ArcRPC:               envOr("ARC_RPC", "https://rpc.testnet.arc.network"),
-		SolanaRPC:            envOr("SOLANA_RPC", "https://api.devnet.solana.com"),
-		SolanaWS:             envOr("SOLANA_WS", "wss://api.devnet.solana.com"),
-		ArcRelayerKey:        os.Getenv("ARC_RELAYER_KEY"),
-		BridgeStaleAfter:     staleAfter,
-		PrivyAppID:           os.Getenv("PRIVY_APP_ID"),
-		PrivyVerificationKey: os.Getenv("PRIVY_VERIFICATION_KEY"),
+		Pool:             pool,
+		StableFXKey:      loadStableFXKey(),
+		StableFXBase:     envOr("STABLEFX_BASE_URL", "https://api-sandbox.circle.com"),
+		AppBaseURL:       envOr("CONDUIT_APP_BASE_URL", "http://localhost:3000"),
+		ArcRPC:           envOr("ARC_RPC", "https://rpc.testnet.arc.network"),
+		SolanaRPC:        envOr("SOLANA_RPC", "https://api.devnet.solana.com"),
+		SolanaWS:         envOr("SOLANA_WS", "wss://api.devnet.solana.com"),
+		ArcRelayerKey:    loadEnvFileKey("ARC_RELAYER_KEY"),
+		BridgeStaleAfter: staleAfter,
+		CircleAPIKey:     loadCircleKey(),
+		CircleBaseURL:    os.Getenv("CIRCLE_BASE_URL"),
 	}
+	// Pull the session secret from packages/api/.env when it is not exported.
+	//
+	// Without this the devserver mints a random secret per boot, so every restart
+	// invalidates every cs_ dashboard session and the app looks signed out --
+	// which is indistinguishable from "the API is down" if you are the one
+	// staring at it. Same file, same reason, as the Circle and relayer keys.
+	if os.Getenv("CONDUIT_SESSION_SECRET") == "" {
+		if v := loadEnvFileKey("CONDUIT_SESSION_SECRET"); v != "" {
+			os.Setenv("CONDUIT_SESSION_SECRET", v)
+		}
+	}
+	// Only now that the .env value has been applied -- checking earlier would
+	// judge a secret that had not been loaded yet.
+	auth.CheckSessionSecret()
+
 	handler := server.New(cfg)
 
 	server.StartBackgroundWorkers(ctx, pool, cfg.ArcRPC, os.Getenv("CONDUIT_ROUTER_ADDRESS"), cfg)
@@ -107,5 +123,54 @@ func loadStableFXKey() string {
 		}
 	}
 	log.Fatalf("STABLEFX_API_KEY not found in %s", envPath)
+	return ""
+}
+
+// loadEnvFileKey reads a secret from the environment, falling back to the
+// gitignored packages/api/.env.
+//
+// The point is that a developer never has to export a private key to run the
+// dev server. ARC_RELAYER_KEY is an actual signing key: exported by hand it
+// lands in shell history and in every `ps` snapshot of the launching command,
+// which is a poor place for it. In .env it is covered by the repo's existing
+// ignore rule and read only by this process.
+//
+// Never fatal. A missing key disables cross-chain and says so at boot; it must
+// not stop the server for the paths that don't need it.
+func loadEnvFileKey(name string) string {
+	if v := os.Getenv(name); v != "" {
+		return v
+	}
+	_, thisFile, _, _ := runtime.Caller(0)
+	data, err := os.ReadFile(filepath.Join(filepath.Dir(thisFile), "..", "..", ".env"))
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.HasPrefix(line, name+"=") {
+			return strings.TrimSpace(strings.TrimPrefix(line, name+"="))
+		}
+	}
+	return ""
+}
+
+// loadCircleKey mirrors loadStableFXKey: env var first, then packages/api/.env,
+// so the devserver picks up Circle Wallets without anything exported. Never
+// fatal -- Circle is opt-in, and without a key those routes simply report
+// "not configured" instead of the server refusing to start.
+func loadCircleKey() string {
+	if v := os.Getenv("CIRCLE_API_KEY"); v != "" {
+		return v
+	}
+	_, thisFile, _, _ := runtime.Caller(0)
+	data, err := os.ReadFile(filepath.Join(filepath.Dir(thisFile), "..", "..", ".env"))
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.HasPrefix(line, "CIRCLE_API_KEY=") {
+			return strings.TrimSpace(strings.TrimPrefix(line, "CIRCLE_API_KEY="))
+		}
+	}
 	return ""
 }

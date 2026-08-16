@@ -11,9 +11,14 @@
 // runs its existing StableFX settlement (converting to the merchant's currency)
 // exactly as before. This component never touches the merchant's settle
 // currency — only USDC.
-import { useEffect, useRef, useState } from "react";
-import { useAccount } from "wagmi";
-import { getSolanaProvider, connectSolanaWallet } from "@/lib/solana-wallet";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useAccount, useConnect, useDisconnect, type Connector } from "wagmi";
+import {
+  getSolanaProvider,
+  connectSolanaWallet,
+  disconnectSolanaWallet,
+  listSolanaWallets,
+} from "@/lib/solana-wallet";
 import {
   getBridgePlan,
   reportBridgeSpend,
@@ -37,9 +42,16 @@ import {
   chainLabel,
   chainToSourceSlug,
   fundedChains,
+  SOURCE_CHAINS,
+  SOURCE_CHAIN_LABELS,
+  type SourceKind,
   type PayerAdapter,
   type UnifiedUsdc,
 } from "@/lib/unified-balance";
+import { ChainIcon } from "@/components/PayFlow/ChainIcon";
+import { CIRCLE_CONNECTOR_ID } from "@/lib/circle/connector";
+import { chainByEvmId } from "@/lib/circle/chains";
+import { Rocket } from "@/components/Shared/Rocket";
 
 interface CrossChainBridgeProps {
   intentId: string;
@@ -59,6 +71,130 @@ type Phase =
 
 const POLL_INTERVAL_MS = 3000;
 
+// Circle's Gateway API exhausting its own retries, told plainly.
+//
+// The SDK surfaces "Gateway API error: Maximum retry attempts (10) exceeded:
+// Request timed out", which reads like our bug and offers the payer nothing to
+// act on. Their testnet Gateway does flap: measured answering in 0.7s, then
+// failing to connect twice in a row, then healthy again.
+function gatewayUnavailable(err: unknown): boolean {
+  const raw = err instanceof Error ? err.message : String(err ?? "");
+  return /maximum retry attempts|request timed out|gateway api error/i.test(raw);
+}
+
+type SolanaChoice = ReturnType<typeof listSolanaWallets>[number];
+type EvmChoice = { connector: Connector };
+
+// Which of the payer's wallets pays.
+//
+// A separate question from which chain, and it has to be asked out loud. The
+// flow used to answer it by grabbing whatever was already connected: on EVM
+// that was whichever extension wagmi had auto-reconnected, and on Solana it was
+// a fixed preference order in lib/solana-wallet.ts. Someone holding USDC in
+// their second wallet had no way to reach it and no way to disconnect the
+// first.
+function WalletSheet({
+  kind,
+  solanaWallets,
+  evmConnectors,
+  connectedEvmId,
+  onPick,
+  onClose,
+}: {
+  kind: SourceKind;
+  solanaWallets: SolanaChoice[];
+  evmConnectors: Connector[];
+  connectedEvmId?: string;
+  onPick: (pick: { solana?: SolanaChoice; evm?: EvmChoice }) => void;
+  onClose: () => void;
+}) {
+  const isSolana = kind === "solana";
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/70"
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Choose a wallet"
+    >
+      <div
+        className="w-full max-w-md bg-surface border-t border-x border-border max-h-[75vh] overflow-y-auto sheet-up"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="sticky top-0 bg-surface border-b border-border px-4 py-3 flex items-center justify-between">
+          <p className="font-mono text-[11px] uppercase tracking-widest text-ink-dim">
+            Pay from {SOURCE_CHAIN_LABELS[kind]} with
+          </p>
+          <button
+            onClick={onClose}
+            className="text-ink-dim hover:text-ink font-mono text-sm leading-none"
+            aria-label="Close"
+          >
+            ×
+          </button>
+        </div>
+
+        <ul>
+          {isSolana
+            ? solanaWallets.map((w) => (
+                <li key={w.id}>
+                  <button
+                    onClick={() => onPick({ solana: w })}
+                    className="w-full px-4 py-3.5 flex items-center justify-between text-left
+                               border-b border-border/60 hover:bg-signal/5 transition-colors"
+                  >
+                    <span className="flex items-center gap-3">
+                      {/* The wallet's own icon, when it registered one. */}
+                      {w.icon ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={w.icon} alt="" className="w-5 h-5 shrink-0" />
+                      ) : (
+                        <span className="w-5 h-5 shrink-0" aria-hidden />
+                      )}
+                      <span className="font-mono text-sm text-ink">{w.label}</span>
+                    </span>
+                    {/* Phantom is listed but cannot finish a Gateway deposit --
+                        it refuses to signMessage a transaction-shaped payload.
+                        Saying so here beats letting someone pick it and fail at
+                        the signature, which is what used to happen. */}
+                    {!w.gatewayCapable && (
+                      <span className="font-mono text-[10px] text-danger uppercase tracking-wider">
+                        can&apos;t sign cross-chain
+                      </span>
+                    )}
+                  </button>
+                </li>
+              ))
+            : evmConnectors.map((c) => (
+                <li key={c.id}>
+                  <button
+                    onClick={() => onPick({ evm: { connector: c } })}
+                    className="w-full px-4 py-3.5 flex items-center justify-between text-left
+                               border-b border-border/60 hover:bg-signal/5 transition-colors"
+                  >
+                    <span className="font-mono text-sm text-ink">
+                      {c.id === CIRCLE_CONNECTOR_ID ? "Google sign-in" : c.name}
+                    </span>
+                    {c.id === connectedEvmId && (
+                      <span className="font-mono text-[10px] text-ink-dim uppercase tracking-wider">
+                        connected
+                      </span>
+                    )}
+                  </button>
+                </li>
+              ))}
+        </ul>
+
+        {isSolana && solanaWallets.length === 0 && (
+          <p className="px-4 py-6 text-sm text-ink-dim">
+            No Solana wallet found in this browser. Install one, then reopen this page.
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function CrossChainBridge({ intentId, intent }: CrossChainBridgeProps) {
   const [phase, setPhase] = useState<Phase>("choose_source");
   const [adapter, setAdapter] = useState<PayerAdapter | null>(null);
@@ -70,6 +206,12 @@ export function CrossChainBridge({ intentId, intent }: CrossChainBridgeProps) {
   // a real choice, not a display detail — defaulted to the richest funded chain
   // and overridable whenever more than one can cover the amount.
   const [sourceChain, setSourceChain] = useState<string | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  // The chain the payer picked, held while they choose WHICH WALLET pays from
+  // it. Two decisions, asked separately: "where is my USDC" and "which of my
+  // wallets holds it" are different questions, and answering the first used to
+  // silently answer the second by grabbing whatever was already connected.
+  const [walletPickerFor, setWalletPickerFor] = useState<SourceKind | null>(null);
   // What the wallet is being asked to do right now (e.g. approve a network
   // switch), so the spinner isn't silent while a wallet prompt is waiting.
   const [fxNote, setFxNote] = useState("");
@@ -78,7 +220,21 @@ export function CrossChainBridge({ intentId, intent }: CrossChainBridgeProps) {
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const { connector, address: evmAddress, isConnected: evmConnected } = useAccount();
-  const hasPhantom = typeof window !== "undefined" && !!getSolanaProvider();
+  const { connectAsync, connectors } = useConnect();
+  const { disconnectAsync } = useDisconnect();
+  const [solanaWallets, setSolanaWallets] = useState<ReturnType<typeof listSolanaWallets>>([]);
+  // Detected after mount, never during render: extensions inject on their own
+  // schedule and reading window during SSR is a hydration mismatch.
+  useEffect(() => setSolanaWallets(listSolanaWallets()), []);
+  const hasSolanaWallet = solanaWallets.length > 0;
+  // One entry per connector id. wagmi's EIP-6963 discovery can surface the same
+  // extension twice (once discovered, once as the generic `injected`), and a
+  // list with "MetaMask" in it twice is worse than useless when the whole point
+  // of this sheet is telling your wallets apart.
+  const evmConnectors = useMemo(() => {
+    const seen = new Set<string>();
+    return connectors.filter((c) => (seen.has(c.id) ? false : (seen.add(c.id), true)));
+  }, [connectors]);
 
   useEffect(() => {
     return () => {
@@ -99,6 +255,34 @@ export function CrossChainBridge({ intentId, intent }: CrossChainBridgeProps) {
     setMintTx("");
     setIntentStatus(intent.status);
   }, [intentId, intent.status]);
+
+  // Drop the current wallet and ask again.
+  //
+  // Both halves matter. Clearing the adapter alone would leave the extension
+  // still connected, so re-picking the same family would silently reuse it --
+  // which is the bug this whole sheet exists to fix.
+  async function switchWallet() {
+    const kind = sourceChain ? chainToSourceSlug(sourceChain) : null;
+    setAdapter(null);
+    setUnified(null);
+    setError("");
+    try {
+      if (kind === "solana") {
+        await disconnectSolanaWallet();
+      } else if (evmConnected) {
+        await disconnectAsync();
+      }
+    } catch {
+      // A wallet that refuses to disconnect must not trap the payer on this
+      // screen; the picker below still lets them choose another one.
+    }
+    if (kind) {
+      setWalletPickerFor(kind as SourceKind);
+      setPhase("choose_source");
+    } else {
+      setPhase("choose_source");
+    }
+  }
 
   function startPolling() {
     if (pollRef.current) clearInterval(pollRef.current);
@@ -126,20 +310,40 @@ export function CrossChainBridge({ intentId, intent }: CrossChainBridgeProps) {
   // Build the chosen wallet's adapter, read the plan (how much USDC to spend +
   // where to mint) and the payer's unified USDC balance, then confirm or report
   // that there isn't enough across all their chains.
-  async function chooseSource(kind: "solana" | "evm") {
+  // `pickedWallet` is the one the payer chose in the wallet sheet. It is passed in
+  // rather than read from state for the same reason `picked` is: both are set in
+  // the click handler that calls this, and neither has flushed yet.
+  async function chooseSource(
+    kind: "solana" | "evm",
+    picked?: string,
+    pickedWallet?: { solana?: SolanaChoice; evm?: EvmChoice }
+  ) {
     setError("");
     setPhase("connecting");
     try {
       let payer: PayerAdapter;
       if (kind === "solana") {
-        const addr = await connectSolanaWallet(); // Phantom, Solana address — never an ETH address
-        payer = await buildSolanaAdapter(getSolanaProvider(), addr);
+        // Solana address, never an ETH address.
+        const addr = await connectSolanaWallet(pickedWallet?.solana?.provider);
+        const provider = pickedWallet?.solana?.provider ?? getSolanaProvider();
+        payer = await buildSolanaAdapter(provider, addr);
       } else {
-        if (!evmConnected || !evmAddress || !connector) {
-          throw new Error("Connect an EVM wallet first to pay from an EVM chain.");
+        const target = pickedWallet?.evm;
+        if (!target) throw new Error("Choose a wallet to pay from.");
+        // Switch wagmi over when the payer picked a different wallet than the
+        // one already connected. Without the disconnect, wagmi keeps the old
+        // connector and the payment signs from the wrong account.
+        let active = connector;
+        let addr = evmAddress;
+        if (!evmConnected || connector?.id !== target.connector.id) {
+          if (evmConnected) await disconnectAsync();
+          const res = await connectAsync({ connector: target.connector });
+          active = target.connector;
+          addr = res.accounts[0];
         }
-        const provider = await connector.getProvider();
-        payer = await buildEvmAdapter(provider, evmAddress);
+        if (!active || !addr) throw new Error("That wallet did not connect.");
+        const provider = await active.getProvider();
+        payer = await buildEvmAdapter(provider, addr);
       }
       setAdapter(payer);
       setPhase("checking_balance");
@@ -148,9 +352,22 @@ export function CrossChainBridge({ intentId, intent }: CrossChainBridgeProps) {
       // wallet portion is deposited on demand at spend time, so counting only
       // the deposited balance falsely reported "found 0" for a payer who holds
       // USDC in their wallet but hasn't pre-deposited into Gateway.
+      // The Gateway balance read is allowed to fail.
+      //
+      // It reports what the payer has ALREADY deposited into Circle Gateway,
+      // which is usually nothing: spendUsdcToArc deposits from the wallet on
+      // demand, so the wallet balance below is what actually funds the payment.
+      // Circle's testnet Gateway API flaps -- observed answering in 0.7s, then
+      // failing to connect twice in a row -- and the SDK gives up after ten
+      // retries with "Maximum retry attempts (10) exceeded". Letting that kill
+      // the whole screen stranded a payer whose USDC was sitting right there in
+      // their wallet, readable without Circle being involved at all.
       const [plan, deposited, wallet] = await Promise.all([
         getBridgePlan(intentId),
-        getUnifiedUsdc(payer),
+        getUnifiedUsdc(payer).catch((err) => {
+          console.warn("circle gateway balance unavailable, using wallet balance only:", err);
+          return {} as UnifiedUsdc;
+        }),
         getWalletUsdc(payer),
       ]);
       const bal = mergeUsdc(deposited, wallet);
@@ -161,8 +378,15 @@ export function CrossChainBridge({ intentId, intent }: CrossChainBridgeProps) {
       const need = BigInt(plan.required_usdc);
       // Default to the richest chain that can cover this on its own — that's
       // the one the spend would actually succeed from.
-      const payable = fundedChains(bal).find((c) => c.minor >= need);
-      setSourceChain(payable?.chain ?? null);
+      const funded = fundedChains(bal);
+      const payable = funded.find((c) => c.minor >= need);
+      // The payer picked a chain in the sheet; that choice outranks the greedy
+      // default. Without this the pick was read and then thrown away here, and
+      // a payer who chose Polygon but held more USDC on Base silently paid from
+      // Base. Fall back only when nothing was picked, or when the pick can't
+      // cover the amount on its own — the confirm screen then shows what can.
+      const pickedFunded = picked ? funded.find((c) => c.chain === picked && c.minor >= need) : undefined;
+      setSourceChain(pickedFunded?.chain ?? payable?.chain ?? null);
       if (payable || planAllocations(bal, need)) {
         setPhase("confirm");
       } else {
@@ -171,12 +395,16 @@ export function CrossChainBridge({ intentId, intent }: CrossChainBridgeProps) {
     } catch (err) {
       const notAvailable =
         err instanceof ConduitApiError && err.code === "not_available";
+      // Circle's own retry exhaustion, verbatim, tells the payer nothing they
+      // can act on and reads like our bug.
+      const raw = err instanceof Error ? err.message : "";
+      const gatewayDown = gatewayUnavailable(err);
       setError(
         notAvailable
           ? "Cross-chain payments aren't enabled on this deployment yet. Pay on Arc instead."
-          : err instanceof Error
-            ? err.message
-            : "Could not connect wallet"
+          : gatewayDown
+            ? "Circle's bridge isn't responding right now. Wait a moment and try again, or pay on Arc instead."
+            : raw || "Could not connect wallet"
       );
       setPhase("choose_source");
     }
@@ -201,6 +429,26 @@ export function CrossChainBridge({ intentId, intent }: CrossChainBridgeProps) {
       // rebuild the adapter so it's bound to the network we just moved to.
       let payer = adapter;
       const sourceChainId = chosen.allocations[0]?.chain;
+
+      // A Circle wallet exists per blockchain, and Circle cannot provision one
+      // on every chain Gateway supports. Say that here, where the chain is
+      // known and the payer can still pick another one — otherwise the switch
+      // below fails inside Circle's adapter as an unsupported-method error that
+      // says nothing about what went wrong or what to do about it.
+      if (connector?.id === CIRCLE_CONNECTOR_ID && payer.family === "evm" && sourceChainId) {
+        const { resolveChainIdentifier } = await import("@circle-fin/unified-balance-kit");
+        const def = resolveChainIdentifier(sourceChainId as never) as unknown as {
+          type?: string;
+          chainId?: number;
+        };
+        if (def?.type === "evm" && typeof def.chainId === "number" && !chainByEvmId(def.chainId)) {
+          throw new Error(
+            `Signing in with Google can't hold USDC on ${chainLabel(sourceChainId)}. ` +
+              `Choose a different chain, or connect a wallet that holds USDC there.`
+          );
+        }
+      }
+
       if (payer.family === "evm" && sourceChainId) {
         setFxNote(`Switch to ${chainLabel(sourceChainId)} in your wallet…`);
         await ensureEvmChain(payer.provider, sourceChainId);
@@ -229,8 +477,13 @@ export function CrossChainBridge({ intentId, intent }: CrossChainBridgeProps) {
       setPhase("bridging");
       startPolling();
     } catch (err) {
-      const message =
-        err instanceof ConduitApiError ? err.message : err instanceof Error ? err.message : "Payment failed to start";
+      const message = gatewayUnavailable(err)
+        ? "Circle's bridge isn't responding right now. Nothing has left your wallet — wait a moment and try again."
+        : err instanceof ConduitApiError
+          ? err.message
+          : err instanceof Error
+            ? err.message
+            : "Payment failed to start";
       setError(message);
       setPhase("error");
     }
@@ -245,21 +498,107 @@ export function CrossChainBridge({ intentId, intent }: CrossChainBridgeProps) {
           This payment settles on Arc, but you can pay with USDC you already hold on another chain.
           Pick where your USDC is — Conduit bridges it and converts to {isoToToken(intent.settle_currency)} for you.
         </p>
+
+        {/* One button, then a list of chains.
+            The old version asked the payer to choose between "Solana" and "any
+            EVM chain (connected wallet)" — a distinction about wallet plumbing,
+            not about where their money is. The only thing a payer knows is
+            which chain holds their USDC, so ask exactly that. */}
         <button
-          onClick={() => chooseSource("solana")}
-          disabled={!hasPhantom}
-          className="w-full py-4 bg-signal text-signal-ink font-mono hover:bg-signal/90 transition-colors disabled:opacity-40"
+          onClick={() => setPickerOpen(true)}
+          className="w-full py-4 bg-signal text-signal-ink font-mono hover:bg-signal/90 transition-colors"
         >
-          Pay with USDC on Solana
-        </button>
-        {!hasPhantom && <p className="text-ink-dim text-xs">Install a Solana wallet (Solflare, Backpack, Phantom) to pay from Solana.</p>}
-        <button
-          onClick={() => chooseSource("evm")}
-          className="w-full py-4 border border-border text-ink font-mono hover:border-signal/40 transition-colors"
-        >
-          Pay with USDC on any EVM chain (connected wallet)
+          Choose the chain your USDC is on
         </button>
         {error && <p className="text-danger text-sm">{error}</p>}
+
+        {pickerOpen && (
+          <div
+            className="fixed inset-0 z-50 flex items-end justify-center bg-black/70"
+            onClick={() => setPickerOpen(false)}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Choose a chain"
+          >
+            {/* Slides up from the bottom: this is most often a phone, and the
+                bottom of the screen is where a thumb already is. */}
+            <div
+              className="w-full max-w-md bg-surface border-t border-x border-border max-h-[75vh] overflow-y-auto sheet-up"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="sticky top-0 bg-surface border-b border-border px-4 py-3 flex items-center justify-between">
+                <p className="font-mono text-[11px] uppercase tracking-widest text-ink-dim">
+                  Where is your USDC?
+                </p>
+                <button
+                  onClick={() => setPickerOpen(false)}
+                  className="text-ink-dim hover:text-ink font-mono text-sm leading-none"
+                  aria-label="Close"
+                >
+                  ×
+                </button>
+              </div>
+
+              <ul>
+                {(Object.keys(SOURCE_CHAINS) as SourceKind[]).map((kind) => {
+                  // Solana needs its own wallet; everything else uses the
+                  // connected EVM wallet. Disabled rather than hidden, so a
+                  // payer who expected Solana learns why it is unavailable.
+                  const isSolana = kind === "solana";
+                  const disabled = isSolana && !hasSolanaWallet;
+                  return (
+                    <li key={kind}>
+                      <button
+                        disabled={disabled}
+                        onClick={() => {
+                          setPickerOpen(false);
+                          setSourceChain(SOURCE_CHAINS[kind]);
+                          // Ask which wallet next, rather than connecting one.
+                          // Picking a chain used to grab whatever was already
+                          // connected, so a payer with two wallets could not
+                          // choose and could not switch.
+                          setWalletPickerFor(kind);
+                        }}
+                        className="w-full px-4 py-3.5 flex items-center justify-between text-left
+                                   border-b border-border/60 hover:bg-signal/5 transition-colors
+                                   disabled:opacity-40 disabled:hover:bg-transparent"
+                      >
+                        <span className="flex items-center gap-3">
+                          <ChainIcon kind={kind} />
+                          <span className="font-mono text-sm text-ink">
+                            {SOURCE_CHAIN_LABELS[kind]}
+                          </span>
+                        </span>
+                        <span className="font-mono text-[10px] text-ink-dim uppercase tracking-wider">
+                          {disabled ? "wallet needed" : isSolana ? "Solana wallet" : "EVM wallet"}
+                        </span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          </div>
+        )}
+
+        {walletPickerFor && (
+          <WalletSheet
+            kind={walletPickerFor}
+            solanaWallets={solanaWallets}
+            evmConnectors={evmConnectors}
+            connectedEvmId={evmConnected ? connector?.id : undefined}
+            onClose={() => setWalletPickerFor(null)}
+            onPick={(pick) => {
+              const kind = walletPickerFor;
+              setWalletPickerFor(null);
+              void chooseSource(
+                kind === "solana" ? "solana" : "evm",
+                SOURCE_CHAINS[kind],
+                pick
+              );
+            }}
+          />
+        )}
       </div>
     );
   }
@@ -267,7 +606,7 @@ export function CrossChainBridge({ intentId, intent }: CrossChainBridgeProps) {
   if (phase === "connecting" || phase === "checking_balance") {
     return (
       <div className="text-center py-8 space-y-3">
-        <div className="w-10 h-10 border-2 border-signal border-t-transparent animate-spin mx-auto" />
+        <Rocket size={56} />
         <p className="text-ink font-mono text-sm">
           {phase === "connecting" ? "Connecting your wallet…" : "Reading your USDC across chains…"}
         </p>
@@ -299,11 +638,20 @@ export function CrossChainBridge({ intentId, intent }: CrossChainBridgeProps) {
               .join(" · ")}
           </p>
         )}
+        {/* This said "use a different wallet" and sent the payer back to the
+            CHAIN list, which was the only screen that existed. It now does what
+            it says. */}
         <button
-          onClick={() => setPhase("choose_source")}
+          onClick={() => void switchWallet()}
           className="text-xs font-mono text-ink-dim hover:text-ink"
         >
           ← Use a different wallet
+        </button>
+        <button
+          onClick={() => setPhase("choose_source")}
+          className="block text-xs font-mono text-ink-dim hover:text-ink"
+        >
+          ← Pay from a different chain
         </button>
       </div>
     );
@@ -381,6 +729,15 @@ export function CrossChainBridge({ intentId, intent }: CrossChainBridgeProps) {
         >
           Pay {usdcDisplay(BigInt(requiredUSDC ?? "0"))} USDC
         </button>
+        {/* Last chance to change wallet before anything is signed. The address
+            about to spend is shown above; if it is not the one the payer meant,
+            this is where they notice. */}
+        <button
+          onClick={() => void switchWallet()}
+          className="w-full text-xs font-mono text-ink-dim hover:text-ink"
+        >
+          Use a different wallet
+        </button>
         {error && <p className="text-danger text-sm">{error}</p>}
       </div>
     );
@@ -389,7 +746,7 @@ export function CrossChainBridge({ intentId, intent }: CrossChainBridgeProps) {
   if (phase === "spending") {
     return (
       <div className="text-center py-8 space-y-3">
-        <div className="w-10 h-10 border-2 border-signal border-t-transparent animate-spin mx-auto" />
+        <Rocket size={56} />
         <p className="text-ink font-mono text-sm">{fxNote || "Confirm in your wallet…"}</p>
       </div>
     );
@@ -409,6 +766,7 @@ export function CrossChainBridge({ intentId, intent }: CrossChainBridgeProps) {
         </ol>
         {phase === "settled" && (
           <div className="space-y-3">
+            <Rocket state="launch" size={56} />
             <p className="text-signal font-mono">Settled. Thank you.</p>
             {mintTx && (
               <a

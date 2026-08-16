@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.24;
+pragma solidity 0.8.24;
 
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ICCTPTokenMessenger, ICCTPMessageTransmitter} from "./interfaces/ICCTPTokenMessenger.sol";
@@ -22,7 +23,7 @@ import {ICCTPTokenMessenger, ICCTPMessageTransmitter} from "./interfaces/ICCTPTo
 ///
 ///      For Conduit v1, CCTP is available as an escape hatch / future hook.
 ///      Primary settlement path for Arc→Arc is direct transfer or StableFX.
-contract CCTPAdapter is Ownable {
+contract CCTPAdapter is Ownable2Step {
     using SafeERC20 for IERC20;
 
     // ── Constants ─────────────────────────────────────────────────────────────
@@ -98,7 +99,7 @@ contract CCTPAdapter is Ownable {
         if (amount == 0) revert ZeroAmount();
 
         // Approve TokenMessengerV2 to burn our USDC
-        IERC20(USDC).approve(TOKEN_MESSENGER_V2, amount);
+        IERC20(USDC).forceApprove(TOKEN_MESSENGER_V2, amount);
 
         nonce = ICCTPTokenMessenger(TOKEN_MESSENGER_V2).depositForBurn(
             amount,

@@ -115,14 +115,6 @@ export const ARC_TESTNET = {
       );
     },
 
-    // ArcSwap — Uniswap V2 by Arc Foundation (public Arc testnet infra, verified Phase 0)
-    ammRouter: "0x48a9bd1644ac67fbef4183261c466bea3eb333fc" as Address,
-    ammFactory: "0x45dd35611179ae6663ae47791175d7d598ced086" as Address,
-
-    // UnitFlow — V2.5 AMM (Uniswap V2-compatible)
-    unitflowRouter: "0x4AA8c7Ac458479d9A4FA5c1481e03061ac76824A" as Address,
-    unitflowFactory: "0xd67F63A4F26a497b364d1C82e6747Aec8B5743a5" as Address,
-
     // Arc native (immutable)
     stableFXEscrow: "0x867650F5eAe8df91445971f14d89fd84F0C9a9f8" as Address,
     permit2: "0x000000000022D473030F116dDEE9F6B43aC78BA3" as Address,
@@ -169,10 +161,13 @@ export const ROUTER_ABI = [
   "function execute((address payer, address recipient, address payerToken, address recipientToken, uint256 amount, uint256 deadline, bytes32 declarationId) instruction) external returns (bytes32 receiptId)",
   // Cross-currency via Circle StableFX + Permit2 funding data
   "function executeWithFX((address payer, address recipient, address payerToken, address recipientToken, uint256 amount, uint256 deadline, bytes32 declarationId) instruction, ((address token, uint256 amount) permitted, uint256 nonce, uint256 deadline) permit, (address to, uint256 requestedAmount) transferDetails, bytes32 witness, string witnessTypeString, bytes fundingSignature) external returns (bytes32 receiptId)",
-  // Cross-currency via AMM fallback (pairs StableFX refuses to quote)
-  "function executeWithAmm((address payer, address recipient, address payerToken, address recipientToken, uint256 amount, uint256 deadline, bytes32 declarationId) instruction, address[] path, uint256 amountInMax, address ammRouter) external returns (bytes32 receiptId)",
   "function quote((address payer, address recipient, address payerToken, address recipientToken, uint256 amount, uint256 deadline, bytes32 declarationId) instruction) external view returns (uint256 payerAmount)",
   "event PaymentSettled(bytes32 indexed receiptId, address indexed payer, address indexed recipient, address payerToken, address recipientToken, uint256 payerAmount, uint256 recipientAmount, bytes32 declarationId, uint256 settledAt)",
+  // Custom errors, so a revert arrives decoded instead of as raw bytes. Without
+  // this entry the recipient's standing settlement preference rejecting a
+  // payment -- a designed, explainable outcome -- reached the payer as a bare
+  // "execution reverted", which reads as the network being broken.
+  "error PreferenceMismatch(address recipient, address preferenceToken, address instructionToken)",
 ] as const;
 
 // DeclarationRegistry minimal ABI

@@ -21,7 +21,7 @@ failure is translated through this registry first.
 | Code | HTTP status | Meaning | What to do |
 |---|---|---|---|
 | `fx_quote_expired` | 409 | The quote you tried to `/prepare` against is past its `quote_expires_at`. | Request a fresh `/quote` — quotes are disposable, never cached (see [FX timing model](./fx-timing.md)). |
-| `fx_no_route` | 422 | StableFX doesn't quote this currency pair directly and no AMM fallback exists either. | Check `GET /v1/currencies` for what's actually routable right now — it reflects live StableFX + AMM coverage, not a static list. |
+| `fx_no_route` | 422 | StableFX doesn't quote this currency pair. | Check `GET /v1/currencies` for what's actually routable right now — it reflects live StableFX coverage, not a static list. |
 | `fx_invalid_amount` | 422 | The amount is outside StableFX's quotable range (too small or too large). | There's a real minimum notional (observed ~1 unit of a major currency on the sandbox) — don't assume any amount ≥ 1 minor unit is quotable. |
 | `fx_provider_unavailable` | 503 | StableFX returned an error code this API doesn't have a specific mapping for. | Transient — retry with backoff. If it persists, it's worth a bug report since it means a new upstream error code needs mapping. |
 | `currency_not_supported` | 422 | The currency isn't registered in `CurrencyRegistry` at all. | Check `GET /v1/currencies`. |
@@ -35,3 +35,15 @@ failure is translated through this registry first.
 | `unauthorized` | 401 | Missing or invalid API key. | Check the `Authorization: Bearer` header. |
 | `forbidden` | 403 | Your key is valid but isn't allowed to do this — e.g. a `pk_` key calling an `sk_`-only endpoint, or a cross-tenant `Conduit-Account` header. | Use the right key type / account. |
 | `internal_error` | 500 | Something broke on our end. | Retry with backoff; if it persists, report it — this code intentionally carries no detail because a raw internal error should never leak to a client. |
+
+## `rate_limited` (429)
+
+The public payer routes are rate limited per client: **5 requests/second sustained,
+burst 20**. Loading a pay page, polling its status, and requesting a quote sit
+comfortably inside that; a script looping over a link URL does not.
+
+The response carries `Retry-After: 1`. Back off and retry rather than tightening the
+loop — the budget refills continuously, so a client that waits recovers within a second.
+
+Authenticated routes (`sk_`/`pk_` keys, dashboard sessions) are not limited this way:
+a key is already a credential and can be revoked.

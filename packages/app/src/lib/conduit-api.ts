@@ -6,11 +6,16 @@
 const API_BASE = process.env.NEXT_PUBLIC_CONDUIT_API_URL ?? "http://localhost:8080";
 const STORAGE_KEY = "conduit_dashboard_session_token";
 
-// Bearer token used for dashboard requests. Holds either a Privy access
-// token (refreshed periodically by the dashboard layout while a merchant is
-// logged in via Privy -- see DashboardLayout) or, still, a pasted sk_/pk_
-// key for the programmatic-access path -- the API's auth.Middleware accepts
-// both, so this file doesn't need to know which kind it's holding.
+// Bearer token used for dashboard requests. Holds either a Conduit session
+// token (cs_..., minted by the API at sign-in and stored by circle-stack) or a
+// pasted sk_/pk_ key for the programmatic-access path -- the API's
+// auth.Middleware accepts both, so this file doesn't need to know which kind
+// it's holding.
+//
+// It used to hold a Privy access token, refreshed periodically by the dashboard
+// layout. That is what the Conduit session token replaced: verifying a
+// provider's JWT meant a network call to that provider on every request (281ms
+// to 7.6s measured), whereas a cs_ token is HMAC-verified locally.
 export function getSessionToken(): string | null {
   if (typeof window === "undefined") return null;
   return window.localStorage.getItem(STORAGE_KEY);
@@ -22,6 +27,27 @@ export function setSessionToken(token: string): void {
 
 export function clearSessionToken(): void {
   window.localStorage.removeItem(STORAGE_KEY);
+  window.localStorage.removeItem(CIRCLE_STORAGE_KEY);
+}
+
+// A Circle session is NOT a bearer token, and must not be stored as one.
+//
+// The API resolves sk_/pk_ keys and Conduit session tokens from the
+// Authorization header.
+// Circle's user token is a credential issued by Circle to the browser; putting
+// it in that same header would hand it to the code path that looks up Conduit
+// keys, where at best it fails confusingly and at worst it is compared against
+// key hashes. The server reads it from X-Circle-User-Token precisely so the two
+// can never be mistaken for one another, and this mirrors that.
+const CIRCLE_STORAGE_KEY = "conduit.circleSession";
+
+export function getCircleSessionToken(): string | null {
+  if (typeof window === "undefined") return null;
+  return window.localStorage.getItem(CIRCLE_STORAGE_KEY);
+}
+
+export function setCircleSessionToken(token: string): void {
+  window.localStorage.setItem(CIRCLE_STORAGE_KEY, token);
 }
 
 export class ConduitApiError extends Error {
@@ -36,11 +62,24 @@ export class ConduitApiError extends Error {
 
 async function request<T>(
   path: string,
-  options: { method?: string; body?: unknown; apiKey?: string; idempotencyKey?: string } = {}
+  options: {
+    method?: string;
+    body?: unknown;
+    apiKey?: string;
+    circleToken?: string;
+    idempotencyKey?: string;
+  } = {}
 ): Promise<T> {
   const apiKey = options.apiKey ?? getSessionToken();
   const headers: Record<string, string> = { "content-type": "application/json" };
   if (apiKey) headers["authorization"] = `Bearer ${apiKey}`;
+  // Only when a caller passes it explicitly, which in practice is the login
+  // bootstrap alone. Attaching a stored Circle token to every request made the
+  // API re-verify with Circle on each one -- a network round trip per call,
+  // measured between 280ms and 7.6s on a polling dashboard, with Circle's
+  // availability in front of every request. The bootstrap returns a Conduit
+  // session token instead, and that is what authenticates everything after.
+  if (options.circleToken) headers["X-Circle-User-Token"] = options.circleToken;
   if (options.idempotencyKey) headers["idempotency-key"] = options.idempotencyKey;
 
   const res = await fetch(`${API_BASE}${path}`, {
@@ -137,6 +176,17 @@ export function getMyAccount() {
   return request<Account>("/v1/accounts/me");
 }
 
+// Ends every session for the account, server-side.
+//
+// Dropping the token from localStorage only removes this browser's copy; the
+// token itself stays valid for the rest of its life wherever else it has
+// reached. This is what actually invalidates it, so it has to be called while
+// the token is still present -- clearing first would leave nothing to
+// authenticate with.
+export function logout() {
+  return request<void>("/v1/auth/logout", { method: "POST" });
+}
+
 export function updateAccount(id: string, body: { name?: string; logo_url?: string; settle_currency?: string; settle_address?: string }) {
   return request<Account>(`/v1/accounts/${id}`, { method: "PATCH", body });
 }
@@ -152,7 +202,10 @@ export function getStorefrontLink(accountId: string) {
   return request<PaymentLink>(`/v1/accounts/${accountId}/storefront_link`, { method: "POST" });
 }
 
-export interface PrivyAccount {
+export interface DashboardAccount {
+  // Conduit's own dashboard session. Present on both login bootstraps; store
+  // it and use it for every subsequent call.
+  session_token?: string;
   id: string;
   name: string;
   settle_currency: string;
@@ -161,17 +214,25 @@ export interface PrivyAccount {
   livemode: boolean;
 }
 
-// Idempotent Privy login bootstrap -- called on every successful Privy
-// login, not only the first. accessToken authenticates the request itself
-// (this route isn't behind the usual session-token plumbing, since a
-// brand-new Privy user has no account yet). On first login the body's
-// name/settle_currency/login_wallet are required by the server; on
-// subsequent logins the body is ignored and the existing account returned.
-export function createAccountFromPrivy(
-  accessToken: string,
+// Idempotent login bootstrap -- called on every successful sign-in, not only
+// the first. The Circle user token authenticates the call in its own header
+// (this route isn't behind the usual session-token plumbing, since a brand-new
+// user has no account yet); the server verifies it with Circle before creating
+// or returning the account. On first login the body's
+// name/settle_currency/login_wallet are required by the server; on subsequent
+// logins the body is ignored and the existing account returned.
+//
+// createAccountFromPrivy stood beside this and hit /v1/accounts/privy with a
+// Privy JWT. Removed in Phase 7 along with that route.
+export function createAccountFromCircle(
+  circleUserToken: string,
   body: { name?: string; settle_currency?: string; settle_address?: string; login_wallet: string }
 ) {
-  return request<PrivyAccount>("/v1/accounts/privy", { method: "POST", body, apiKey: accessToken });
+  return request<DashboardAccount>("/v1/accounts/circle", {
+    method: "POST",
+    body,
+    circleToken: circleUserToken,
+  });
 }
 
 // ── Settlement intents ───────────────────────────────────────────────────────

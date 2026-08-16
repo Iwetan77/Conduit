@@ -1,21 +1,21 @@
 # Quickstart: your first settled payment
 
 Every code block below is real and runnable against a locally running `packages/api`
-devserver + live Arc testnet — nothing here is illustrative pseudo-code. GATE 4 extracts
-these blocks verbatim into `docs/quickstart-verbatim.sh` and runs them; if that script
+devserver + live Arc testnet — nothing here is illustrative pseudo-code. These blocks are
+extracted verbatim into `docs/quickstart-verbatim.sh` and run in CI; if that script
 fails, the fix is to this doc, not to the script.
 
 **Honesty note up front:** Conduit payments settle via Permit2, which means the payer's
 wallet must produce a real EIP-712 signature — that step cannot be a bare `curl` command
 in any HTTP API, ours included. In your own integration this signing happens in the payer's
-browser wallet (see the hosted checkout flow, Phase 3). For this quickstart we use a small
+browser wallet (see the hosted checkout flow). For this quickstart we use a small
 Node helper (`sign-typed-data.mjs`, already in this repo) to play that role non-interactively
 so the whole thing is scriptable end to end.
 
 ## 1. Start the API
 
 This resolves the repo root from the script's own location so it works no matter what
-directory you run it from (that's also exactly what GATE 4 exercises — running this from a
+directory you run it from (which is exactly what CI exercises — running this from a
 scratch directory, not a repo checkout).
 
 ```bash

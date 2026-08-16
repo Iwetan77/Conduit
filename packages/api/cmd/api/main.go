@@ -10,11 +10,16 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kzn-labs/conduit/api/internal/auth"
 	"github.com/kzn-labs/conduit/api/internal/db"
 	"github.com/kzn-labs/conduit/api/internal/server"
 )
 
 func main() {
+	// Resolve the session secret first, so a weak or missing one is a startup
+	// failure rather than something discovered at the first sign-in.
+	auth.CheckSessionSecret()
+
 	databaseURL := requireEnv("DATABASE_URL")
 	stableFXKey := loadStableFXKey()
 	appBaseURL := envOr("CONDUIT_APP_BASE_URL", "http://localhost:3000")
@@ -35,12 +40,12 @@ func main() {
 
 	cfg := server.Config{
 		Pool: pool, StableFXKey: stableFXKey, StableFXBase: stableFXBase, AppBaseURL: appBaseURL,
-		ArcRPC:               envOr("ARC_RPC", "https://rpc.testnet.arc.network"),
-		SolanaRPC:            envOr("SOLANA_RPC", "https://api.devnet.solana.com"),
-		SolanaWS:             envOr("SOLANA_WS", "wss://api.devnet.solana.com"),
-		ArcRelayerKey:        os.Getenv("ARC_RELAYER_KEY"),
-		PrivyAppID:           os.Getenv("PRIVY_APP_ID"),
-		PrivyVerificationKey: os.Getenv("PRIVY_VERIFICATION_KEY"),
+		ArcRPC:        envOr("ARC_RPC", "https://rpc.testnet.arc.network"),
+		SolanaRPC:     envOr("SOLANA_RPC", "https://api.devnet.solana.com"),
+		SolanaWS:      envOr("SOLANA_WS", "wss://api.devnet.solana.com"),
+		ArcRelayerKey: os.Getenv("ARC_RELAYER_KEY"),
+		CircleAPIKey:  loadCircleKey(),
+		CircleBaseURL: os.Getenv("CIRCLE_BASE_URL"),
 	}
 	handler := server.New(cfg)
 
@@ -99,4 +104,25 @@ func findMigrationsDir() string {
 	}
 	_, thisFile, _, _ := runtime.Caller(0)
 	return filepath.Join(filepath.Dir(thisFile), "..", "..", "migrations")
+}
+
+// loadCircleKey mirrors loadStableFXKey: env var first, then packages/api/.env,
+// so `go run ./cmd/api` works without exporting anything. Unlike StableFX this
+// never fatals — Circle Wallets are opt-in, and a deployment without the key
+// simply doesn't serve those routes.
+func loadCircleKey() string {
+	if v := os.Getenv("CIRCLE_API_KEY"); v != "" {
+		return v
+	}
+	_, thisFile, _, _ := runtime.Caller(0)
+	data, err := os.ReadFile(filepath.Join(filepath.Dir(thisFile), "..", "..", ".env"))
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.HasPrefix(line, "CIRCLE_API_KEY=") {
+			return strings.TrimSpace(strings.TrimPrefix(line, "CIRCLE_API_KEY="))
+		}
+	}
+	return ""
 }

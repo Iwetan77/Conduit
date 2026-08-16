@@ -119,86 +119,18 @@ refused with the same "invalid currency" error as genuinely unsupported currenci
 both legs are individually quotable against USDC. Treat this as a real routing constraint, not a
 permissions gap.
 
-## AMM coverage (ArcSwap + UnitFlow)
+## On-chain swap coverage (probed, then removed)
 
-| DEX | Pair | Pool exists |
-|---|---|---|
-| ArcSwap | USDC/EURC | yes — 0x2ac1501f7d4f54661cd9b46f8116a0ee9a85d08d |
-| ArcSwap | USDC/BRLA | no |
-| ArcSwap | USDC/AUDF | no |
-| ArcSwap | USDC/MXNB | no |
-| ArcSwap | USDC/QCAD | no |
-| ArcSwap | USDC/KRW1 | no |
-| ArcSwap | USDC/GBPA | no |
-| ArcSwap | USDC/ZARU | no |
-| ArcSwap | EURC/BRLA | no |
-| ArcSwap | EURC/AUDF | no |
-| ArcSwap | EURC/MXNB | no |
-| ArcSwap | EURC/QCAD | no |
-| ArcSwap | EURC/KRW1 | no |
-| ArcSwap | EURC/GBPA | no |
-| ArcSwap | EURC/ZARU | no |
-| ArcSwap | BRLA/AUDF | no |
-| ArcSwap | BRLA/MXNB | no |
-| ArcSwap | BRLA/QCAD | no |
-| ArcSwap | BRLA/KRW1 | no |
-| ArcSwap | BRLA/GBPA | no |
-| ArcSwap | BRLA/ZARU | no |
-| ArcSwap | AUDF/MXNB | no |
-| ArcSwap | AUDF/QCAD | no |
-| ArcSwap | AUDF/KRW1 | no |
-| ArcSwap | AUDF/GBPA | no |
-| ArcSwap | AUDF/ZARU | no |
-| ArcSwap | MXNB/QCAD | no |
-| ArcSwap | MXNB/KRW1 | no |
-| ArcSwap | MXNB/GBPA | no |
-| ArcSwap | MXNB/ZARU | no |
-| ArcSwap | QCAD/KRW1 | no |
-| ArcSwap | QCAD/GBPA | no |
-| ArcSwap | QCAD/ZARU | no |
-| ArcSwap | KRW1/GBPA | no |
-| ArcSwap | KRW1/ZARU | no |
-| ArcSwap | GBPA/ZARU | no |
-| UnitFlow | USDC/EURC | yes — 0xe64f94b4a566e32dfa524f6791b253f1e0659c48 |
-| UnitFlow | USDC/BRLA | no |
-| UnitFlow | USDC/AUDF | no |
-| UnitFlow | USDC/MXNB | no |
-| UnitFlow | USDC/QCAD | no |
-| UnitFlow | USDC/KRW1 | no |
-| UnitFlow | USDC/GBPA | no |
-| UnitFlow | USDC/ZARU | no |
-| UnitFlow | EURC/BRLA | no |
-| UnitFlow | EURC/AUDF | no |
-| UnitFlow | EURC/MXNB | no |
-| UnitFlow | EURC/QCAD | no |
-| UnitFlow | EURC/KRW1 | no |
-| UnitFlow | EURC/GBPA | no |
-| UnitFlow | EURC/ZARU | no |
-| UnitFlow | BRLA/AUDF | no |
-| UnitFlow | BRLA/MXNB | no |
-| UnitFlow | BRLA/QCAD | no |
-| UnitFlow | BRLA/KRW1 | no |
-| UnitFlow | BRLA/GBPA | no |
-| UnitFlow | BRLA/ZARU | no |
-| UnitFlow | AUDF/MXNB | no |
-| UnitFlow | AUDF/QCAD | no |
-| UnitFlow | AUDF/KRW1 | no |
-| UnitFlow | AUDF/GBPA | no |
-| UnitFlow | AUDF/ZARU | no |
-| UnitFlow | MXNB/QCAD | no |
-| UnitFlow | MXNB/KRW1 | no |
-| UnitFlow | MXNB/GBPA | no |
-| UnitFlow | MXNB/ZARU | no |
-| UnitFlow | QCAD/KRW1 | no |
-| UnitFlow | QCAD/GBPA | no |
-| UnitFlow | QCAD/ZARU | no |
-| UnitFlow | KRW1/GBPA | no |
-| UnitFlow | KRW1/ZARU | no |
-| UnitFlow | GBPA/ZARU | no |
+Both Arc DEXes were probed for pools across every currency above. Only USDC/EURC
+had one. For BRLA, AUDF, MXNB, QCAD, GBPA, ZARU and KRW1 there was no pool on
+either router, so an on-chain swap route could not settle those pairs at all,
+and seeding liquidity to work around it was ruled out (spec §VOID).
 
-Only USDC/EURC has a live pool on either router (both ArcSwap and UnitFlow). No AMM fallback exists
-today for BRLA, AUDF, MXNB, QCAD, or KRW1 — for those, StableFX is not just primary, it is the only
-route. Do not seed liquidity to work around this (spec §VOID).
+That made StableFX not merely the primary cross-currency route but the only one.
+The swap code has since been removed rather than left in place unreachable —
+`ConduitRouter.executeWithAmm`, the adapter's swap functions and the SDK's
+`swap` are all gone. This section is kept as the record of why.
+
 
 ## Recommendation
 

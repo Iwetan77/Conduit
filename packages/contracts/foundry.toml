@@ -20,6 +20,9 @@ arc_testnet = { key = "placeholder", url = "https://testnet.arcscan.app/api" }
 [fuzz]
 runs = 256
 
+# Relative to this project root (packages/contracts), so the deploy works on
+# any machine and in CI. It was an absolute path under one developer's home
+# directory, which no other checkout could satisfy.
 [[profile.default.fs_permissions]]
 access = "read-write"
-path = "/home/iwetan/conduit/deployments"
+path = "../../deployments"

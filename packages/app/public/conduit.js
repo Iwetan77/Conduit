@@ -9,7 +9,8 @@
  * never has to touch this file; the security lives in who created the intent.
  *
  * Why a new tab and not an iframe or a chrome-less popup: the checkout needs a
- * real wallet — Google/Privy sign-in (OAuth), browser wallet extensions, and
+ * real wallet — Google sign-in (OAuth, via Circle Wallets), browser wallet
+ * extensions, and
  * cross-chain signing. A cross-origin iframe blocks all of those (third-party
  * cookies, OAuth popups, extension injection). A chrome-less popup window
  * (window.open with a width/height features string) is nearly as bad: wallet

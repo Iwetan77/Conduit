@@ -110,15 +110,24 @@ function WalletSheet({
 }) {
   const isSolana = kind === "solana";
   return (
+    // z-[60], above the mobile bottom nav.
+    //
+    // That nav is `fixed bottom-0 ... z-50` and this sheet was z-50 too, so at
+    // the same stacking level the nav painted over a bottom-anchored sheet.
+    // On a phone that hid the wallet list and the "no wallet found" line under
+    // the Send/Create/Links/History bar, leaving a header and blank space.
+    // The padding below keeps the last row clear of the nav and the home
+    // indicator even when the list is long enough to scroll.
     <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-black/70"
+      className="fixed inset-0 z-[60] flex items-end justify-center bg-black/70"
       onClick={onClose}
       role="dialog"
       aria-modal="true"
       aria-label="Choose a wallet"
     >
       <div
-        className="w-full max-w-md bg-surface border-t border-x border-border max-h-[75vh] overflow-y-auto sheet-up"
+        className="w-full max-w-md bg-surface border-t border-x border-border max-h-[75vh] overflow-y-auto sheet-up
+                   pb-[calc(4rem+env(safe-area-inset-bottom))] md:pb-0"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="sticky top-0 bg-surface border-b border-border px-4 py-3 flex items-center justify-between">
@@ -277,8 +286,8 @@ export function CrossChainBridge({ intentId, intent }: CrossChainBridgeProps) {
       // screen; the picker below still lets them choose another one.
     }
     if (kind) {
-      setWalletPickerFor(kind as SourceKind);
       setPhase("choose_source");
+      openWalletPicker(kind as SourceKind);
     } else {
       setPhase("choose_source");
     }
@@ -313,6 +322,45 @@ export function CrossChainBridge({ intentId, intent }: CrossChainBridgeProps) {
   // `pickedWallet` is the one the payer chose in the wallet sheet. It is passed in
   // rather than read from state for the same reason `picked` is: both are set in
   // the click handler that calls this, and neither has flushed yet.
+  // Ask which wallet only when there is actually a choice to make.
+  //
+  // Wallet discovery finds browser EXTENSIONS -- the Wallet Standard registry,
+  // with a window scan behind it. A phone's browser has none, so the list comes
+  // back empty and the sheet had nothing to draw: on mobile it opened a panel
+  // with a header and no options, which is worse than not opening at all. (The
+  // "no wallet found" line underneath it was there, and sat behind the fixed
+  // bottom nav, so it could not be read either.)
+  //
+  // One wallet is not a choice, so that connects straight through. Zero means
+  // the question cannot be answered here at all, so say what to do instead of
+  // presenting an empty list. More than one is the case the picker exists for:
+  // a payer with both Phantom and Solflare, who used to get whichever one won
+  // the injection race.
+  function openWalletPicker(kind: SourceKind) {
+    const options: unknown[] = kind === "solana" ? solanaWallets : evmConnectors;
+
+    if (options.length === 0) {
+      setError(
+        kind === "solana"
+          ? "No Solana wallet is available in this browser. On a phone, open this page inside your wallet's own browser (Phantom or Solflare), then try again."
+          : "No wallet is available in this browser. On a phone, open this page inside your wallet's own browser, then try again."
+      );
+      setPhase("choose_source");
+      return;
+    }
+
+    if (options.length === 1) {
+      const only =
+        kind === "solana"
+          ? { solana: solanaWallets[0] }
+          : { evm: { connector: evmConnectors[0] } as EvmChoice };
+      void chooseSource(kind === "solana" ? "solana" : "evm", SOURCE_CHAINS[kind], only);
+      return;
+    }
+
+    setWalletPickerFor(kind);
+  }
+
   async function chooseSource(
     kind: "solana" | "evm",
     picked?: string,
@@ -556,8 +604,9 @@ export function CrossChainBridge({ intentId, intent }: CrossChainBridgeProps) {
                           // Ask which wallet next, rather than connecting one.
                           // Picking a chain used to grab whatever was already
                           // connected, so a payer with two wallets could not
-                          // choose and could not switch.
-                          setWalletPickerFor(kind);
+                          // choose and could not switch. openWalletPicker only
+                          // asks when there is more than one to choose from.
+                          openWalletPicker(kind);
                         }}
                         className="w-full px-4 py-3.5 flex items-center justify-between text-left
                                    border-b border-border/60 hover:bg-signal/5 transition-colors

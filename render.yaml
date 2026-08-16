@@ -37,7 +37,7 @@ services:
       # for PaymentSettled, so leaving it unset silently disables that path.
       # Not a secret -- it is a public contract address.
       - key: CONDUIT_ROUTER_ADDRESS
-        value: "0x2F728Dd86099d1AE39dD7377505539179CeC7C6F"
+        value: "0x80f996e86C003AF309635B67A53dC6e63e623318"
 
       # ── Merchant login: Circle Wallets ─────────────────────────────────
       # The API key is a server-side secret and never reaches the browser;

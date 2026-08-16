@@ -292,8 +292,8 @@ func New(cfg Config) http.Handler {
 			// Cross-currency FX for the payer surface. Same "no API key" reasoning
 			// as the routes above: a payer opening a link or QR has no
 			// credentials, and Circle StableFX is the ONLY working cross-currency
-			// path (the old on-chain AMM route had no USDC/EURC pool on Arc and
-			// could never settle). Scoped by intent ID, which is the capability.
+			// path (an on-chain swap route was removed: Arc has no USDC/EURC
+			// pool, so it could never settle). Scoped by intent ID, which is the capability.
 			// Authenticated callers are still restricted to their own account --
 			// see resolveIntentAccount. No funds move without the payer's own
 			// wallet signature on the quote and funding payloads.

@@ -1,8 +1,8 @@
 // Package fx implements FX provider selection. Provider selection is a Go
 // concern (per the architecture delta §VOID — no Solidity IFXProvider
-// abstraction): StableFX is off-chain REST RFQ with no view function, AMM
-// quoting is an eth_call. They cannot share one on-chain interface, so they
-// don't try to; this interface is the actual unification point.
+// abstraction): StableFX is off-chain REST RFQ with no view function and
+// nothing on-chain to call, so it could not sit behind a Solidity interface.
+// This interface is the actual unification point.
 package fx
 
 import (
@@ -11,8 +11,8 @@ import (
 )
 
 type Quote struct {
-	Provider     string // "stablefx" | "amm" | "direct"
-	QuoteID      string // provider's own quote identifier, empty for amm/direct
+	Provider     string // "stablefx" | "direct"
+	QuoteID      string // provider's own quote identifier, empty for direct
 	FromCurrency string // token symbol
 	ToCurrency   string // token symbol
 	FromAmount   *big.Int
@@ -30,7 +30,7 @@ type Preparation struct {
 	FundingTypedData  []byte // EIP-712 typed data for the PAYER to sign
 
 	// StableFX-specific fields Submit needs to replay the exact signed permit
-	// back to Circle's /fund endpoint. Not used by AMM/direct providers, which
+	// back to Circle's /fund endpoint. Not used by the direct provider, which
 	// have no funding step to replay. See stablefx.go's Submit doc comment for
 	// why this exists (Circle's relayer, not our contracts, redeems the
 	// signature — there is no on-chain call for Conduit to construct here).
@@ -50,8 +50,8 @@ type Provider interface {
 	// Quote requests a rate for settling `settleAmount` of `to`, paid in `from`.
 	Quote(ctx context.Context, from, to string, settleAmount *big.Int, recipientAddress string) (Quote, error)
 	// Prepare turns an unexpired Quote into signable funding typed data. For
-	// StableFX this creates the trade and presigns; for AMM it's a no-op that
-	// just re-shapes the quote (there's nothing to presign — see Submit).
+	// StableFX this creates the trade and presigns; for the direct provider
+	// it's a no-op that just re-shapes the quote (nothing to presign).
 	Prepare(ctx context.Context, q Quote, payer, recipient string) (Preparation, error)
 	// Submit takes the payer's signature over Preparation.FundingTypedData and
 	// settles on-chain, returning the transaction hash.

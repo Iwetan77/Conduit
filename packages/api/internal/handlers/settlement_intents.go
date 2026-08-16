@@ -764,7 +764,7 @@ func (h *SettlementIntents) Confirm(w http.ResponseWriter, r *http.Request) {
 
 	// Record settlements + balance_transactions so GET /v1/balance_transactions
 	// and the CSV export have something to show for FX-routed settlements
-	// (the indexer only ever sees direct/AMM ConduitRouter events — see its
+	// (the indexer only ever sees direct ConduitRouter events — see its
 	// package doc comment — so this path has to record its own rows).
 	// KNOWN GAP: fee is recorded as 0 here. StableFX's quote response does
 	// carry a real fee figure but Confirm doesn't have it in scope at this

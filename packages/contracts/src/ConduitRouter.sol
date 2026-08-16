@@ -13,18 +13,6 @@ import {AtomicSettler} from "./AtomicSettler.sol";
 import {StableFXAdapter} from "./StableFXAdapter.sol";
 import {SettlementPreferenceRegistry} from "./SettlementPreferenceRegistry.sol";
 
-/// @dev Minimal Uniswap V2-compatible router interface for the AMM fallback path.
-///      Same interface StableFXAdapter uses internally — declared again here so
-///      ConduitRouter.executeWithAmm doesn't depend on StableFXAdapter internals.
-interface IUniswapV2RouterMinimal {
-    function swapTokensForExactTokens(
-        uint256 amountOut,
-        uint256 amountInMax,
-        address[] calldata path,
-        address to,
-        uint256 deadline
-    ) external returns (uint256[] memory amounts);
-}
 
 /// @title ConduitRouter
 /// @notice The single execution surface for all Conduit payments.
@@ -253,67 +241,13 @@ contract ConduitRouter is IConduitRouter, ReentrancyGuard, Ownable2Step {
         );
     }
 
-    // ── Path 3: Cross-currency execute via AMM fallback ───────────────────────
-
-    /// @notice Execute a cross-currency payment by routing through a Uniswap
-    ///         V2-compatible AMM. Fallback only — used for pairs StableFX
-    ///         refuses to quote (see docs/fx-capability.md for which pairs that
-    ///         is today). Provider selection happens off-chain in the Go API;
-    ///         this entry point just executes whichever route it picked.
-    /// @param path        [payerToken, ..., recipientToken] — validated at the ends only.
-    /// @param amountInMax Maximum payerToken the payer will spend (slippage cap,
-    ///                    computed off-chain via the router's getAmountsIn).
-    /// @param ammRouter   Uniswap V2-compatible router address (ArcSwap or UnitFlow).
-    function executeWithAmm(
-        PaymentInstruction calldata instruction,
-        address[] calldata path,
-        uint256 amountInMax,
-        address ammRouter
-    ) external nonReentrant returns (bytes32 receiptId) {
-        _validateInstruction(instruction);
-        // Same reasoning as execute(): without this, the pull below is
-        // authorized by the payer's allowance alone and anyone may trigger it.
-        require(msg.sender == instruction.payer, "not payer");
-        require(
-            instruction.payerToken != instruction.recipientToken,
-            "use execute() for same-currency"
-        );
-        require(path.length >= 2, "invalid path");
-        require(path[0] == instruction.payerToken, "path must start at payerToken");
-        require(path[path.length - 1] == instruction.recipientToken, "path must end at recipientToken");
-
-        IERC20(instruction.payerToken).safeTransferFrom(instruction.payer, address(this), amountInMax);
-        IERC20(instruction.payerToken).forceApprove(ammRouter, amountInMax);
-
-        uint256[] memory amounts = IUniswapV2RouterMinimal(ammRouter).swapTokensForExactTokens(
-            instruction.amount,
-            amountInMax,
-            path,
-            instruction.recipient,
-            instruction.deadline
-        );
-        uint256 actualIn = amounts[0];
-
-        uint256 leftover = amountInMax - actualIn;
-        if (leftover > 0) {
-            IERC20(instruction.payerToken).safeTransfer(instruction.payer, leftover);
-        }
-        IERC20(instruction.payerToken).forceApprove(ammRouter, 0);
-
-        receiptId = _mintReceipt(instruction);
-
-        emit PaymentSettled(
-            receiptId,
-            instruction.payer,
-            instruction.recipient,
-            instruction.payerToken,
-            instruction.recipientToken,
-            actualIn,
-            instruction.amount,
-            instruction.declarationId,
-            block.timestamp
-        );
-    }
+    // Path 3 was a cross-currency AMM fallback (executeWithAmm), removed.
+    //
+    // It could never settle: Arc has no USDC/EURC pool, so the swap it depended
+    // on had no liquidity to execute against. Cross-currency goes through Circle
+    // StableFX. Nothing in this repo called it, while it stayed deployed and
+    // publicly callable, taking an unvalidated router address and approving that
+    // address over tokens this contract holds -- including accumulated fees.
 
     // ── Quote (view) ──────────────────────────────────────────────────────────
 

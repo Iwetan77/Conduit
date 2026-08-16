@@ -1,6 +1,6 @@
 // Single source of truth for currency <-> token resolution, replacing the five
 // independent (and drifting) currencyToAddress/addressToCurrency implementations
-// found in swap.ts, client.ts, router.ts, and declaration.ts during the Phase 0
+// found in client.ts, router.ts, and declaration.ts during the Phase 0
 // audit (audit/DECIMAL-AUDIT.md, finding #7).
 //
 // Keyed by ON-CHAIN TOKEN SYMBOL (USDC, EURC, BRLA, ...) — NOT the 3-letter ISO

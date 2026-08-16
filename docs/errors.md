@@ -21,7 +21,7 @@ failure is translated through this registry first.
 | Code | HTTP status | Meaning | What to do |
 |---|---|---|---|
 | `fx_quote_expired` | 409 | The quote you tried to `/prepare` against is past its `quote_expires_at`. | Request a fresh `/quote` — quotes are disposable, never cached (see [FX timing model](./fx-timing.md)). |
-| `fx_no_route` | 422 | StableFX doesn't quote this currency pair directly and no AMM fallback exists either. | Check `GET /v1/currencies` for what's actually routable right now — it reflects live StableFX + AMM coverage, not a static list. |
+| `fx_no_route` | 422 | StableFX doesn't quote this currency pair. | Check `GET /v1/currencies` for what's actually routable right now — it reflects live StableFX coverage, not a static list. |
 | `fx_invalid_amount` | 422 | The amount is outside StableFX's quotable range (too small or too large). | There's a real minimum notional (observed ~1 unit of a major currency on the sandbox) — don't assume any amount ≥ 1 minor unit is quotable. |
 | `fx_provider_unavailable` | 503 | StableFX returned an error code this API doesn't have a specific mapping for. | Transient — retry with backoff. If it persists, it's worth a bug report since it means a new upstream error code needs mapping. |
 | `currency_not_supported` | 422 | The currency isn't registered in `CurrencyRegistry` at all. | Check `GET /v1/currencies`. |

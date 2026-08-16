@@ -17,9 +17,9 @@ type currencyResponse struct {
 
 // List returns GET /v1/currencies. Per the v2 spec: "what is actually
 // routable right now... read CurrencyRegistry, then confirm each pair against
-// StableFX (or AMM fallback). Never a static list." This currently returns
+// StableFX. Never a static list." This currently returns
 // currency.All() (the Phase 0-confirmed static bootstrap table) directly —
-// the live cross-check against CurrencyRegistry.sol + StableFX/AMM coverage
+// the live cross-check against CurrencyRegistry.sol + StableFX coverage
 // per pair is NOT yet implemented (needs an eth client wired here + would be
 // slow to do synchronously on every request without caching). Flagged as
 // remaining work in whereistopped.md — don't treat this endpoint as fully

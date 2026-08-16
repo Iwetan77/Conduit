@@ -10,7 +10,7 @@
 //   4. sign     — payer authorises the funding
 //   5. confirm  — Circle's maker executes and delivers to the recipient
 //
-// This is the ONLY working cross-currency route. The old on-chain AMM path
+// This is the ONLY working cross-currency route. An on-chain swap path
 // had no USDC/EURC pool on Arc testnet and could never settle.
 
 import type { Connector } from "wagmi";

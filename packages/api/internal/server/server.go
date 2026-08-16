@@ -344,6 +344,10 @@ func New(cfg Config) http.Handler {
 
 			r.Get("/accounts", accountsH.List)
 			r.Get("/accounts/me", accountsH.Me)
+			// Ends every session for the account. Authenticated because it acts
+			// on the caller's own account, and only meaningful to a session
+			// caller -- see Accounts.Logout.
+			r.Post("/auth/logout", accountsH.Logout)
 			r.Get("/accounts/{id}", accountsH.Get)
 			r.Patch("/accounts/{id}", accountsH.Update)
 			r.Post("/accounts/sub", accountsH.CreateSub)

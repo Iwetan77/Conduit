@@ -10,11 +10,16 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kzn-labs/conduit/api/internal/auth"
 	"github.com/kzn-labs/conduit/api/internal/db"
 	"github.com/kzn-labs/conduit/api/internal/server"
 )
 
 func main() {
+	// Resolve the session secret first, so a weak or missing one is a startup
+	// failure rather than something discovered at the first sign-in.
+	auth.CheckSessionSecret()
+
 	databaseURL := requireEnv("DATABASE_URL")
 	stableFXKey := loadStableFXKey()
 	appBaseURL := envOr("CONDUIT_APP_BASE_URL", "http://localhost:3000")
@@ -35,12 +40,12 @@ func main() {
 
 	cfg := server.Config{
 		Pool: pool, StableFXKey: stableFXKey, StableFXBase: stableFXBase, AppBaseURL: appBaseURL,
-		ArcRPC:               envOr("ARC_RPC", "https://rpc.testnet.arc.network"),
-		SolanaRPC:            envOr("SOLANA_RPC", "https://api.devnet.solana.com"),
-		SolanaWS:             envOr("SOLANA_WS", "wss://api.devnet.solana.com"),
-		ArcRelayerKey:        os.Getenv("ARC_RELAYER_KEY"),
-		CircleAPIKey:         loadCircleKey(),
-		CircleBaseURL:        os.Getenv("CIRCLE_BASE_URL"),
+		ArcRPC:        envOr("ARC_RPC", "https://rpc.testnet.arc.network"),
+		SolanaRPC:     envOr("SOLANA_RPC", "https://api.devnet.solana.com"),
+		SolanaWS:      envOr("SOLANA_WS", "wss://api.devnet.solana.com"),
+		ArcRelayerKey: os.Getenv("ARC_RELAYER_KEY"),
+		CircleAPIKey:  loadCircleKey(),
+		CircleBaseURL: os.Getenv("CIRCLE_BASE_URL"),
 	}
 	handler := server.New(cfg)
 

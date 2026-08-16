@@ -8,6 +8,7 @@ import { useAccount, useConnect, useDisconnect } from "wagmi";
 import {
   clearSessionToken,
   createAccountFromCircle,
+  logout,
   setSessionToken,
 } from "@/lib/conduit-api";
 import { CIRCLE_CONNECTOR_ID } from "@/lib/circle/connector";
@@ -321,6 +322,18 @@ function CircleDashboard({ children }: { children: React.ReactNode }) {
   }, [onCircle, address]);
 
   const signOut = async () => {
+    // Revoke server-side FIRST, while the token is still there to authenticate
+    // the call. Clearing localStorage only drops this browser's copy -- the
+    // token stays valid for the rest of its 12 hours anywhere else it reached.
+    //
+    // A failure here must not strand the user on a dashboard they asked to
+    // leave, so the local sign-out proceeds either way. The cost of that is a
+    // token that outlives the click; the cost of the alternative is a sign-out
+    // button that can refuse to work.
+    try {
+      await logout();
+    } catch {}
+
     clearSessionToken();
     queryClient.clear();
     try {

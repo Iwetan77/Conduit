@@ -176,6 +176,17 @@ export function getMyAccount() {
   return request<Account>("/v1/accounts/me");
 }
 
+// Ends every session for the account, server-side.
+//
+// Dropping the token from localStorage only removes this browser's copy; the
+// token itself stays valid for the rest of its life wherever else it has
+// reached. This is what actually invalidates it, so it has to be called while
+// the token is still present -- clearing first would leave nothing to
+// authenticate with.
+export function logout() {
+  return request<void>("/v1/auth/logout", { method: "POST" });
+}
+
 export function updateAccount(id: string, body: { name?: string; logo_url?: string; settle_currency?: string; settle_address?: string }) {
   return request<Account>(`/v1/accounts/${id}`, { method: "PATCH", body });
 }

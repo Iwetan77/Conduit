@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/kzn-labs/conduit/api/internal/auth"
 	"github.com/kzn-labs/conduit/api/internal/db"
 	"github.com/kzn-labs/conduit/api/internal/server"
 )
@@ -52,17 +53,17 @@ func main() {
 	}
 
 	cfg := server.Config{
-		Pool:                 pool,
-		StableFXKey:          loadStableFXKey(),
-		StableFXBase:         envOr("STABLEFX_BASE_URL", "https://api-sandbox.circle.com"),
-		AppBaseURL:           envOr("CONDUIT_APP_BASE_URL", "http://localhost:3000"),
-		ArcRPC:               envOr("ARC_RPC", "https://rpc.testnet.arc.network"),
-		SolanaRPC:            envOr("SOLANA_RPC", "https://api.devnet.solana.com"),
-		SolanaWS:             envOr("SOLANA_WS", "wss://api.devnet.solana.com"),
-		ArcRelayerKey:        loadEnvFileKey("ARC_RELAYER_KEY"),
-		BridgeStaleAfter:     staleAfter,
-		CircleAPIKey:         loadCircleKey(),
-		CircleBaseURL:        os.Getenv("CIRCLE_BASE_URL"),
+		Pool:             pool,
+		StableFXKey:      loadStableFXKey(),
+		StableFXBase:     envOr("STABLEFX_BASE_URL", "https://api-sandbox.circle.com"),
+		AppBaseURL:       envOr("CONDUIT_APP_BASE_URL", "http://localhost:3000"),
+		ArcRPC:           envOr("ARC_RPC", "https://rpc.testnet.arc.network"),
+		SolanaRPC:        envOr("SOLANA_RPC", "https://api.devnet.solana.com"),
+		SolanaWS:         envOr("SOLANA_WS", "wss://api.devnet.solana.com"),
+		ArcRelayerKey:    loadEnvFileKey("ARC_RELAYER_KEY"),
+		BridgeStaleAfter: staleAfter,
+		CircleAPIKey:     loadCircleKey(),
+		CircleBaseURL:    os.Getenv("CIRCLE_BASE_URL"),
 	}
 	// Pull the session secret from packages/api/.env when it is not exported.
 	//
@@ -75,6 +76,9 @@ func main() {
 			os.Setenv("CONDUIT_SESSION_SECRET", v)
 		}
 	}
+	// Only now that the .env value has been applied -- checking earlier would
+	// judge a secret that had not been loaded yet.
+	auth.CheckSessionSecret()
 
 	handler := server.New(cfg)
 

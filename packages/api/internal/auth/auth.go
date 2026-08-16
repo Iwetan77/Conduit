@@ -261,13 +261,22 @@ func lookupAuthPrincipal(ctx context.Context, pool *pgxpool.Pool, provider, subj
 // can be deleted or change livemode after the token was signed, and a session
 // that outlived its account would be authenticated against nothing.
 func lookupSessionPrincipal(ctx context.Context, pool *pgxpool.Pool, token string) (Principal, error) {
-	accountID, err := ParseSessionToken(token)
+	accountID, tokenVersion, err := ParseSessionToken(token)
 	if err != nil {
 		return Principal{}, err
 	}
 	var livemode bool
-	if err := pool.QueryRow(ctx, `SELECT livemode FROM accounts WHERE id = $1`, accountID).Scan(&livemode); err != nil {
+	var currentVersion int
+	if err := pool.QueryRow(ctx,
+		`SELECT livemode, session_version FROM accounts WHERE id = $1`, accountID,
+	).Scan(&livemode, &currentVersion); err != nil {
 		return Principal{}, fmt.Errorf("no account for session %s: %w", accountID, err)
+	}
+	// A valid signature only proves we issued the token, not that it is still
+	// meant to work. The account's version is the authority; signing out bumps
+	// it, and every token signed at an earlier one dies with it.
+	if tokenVersion != currentVersion {
+		return Principal{}, errors.New("session revoked")
 	}
 	return Principal{AccountID: accountID, KeyType: KeyTypeSession, Livemode: livemode}, nil
 }

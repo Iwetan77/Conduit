@@ -160,16 +160,20 @@ func (h *Accounts) bootstrapAccount(w http.ResponseWriter, r *http.Request, prov
 	// Already onboarded -- return the existing account, don't re-create.
 	var existing bootstrapAccountResponse
 	var loginWallet *string
+	var sessionVersion int
 	err := h.Pool.QueryRow(ctx,
-		`SELECT id, name, logo_url, settle_currency, settle_address, login_wallet, livemode
+		`SELECT id, name, logo_url, settle_currency, settle_address, login_wallet, livemode, session_version
 		 FROM accounts WHERE auth_provider = $1 AND auth_subject = $2`,
 		provider, subject,
-	).Scan(&existing.ID, &existing.Name, &existing.LogoURL, &existing.SettleCurrency, &existing.SettleAddress, &loginWallet, &existing.Livemode)
+	).Scan(&existing.ID, &existing.Name, &existing.LogoURL, &existing.SettleCurrency, &existing.SettleAddress, &loginWallet, &existing.Livemode, &sessionVersion)
 	if err == nil {
 		if loginWallet != nil {
 			existing.LoginWallet = *loginWallet
 		}
-		existing.SessionToken = auth.NewSessionToken(existing.ID)
+		// Signed at the account's CURRENT version, so a token minted by this
+		// login survives while every token from before the last sign-out does
+		// not.
+		existing.SessionToken = auth.NewSessionToken(existing.ID, sessionVersion)
 		writeJSON(w, http.StatusOK, existing)
 		return
 	}
@@ -210,7 +214,8 @@ func (h *Accounts) bootstrapAccount(w http.ResponseWriter, r *http.Request, prov
 	}
 
 	writeJSON(w, http.StatusCreated, bootstrapAccountResponse{
-		SessionToken: auth.NewSessionToken(accountID),
+		// A new account starts at version 0, the column default.
+		SessionToken: auth.NewSessionToken(accountID, 0),
 		ID:           accountID, Name: req.Name, SettleCurrency: req.SettleCurrency,
 		SettleAddress: settleAddress, LoginWallet: req.LoginWallet, Livemode: false,
 	})
@@ -252,6 +257,40 @@ func (h *Accounts) Me(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// Logout revokes every session token issued for the calling account.
+//
+// Clearing the browser's copy of a token is not revocation: the token stays
+// valid for the rest of its 12 hours wherever else it has reached. Bumping the
+// account's session_version invalidates all of them at once, since the version
+// is inside the signed payload and compared on every request.
+//
+// Deliberately all sessions and not just this one. There is no per-session id
+// to revoke individually, and the case that matters -- signing out because a
+// device or a token may be in someone else's hands -- is the case where ending
+// only the session you are holding is no use.
+//
+// Restricted to session callers. An sk_ key has no session to end, and letting
+// a leaked key sign the merchant's dashboard out would hand an attacker a
+// denial of service against the account's own owner.
+func (h *Accounts) Logout(w http.ResponseWriter, r *http.Request) {
+	principal, _ := auth.FromContext(r.Context())
+	if principal.KeyType != auth.KeyTypeSession {
+		writeErr(w, apierrors.E(apierrors.CodeForbidden, "session required"))
+		return
+	}
+
+	if _, err := h.Pool.Exec(r.Context(),
+		`UPDATE accounts SET session_version = session_version + 1 WHERE id = $1`,
+		principal.AccountID,
+	); err != nil {
+		// Must not report success on a failed bump: the caller would believe
+		// the session was ended when it is still live.
+		writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 type updateAccountRequest struct {

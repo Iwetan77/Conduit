@@ -100,7 +100,15 @@ func New(cfg Config) http.Handler {
 	if arcRPCForBalances == "" {
 		arcRPCForBalances = "https://rpc.testnet.arc.network"
 	}
-	intentsH := &handlers.SettlementIntents{Pool: cfg.Pool, StableFX: stableFX, AppBaseURL: cfg.AppBaseURL, Webhooks: dispatcher, ArcRPC: arcRPCForBalances}
+	// The router address the record route verifies against. Read from the
+	// environment here for the same reason StartBackgroundWorkers does: it is
+	// deployment configuration, and the indexer and the record route must agree
+	// on which router is ours.
+	intentsH := &handlers.SettlementIntents{
+		Pool: cfg.Pool, StableFX: stableFX, AppBaseURL: cfg.AppBaseURL,
+		Webhooks: dispatcher, ArcRPC: arcRPCForBalances,
+		RouterAddr: strings.TrimSpace(os.Getenv("CONDUIT_ROUTER_ADDRESS")),
+	}
 	currenciesH := &handlers.Currencies{}
 	fxRatesH := &handlers.FxRates{StableFX: stableFX}
 	balancesH := &handlers.Balances{ArcRPC: arcRPCForBalances}

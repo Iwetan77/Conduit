@@ -34,6 +34,12 @@ type SettlementIntents struct {
 	// payment's tx receipt and verify on-chain that the settle token actually
 	// reached the merchant — the record endpoint never trusts the caller's word.
 	ArcRPC string
+	// RouterAddr is Conduit's own ConduitRouter. RecordDirectSettlement
+	// requires a PaymentSettled event from it, which is what ties a reported
+	// transaction to THIS payment rather than to any transfer that happened to
+	// reach the merchant. Unset, the record route fails closed -- see its
+	// comment for why that is better than the looser check it replaced.
+	RouterAddr string
 }
 
 type createIntentRequest struct {
@@ -804,6 +810,57 @@ func (h *SettlementIntents) Confirm(w http.ResponseWriter, r *http.Request) {
 // of these paying the settle token to the merchant.
 var erc20TransferTopic = crypto.Keccak256Hash([]byte("Transfer(address,address,uint256)"))
 
+// PaymentSettled(bytes32 indexed receiptId, address indexed payer,
+//
+//	address indexed recipient, address payerToken, address recipientToken,
+//	uint256 payerAmount, uint256 recipientAmount, bytes32 declarationId,
+//	uint256 settledAt)
+//
+// Three indexed fields, so the non-indexed six sit in Data in declaration
+// order, 32 bytes each. recipientAmount is the fourth of those.
+var paymentSettledTopic = crypto.Keccak256Hash([]byte(
+	"PaymentSettled(bytes32,address,address,address,address,uint256,uint256,bytes32,uint256)"))
+
+// routerSettledThisIntent reports whether the receipt contains a PaymentSettled
+// from our own router that matches this payment exactly.
+//
+// This is what a reported transaction has to prove. Without it, the only test
+// was "some transfer of the settle token reached the merchant for at least the
+// amount" -- and a merchant's settle address receives a continuous stream of
+// those, most never claimed by a /record call. Anyone could create an intent
+// against that merchant, watch for an unclaimed transfer, and report it: the
+// intent flips to settled and settlement.succeeded fires, so the merchant ships
+// goods having been paid once for two orders.
+//
+// Matching on the router's own event closes that, because a stray transfer to
+// the merchant does not carry one. Every same-currency payment does: the SDK
+// pays through ConduitRouter.execute (client.pay -> routerClient.execute), so
+// requiring the event costs the real flow nothing.
+func routerSettledThisIntent(
+	receipt *types.Receipt, router, recipient, token common.Address, amount *big.Int,
+) bool {
+	for _, lg := range receipt.Logs {
+		if lg.Address != router || len(lg.Topics) != 4 || lg.Topics[0] != paymentSettledTopic {
+			continue
+		}
+		if common.BytesToAddress(lg.Topics[3].Bytes()) != recipient {
+			continue
+		}
+		if len(lg.Data) < 128 {
+			continue
+		}
+		if common.BytesToAddress(lg.Data[32:64]) != token {
+			continue
+		}
+		// recipientAmount, exactly. The router delivers instruction.amount to
+		// the recipient, so an exact match is what a correct payment produces.
+		if new(big.Int).SetBytes(lg.Data[96:128]).Cmp(amount) == 0 {
+			return true
+		}
+	}
+	return false
+}
+
 type recordSettlementRequest struct {
 	TxHash string `json:"tx_hash"`
 }
@@ -861,6 +918,19 @@ func (h *SettlementIntents) RecordDirectSettlement(w http.ResponseWriter, r *htt
 		writeJSON(w, http.StatusOK, confirmResponse{Status: "settled", TxHash: txHash})
 		return
 	}
+	// An intent that is over cannot be settled by a later report.
+	//
+	// The only guard here was "already settled", so a canceled, expired or
+	// failed intent could still be flipped to settled by reporting a matching
+	// transaction. Cancelling is the merchant's decision and expiry is the
+	// intent's own policy; neither should be undone from an unauthenticated
+	// route. (The schema's statuses are created/quoted/funding/settling/
+	// settled/expired/canceled/failed -- there is no requires_payment here.)
+	switch status {
+	case "canceled", "expired", "failed":
+		writeErr(w, apierrors.E(apierrors.CodeInvalidRequest, "intent is "+status))
+		return
+	}
 
 	settleInfo, ok := currency.ByISO(settleISO)
 	if !ok {
@@ -874,6 +944,19 @@ func (h *SettlementIntents) RecordDirectSettlement(w http.ResponseWriter, r *htt
 	}
 
 	if h.ArcRPC == "" {
+		writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
+		return
+	}
+	// Fail closed without a router address.
+	//
+	// The check below is only meaningful if it can require our router's own
+	// event. Falling back to "any transfer reached the merchant" when the
+	// address is missing would restore exactly the hole this closes, and it
+	// would do it silently, on the deployments least likely to be watched.
+	// CONDUIT_ROUTER_ADDRESS is configuration, and missing configuration is an
+	// operator problem, not a reason to accept an unverifiable payment.
+	if strings.TrimSpace(h.RouterAddr) == "" {
+		log.Printf("record: CONDUIT_ROUTER_ADDRESS is not set; refusing to record intent %s", id)
 		writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
 		return
 	}
@@ -917,7 +1000,11 @@ func (h *SettlementIntents) RecordDirectSettlement(w http.ResponseWriter, r *htt
 			continue
 		}
 		value := new(big.Int).SetBytes(lg.Data)
-		if value.Cmp(amount) >= 0 {
+		// Exactly the amount, not at least it. A router payment delivers
+		// instruction.amount and nothing else, so ">=" only ever admitted
+		// transfers this intent did not cause -- and it recorded settle_amount
+		// as the intent amount regardless, leaving any excess unaccounted.
+		if value.Cmp(amount) == 0 {
 			paidAmount = value
 			matchedLogIndex = lg.Index
 			payerAddress = common.BytesToAddress(lg.Topics[1].Bytes()).Hex()
@@ -925,6 +1012,14 @@ func (h *SettlementIntents) RecordDirectSettlement(w http.ResponseWriter, r *htt
 		}
 	}
 	if paidAmount == nil {
+		writeErr(w, apierrors.E(apierrors.CodeInvalidRequest, "tx does not settle this intent"))
+		return
+	}
+
+	// ...and it must be OUR router that settled it. See
+	// routerSettledThisIntent: a transfer reaching the merchant is not evidence
+	// that this payment caused it.
+	if !routerSettledThisIntent(receipt, common.HexToAddress(h.RouterAddr), settleAddr, tokenAddr, amount) {
 		writeErr(w, apierrors.E(apierrors.CodeInvalidRequest, "tx does not settle this intent"))
 		return
 	}

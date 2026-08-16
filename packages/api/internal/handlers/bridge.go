@@ -291,9 +291,27 @@ func (h *Bridge) pollAndCompleteFunding(ctx context.Context, intentID, transferI
 		return
 	}
 
+	// Confirm on-chain what actually arrived, before anything is paid out.
+	//
+	// Circle reporting "finalized" is a claim about a transfer id the payer
+	// handed us on an unauthenticated route. The relayer's payout is real money,
+	// so the amount it is sized against has to come from the chain, not from
+	// that claim. A mint that paid someone else, or reverted, stops here.
+	minted, verr := h.verifyMintToRelayer(ctx, status.MintTxHash)
+	if verr != nil {
+		log.Printf("bridge: mint verification failed for transfer %s: %v", transferID, verr)
+		h.setState(ctx, transferID, bridgepkg.StateFailed)
+		h.emitWebhook(ctx, intentID, "bridge.failed", map[string]any{
+			"intent_id": intentID, "transfer_id": transferID,
+			"reason": "the funding transfer could not be verified on Arc",
+		})
+		return
+	}
+
 	if _, err := h.Pool.Exec(ctx,
-		`UPDATE bridge_transfers SET state = 'minted', mint_tx_hash = $1, updated_at = now() WHERE id = $2 AND state = 'mint_submitted'`,
-		status.MintTxHash, transferID,
+		`UPDATE bridge_transfers SET state = 'minted', mint_tx_hash = $1, minted_amount = $2, updated_at = now()
+		 WHERE id = $3 AND state = 'mint_submitted'`,
+		status.MintTxHash, minted.String(), transferID,
 	); err != nil {
 		log.Printf("bridge: persist mint for transfer %s: %v", transferID, err)
 		return
@@ -302,7 +320,7 @@ func (h *Bridge) pollAndCompleteFunding(ctx context.Context, intentID, transferI
 
 	// Quote-after-mint ordering: only now, with the USDC actually sitting on
 	// Arc, do we ask StableFX for a rate.
-	if err := h.settleBridgedIntent(ctx, intentID); err != nil {
+	if err := h.settleBridgedIntent(ctx, intentID, minted); err != nil {
 		log.Printf("bridge: settlement handoff failed for intent %s: %v", intentID, err)
 		return
 	}
@@ -314,7 +332,16 @@ func (h *Bridge) pollAndCompleteFunding(ctx context.Context, intentID, transferI
 // signatures instead of a human wallet. See eip712_sign.go's doc comment for
 // why this is safe: the funding intent was the payer's one and only, final
 // signature.
-func (h *Bridge) settleBridgedIntent(ctx context.Context, intentID string) error {
+// minted is what the funding transfer actually delivered to the relayer,
+// verified on Arc. It is a required argument rather than something read back
+// out of the intent, because the intent's amount is what the payer ASKED to
+// settle and this is what arrived; paying the former out of the relayer's own
+// float whenever they differ is how the relayer gets drained.
+func (h *Bridge) settleBridgedIntent(ctx context.Context, intentID string, minted *big.Int) error {
+	if minted == nil || minted.Sign() <= 0 {
+		return fmt.Errorf("refusing to settle intent %s: no verified funding amount", intentID)
+	}
+
 	var amountStr, settleCurrencyISO, settleAddress string
 	if err := h.Pool.QueryRow(ctx,
 		`SELECT amount::text, settle_currency, settle_address FROM settlement_intents WHERE id = $1`, intentID,
@@ -327,6 +354,32 @@ func (h *Bridge) settleBridgedIntent(ctx context.Context, intentID string) error
 	}
 	amount, _ := new(big.Int).SetString(amountStr, 10)
 	relayerAddrHex := h.RelayerAddr.Hex()
+
+	// The relayer forwards what arrived; it does not top up the difference.
+	//
+	// Everything below pays `amount` -- the intent's own figure -- out of the
+	// relayer's balance. Nothing compared that to what the bridge actually
+	// delivered, so an intent for any sum could be settled by a funding
+	// transfer for less, with the relayer's float covering the gap. Repeat
+	// that and the float is the only bound.
+	//
+	// Underfunded stops here, marked failed with the two numbers on the
+	// webhook. Never a partial payout and never a top-up: paying a merchant
+	// less than the intent says silently is worse than not paying and saying
+	// why. ('underpaid' is not in settlement_intents' status CHECK; 'failed'
+	// is accurate and the payload carries the detail.)
+	if minted.Cmp(amount) < 0 {
+		_, _ = h.Pool.Exec(ctx,
+			`UPDATE settlement_intents SET status = 'failed', updated_at = now() WHERE id = $1 AND status <> 'settled'`,
+			intentID)
+		h.emitWebhook(ctx, intentID, "bridge.underpaid", map[string]any{
+			"intent_id":       intentID,
+			"required_amount": amount.String(),
+			"funded_amount":   minted.String(),
+			"reason":          "the funding transfer delivered less USDC than the intent requires",
+		})
+		return fmt.Errorf("intent %s underfunded: required %s, funded %s", intentID, amount, minted)
+	}
 
 	// Same-asset settlement (USD settles in USDC): the bridge already minted
 	// the USDC to the relayer, so there's nothing to convert — the relayer just
@@ -436,6 +489,85 @@ func (h *Bridge) settleBridgedIntent(ctx context.Context, intentID string) error
 // Used to settle a same-asset (USD→USDC) bridged intent: the minted USDC is
 // already at the relayer, so this is a plain ERC-20 transfer, signed with the
 // relayer key. EIP-1559 to match what Arc accepts (its browser txs are type 2).
+// mintedAmountFor resolves the verified funding amount for a transfer, from the
+// stored value when there is one and from the chain when there is not.
+//
+// Rows minted before minted_amount was recorded carry NULL. Those must be
+// re-read rather than waved through on the intent's own figure, which is the
+// assumption this whole change exists to remove.
+func (h *Bridge) mintedAmountFor(ctx context.Context, stored, mintTxHash *string) (*big.Int, error) {
+	if stored != nil && *stored != "" {
+		if v, ok := new(big.Int).SetString(*stored, 10); ok && v.Sign() > 0 {
+			return v, nil
+		}
+	}
+	if mintTxHash == nil || *mintTxHash == "" {
+		return nil, fmt.Errorf("no recorded funding amount and no mint transaction to verify")
+	}
+	return h.verifyMintToRelayer(ctx, *mintTxHash)
+}
+
+// verifyMintToRelayer reads the mint transaction on Arc and returns how much
+// USDC it actually delivered to the relayer.
+//
+// This is what binds a payout to a real inbound transfer. Everything upstream
+// of it is reported by the payer: the Gateway transfer id arrives on a route
+// that needs no credential, and Circle's transfer-status response carries
+// neither an amount nor a destination (see gatewayTransferDetails -- it decodes
+// status, tx hash and a message, and that is all the API gives us). So the only
+// trustworthy statement about "did we receive money, and how much" is the chain
+// itself.
+//
+// Sums USDC Transfer logs whose recipient is the relayer, which is both the
+// amount check and the destination check in one pass: a transfer id whose mint
+// paid somebody else produces no matching log and returns zero.
+//
+// Same shape as the verification in RecordDirectSettlement, deliberately -- an
+// inbound payment is confirmed by reading the chain, never by trusting the
+// caller who told us about it.
+func (h *Bridge) verifyMintToRelayer(ctx context.Context, mintTxHash string) (*big.Int, error) {
+	if h.ArcRPC == "" {
+		return nil, fmt.Errorf("no Arc RPC configured to verify the mint")
+	}
+	if mintTxHash == "" {
+		return nil, fmt.Errorf("no mint transaction hash to verify")
+	}
+
+	client, err := ethclient.DialContext(ctx, h.ArcRPC)
+	if err != nil {
+		return nil, fmt.Errorf("dial arc: %w", err)
+	}
+	defer client.Close()
+
+	receipt, err := client.TransactionReceipt(ctx, common.HexToHash(mintTxHash))
+	if err != nil {
+		return nil, fmt.Errorf("mint receipt %s: %w", mintTxHash, err)
+	}
+	if receipt.Status != types.ReceiptStatusSuccessful {
+		return nil, fmt.Errorf("mint transaction %s reverted", mintTxHash)
+	}
+
+	usdc := common.HexToAddress("0x3600000000000000000000000000000000000000")
+	transferTopic := crypto.Keccak256Hash([]byte("Transfer(address,address,uint256)"))
+
+	total := new(big.Int)
+	for _, lg := range receipt.Logs {
+		if lg.Address != usdc || len(lg.Topics) != 3 || lg.Topics[0] != transferTopic {
+			continue
+		}
+		// topics[2] is the indexed `to`; the low 20 bytes are the address.
+		if common.BytesToAddress(lg.Topics[2].Bytes()) != h.RelayerAddr {
+			continue
+		}
+		total.Add(total, new(big.Int).SetBytes(lg.Data))
+	}
+
+	if total.Sign() == 0 {
+		return nil, fmt.Errorf("mint %s delivered no USDC to the relayer", mintTxHash)
+	}
+	return total, nil
+}
+
 func (h *Bridge) transferUSDCFromRelayer(ctx context.Context, to string, amount *big.Int) (string, error) {
 	if h.ArcRPC == "" {
 		return "", fmt.Errorf("no Arc RPC configured for relayer transfer")
@@ -820,6 +952,16 @@ func (h *Bridge) ReportClientSpend(w http.ResponseWriter, r *http.Request) {
 			 VALUES ($1,$2,$3,$4,$5,$6,'attested')`,
 			transferID, id, int(sourceDomain), int(bridgepkg.ArcDomain), amount.String(), req.GatewayTransferID,
 		); err != nil {
+			// The unique index on attestation rejects a transfer id already
+			// funding another intent. The lookup above only matched this
+			// intent's own rows, so a reused id reaches here -- and it is a bad
+			// request, not a server fault. Reporting it as a 500 would read as
+			// "try again", which is exactly the wrong advice.
+			if strings.Contains(err.Error(), "idx_bridge_transfers_attestation_unique") {
+				writeErr(w, apierrors.E(apierrors.CodeInvalidRequest,
+					"gateway_transfer_id is already funding another payment"))
+				return
+			}
 			writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
 			return
 		}

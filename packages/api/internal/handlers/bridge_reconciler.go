@@ -25,7 +25,7 @@ func (h *Bridge) ReconcileOrphanedBridges(ctx context.Context) {
 		staleAfter = 45 * time.Second
 	}
 	rows, err := h.Pool.Query(ctx,
-		`SELECT id, intent_id, state, source_tx_hash, attestation
+		`SELECT id, intent_id, state, source_tx_hash, attestation, mint_tx_hash, minted_amount::text
 		 FROM bridge_transfers
 		 WHERE state IN ('burn_submitted', 'burn_confirmed', 'attestation_pending', 'attested', 'orphaned', 'minted')
 		 AND updated_at < $1`,
@@ -38,11 +38,12 @@ func (h *Bridge) ReconcileOrphanedBridges(ctx context.Context) {
 	type stuck struct {
 		id, intentID, state             string
 		sourceTxHash, gatewayTransferID *string
+		mintTxHash, mintedAmount        *string
 	}
 	var stuckRows []stuck
 	for rows.Next() {
 		var s stuck
-		if err := rows.Scan(&s.id, &s.intentID, &s.state, &s.sourceTxHash, &s.gatewayTransferID); err != nil {
+		if err := rows.Scan(&s.id, &s.intentID, &s.state, &s.sourceTxHash, &s.gatewayTransferID, &s.mintTxHash, &s.mintedAmount); err != nil {
 			log.Printf("bridge reconciler: scan failed: %v", err)
 			continue
 		}
@@ -81,7 +82,19 @@ func (h *Bridge) ReconcileOrphanedBridges(ctx context.Context) {
 			// pollAndCompleteFunding, whose own "already minted" guard would
 			// just no-op here.
 			log.Printf("bridge reconciler: retrying settlement handoff for transfer %s (already minted)", s.id)
-			if err := h.settleBridgedIntent(ctx, s.intentID); err != nil {
+
+			// The verified funding amount, on the same terms as the live path.
+			// This runs with no payer present and pays out of the relayer, so
+			// it must not be the one place that settles an unverified figure.
+			// Rows minted before minted_amount was recorded carry NULL, so the
+			// chain is re-read for them rather than assuming the intent amount.
+			minted, merr := h.mintedAmountFor(ctx, s.mintedAmount, s.mintTxHash)
+			if merr != nil {
+				log.Printf("bridge reconciler: cannot establish funded amount for transfer %s: %v", s.id, merr)
+				h.setState(ctx, s.id, bridgepkg.StateFailed)
+				continue
+			}
+			if err := h.settleBridgedIntent(ctx, s.intentID, minted); err != nil {
 				log.Printf("bridge reconciler: settlement retry failed for intent %s: %v", s.intentID, err)
 				continue
 			}

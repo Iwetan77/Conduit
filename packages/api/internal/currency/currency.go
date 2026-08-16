@@ -38,6 +38,23 @@ var registry = []Info{
 	{ISO: "GBP", Symbol: "GBPA", Token: "0xa42e82b5D25E84d107Cd8549CA432ef489CbaD32", Decimals: 6},
 	{ISO: "ZAR", Symbol: "ZARU", Token: "0x47b025D6002234a5038bCD94767bd82b27C2b96F", Decimals: 18},
 	{ISO: "KRW", Symbol: "KRW1", Token: "0xC5bD9EBB09446F5F94E3b3D899072fC2eC5d3a1a", Decimals: 18},
+	{ISO: "CHF", Symbol: "CHFAU", Token: "0x74ef206336F87843485E5f3fdaEA13ba4ec309E7", Decimals: 6},
+
+	// A second euro token, from a different issuer than EURC.
+	//
+	// Keyed by its symbol rather than by "EUR", which EURC already holds. The
+	// table is keyed one-token-per-code -- ByISO returns a single entry, and
+	// CurrencyRegistry.sol's bytes3 map rejects a duplicate outright -- so two
+	// euro tokens cannot share a code without changing what a code means.
+	//
+	// The consequence, stated plainly because it decides where money goes:
+	// settle_currency "EUR" pays EURC, and a merchant who wants AllUnity's euro
+	// asks for "EURAU". Neither silently substitutes for the other.
+	//
+	// If a second token ever appears for a currency where the choice should be
+	// the merchant's default rather than a separate code, this table needs a
+	// preferred-token concept instead of another row.
+	{ISO: "EURAU", Symbol: "EURAU", Token: "0x67521a2b4b385eEB2c65695C23457e04dC8A6331", Decimals: 6},
 }
 
 func All() []Info { return registry }

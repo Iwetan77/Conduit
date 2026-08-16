@@ -94,8 +94,12 @@ Conduit is USDC-hub: StableFX routes through USDC on one leg, so coverage is wha
 | GBP | GBPA | 6 |
 | ZAR | ZARU | 18 |
 | KRW | KRW1 | 18 |
+| CHF | CHFAU | 6 |
+| EURAU | EURAU | 6 |
 
 `GET /v1/currencies` always reflects what is routable now. Token decimals differ; resolve them, never assume six.
+
+EURC and EURAU are both euro, from different issuers, so only one can hold the `EUR` code and the second is identified by its token symbol. Asking to settle in `EUR` pays EURC; asking for `EURAU` pays EURAU. Neither substitutes for the other.
 
 ## Network
 

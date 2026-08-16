@@ -2,7 +2,7 @@ import type { Currency } from "@conduit/sdk/lite";
 import { toHumanAmount, fromHumanAmount, currencyDecimals } from "@conduit/sdk/lite";
 import { isoToToken } from "./currencies";
 
-const SYMBOLS: Record<string, string> = { USDC: "$", EURC: "€", BRLA: "R$", AUDF: "A$", MXNB: "MX$", QCAD: "C$", GBPA: "£", ZARU: "R", KRW1: "₩" };
+const SYMBOLS: Record<string, string> = { USDC: "$", EURC: "€", BRLA: "R$", AUDF: "A$", MXNB: "MX$", QCAD: "C$", GBPA: "£", ZARU: "R", KRW1: "₩", CHFAU: "CHF", EURAU: "€" };
 
 // The label to print next to an amount. Every amount Conduit moves is an
 // on-chain token, so the label must be the token symbol the payer is actually

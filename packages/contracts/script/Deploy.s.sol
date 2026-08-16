@@ -41,6 +41,9 @@ contract Deploy is Script {
     address constant GBPA = 0xa42e82b5D25E84d107Cd8549CA432ef489CbaD32;
     address constant ZARU = 0x47b025D6002234a5038bCD94767bd82b27C2b96F;
     address constant KRW1 = 0xC5bD9EBB09446F5F94E3b3D899072fC2eC5d3a1a; // 18dp
+    // AllUnity, added to StableFX later than the set above. Both 6dp.
+    address constant CHFAU = 0x74ef206336F87843485E5f3fdaEA13ba4ec309E7;
+    address constant EURAU = 0x67521a2b4b385eEB2c65695C23457e04dC8A6331;
 
     function run() external {
         uint256 deployerKey = vm.envUint("PRIVATE_KEY");
@@ -101,6 +104,17 @@ contract Deploy is Script {
         currencyRegistry.registerCurrency("GBP", GBPA, 6);
         currencyRegistry.registerCurrency("ZAR", ZARU, 18);
         currencyRegistry.registerCurrency("KRW", KRW1, 18);
+        currencyRegistry.registerCurrency("CHF", CHFAU, 6);
+        // EURAU is registered as "EUA", not "EUR".
+        //
+        // The key here is bytes3 and registerCurrency reverts on a duplicate,
+        // so the second euro token cannot take "EUR" -- EURC holds it. "EUA" is
+        // this registry's 3-byte handle for it and is NOT an ISO currency code.
+        // The API and the app identify it as "EURAU"; nothing reads this
+        // registry today (ConduitRouter never consults it), so the two do not
+        // currently have to agree. They must be reconciled before anything
+        // starts routing off this registry.
+        currencyRegistry.registerCurrency("EUA", EURAU, 6);
 
         console2.log("");
         console2.log("=== Authorizations + currency registrations set ===");
@@ -125,7 +139,9 @@ contract Deploy is Script {
         vm.serializeAddress(json, "qcad", QCAD);
         vm.serializeAddress(json, "gbpa", GBPA);
         vm.serializeAddress(json, "zaru", ZARU);
-        string memory finalJson = vm.serializeAddress(json, "krw1", KRW1);
+        vm.serializeAddress(json, "krw1", KRW1);
+        vm.serializeAddress(json, "chfau", CHFAU);
+        string memory finalJson = vm.serializeAddress(json, "eurau", EURAU);
 
         // Derived from projectRoot so this runs on any checkout. It was an
         // absolute path under one developer's home directory, which made the

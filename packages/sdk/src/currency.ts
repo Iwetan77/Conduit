@@ -31,6 +31,10 @@ export const CURRENCIES: Record<Currency, CurrencyDescriptor> = {
   GBPA: { iso: "GBPA", token: "0xa42e82b5D25E84d107Cd8549CA432ef489CbaD32", decimals: 6 },
   ZARU: { iso: "ZARU", token: "0x47b025D6002234a5038bCD94767bd82b27C2b96F", decimals: 18 },
   KRW1: { iso: "KRW1", token: "0xC5bD9EBB09446F5F94E3b3D899072fC2eC5d3a1a", decimals: 18 },
+  // AllUnity's Swiss franc and euro. Both 6dp, both confirmed quotable against
+  // USDC on StableFX and read back from their own decimals() on Arc.
+  CHFAU: { iso: "CHFAU", token: "0x74ef206336F87843485E5f3fdaEA13ba4ec309E7", decimals: 6 },
+  EURAU: { iso: "EURAU", token: "0x67521a2b4b385eEB2c65695C23457e04dC8A6331", decimals: 6 },
 };
 
 export function resolveCurrency(iso: Currency): CurrencyDescriptor {

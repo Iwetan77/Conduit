@@ -5,7 +5,7 @@ import type { Currency } from "@conduit/sdk/lite";
 import { CURRENCIES } from "@conduit/sdk/lite";
 // Real SVG flags — flag EMOJI render as bare letters ("BR") on Windows
 // browsers, which is why the earlier emoji attempt "didn't load".
-import { BR, AU, MX, CA, GB, ZA, KR, type FlagComponent } from "country-flag-icons/react/3x2";
+import { BR, AU, MX, CA, GB, ZA, KR, CH, EU, type FlagComponent } from "country-flag-icons/react/3x2";
 
 interface TokenBadgeProps {
   currency: Currency;
@@ -23,6 +23,11 @@ const FLAG_TOKENS: Record<string, FlagComponent> = {
   GBPA: GB,
   ZARU: ZA,
   KRW1: KR,
+  CHFAU: CH,
+  // AllUnity's euro. EURC keeps the USDC-style coin mark; this one is a second
+  // euro token from a different issuer, so the EU flag distinguishes it rather
+  // than reusing that mark.
+  EURAU: EU,
 };
 
 // @web3icons/react was a 116 MB dependency serving exactly TWO icons here:

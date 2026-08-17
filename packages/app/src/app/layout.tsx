@@ -38,6 +38,25 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
+      <head>
+        {/* Warm the connection to Circle's auth origin before anything needs it.
+
+            Google sign-in returns to /auth/circle/callback, and completing it
+            means loading Circle's SDK, which opens an iframe on this origin and
+            waits for a postMessage handshake. Without a preconnect the browser
+            starts that with a cold DNS lookup and TLS negotiation, in series,
+            while the user stares at a blank page -- and the callback route is
+            precisely where the user is least willing to wait, because from
+            their side sign-in has already happened.
+
+            Placed in the ROOT layout, not on the callback route, so the
+            handshake is already done by the time the redirect lands: warming it
+            on the page you arrive at is too late to help. Circle's own flow is
+            a full-page redirect with no popup option, so this is the part of
+            that wait we can actually remove. */}
+        <link rel="preconnect" href="https://pw-auth.circle.com" crossOrigin="" />
+        <link rel="dns-prefetch" href="https://pw-auth.circle.com" />
+      </head>
       {/* No bg on body — an opaque body background paints over the
           z-index:-1 grid. The canvas bg comes from html (globals.css). */}
       <body className="text-ink font-mono antialiased">

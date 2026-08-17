@@ -39,7 +39,7 @@ docs/                 Source-of-truth markdown, rendered as the docs site
 
 **Drop-in checkout.** One script tag and `Conduit.checkout({...})`, with the merchant's server keeping control of the amount.
 
-**An API and webhooks** for everything the dashboard can do, with `sk_`/`pk_` keys and HMAC-signed deliveries.
+**An API and webhooks** for everything the dashboard can do, with `sk_` keys and HMAC-signed deliveries.
 
 ## Two surfaces, one engine
 
@@ -57,7 +57,7 @@ Merchant login is Google, through Circle **user-controlled** wallets: MPC and no
 
 The Circle token is verified once, at login, and exchanged for a Conduit session token (`cs_`, HMAC-signed, 12 hours). Requests carry that rather than the provider's credential, so no identity provider sits on the request path.
 
-`sk_`/`pk_` API keys remain the programmatic path. Google login is layered on top for humans, not a replacement.
+`sk_` API keys remain the programmatic path. Google login is layered on top for humans, not a replacement.
 
 ## Settlement paths
 

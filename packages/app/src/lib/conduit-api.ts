@@ -8,7 +8,7 @@ const STORAGE_KEY = "conduit_dashboard_session_token";
 
 // Bearer token used for dashboard requests. Holds either a Conduit session
 // token (cs_..., minted by the API at sign-in and stored by circle-stack) or a
-// pasted sk_/pk_ key for the programmatic-access path -- the API's
+// pasted sk_ key for the programmatic-access path -- the API's
 // auth.Middleware accepts both, so this file doesn't need to know which kind
 // it's holding.
 //

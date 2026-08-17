@@ -9,21 +9,20 @@ import (
 	"github.com/kzn-labs/conduit/api/internal/auth"
 )
 
-// TestPkKeyCannotReachPrivateIntentRoutes exercises the pk_ scope through the
-// real router and the real middleware, not just the predicate.
+// TestPkKeyIsNotACredential exercises the removal of publishable keys through
+// the real router and the real middleware.
 //
-// A pk_ key is meant to be pasted into a public checkout page, so anyone who
-// views source holds it. The scope check is therefore the only thing standing
-// between a published key and the merchant's own data. It previously compared
-// the HTTP method alone, which admitted every GET and POST under
-// /v1/settlement_intents/ -- including the private intent view (settle_address,
-// reference, metadata) and cancel.
+// Publishable keys are gone: nothing mints one and nothing accepts one. They
+// were documented but unissuable, and they would only ever have granted access
+// to routes that need no credential at all.
 //
-// Note the key is inserted directly: no handler in this API mints a pk_ key
-// today (every GenerateKey call site passes KeyTypeSecret), even though the
-// gateway docs describe pk_ as a product surface. The scope has to hold for
-// whenever that gap is closed.
-func TestPkKeyCannotReachPrivateIntentRoutes(t *testing.T) {
+// The important property is not "scoped" but REJECTED. keyType in lookupKey
+// defaults to SECRET and only a pk_ prefix downgraded it, so removing the
+// concept without refusing the prefix would have promoted any surviving pk_ row
+// from scoped to full access -- deleting the restriction rather than the
+// feature. This inserts such a row directly, which is the only way one can
+// exist, and asserts it authenticates nothing.
+func TestPkKeyIsNotACredential(t *testing.T) {
 	srv, secretKey, pool := newLinkTestServer(t, 15515)
 	ctx := context.Background()
 
@@ -62,28 +61,28 @@ func TestPkKeyCannotReachPrivateIntentRoutes(t *testing.T) {
 	// /public variant exists to withhold exactly those, so a pk_ key reaching
 	// this route makes that split meaningless.
 	resp = doJSON(t, srv.URL, "GET", "/v1/settlement_intents/"+intent.ID, pkKey, "", "")
-	if resp.status != http.StatusForbidden {
-		t.Errorf("pk GET private intent: status=%d, want 403; body=%s", resp.status, resp.body)
+	if resp.status != http.StatusUnauthorized {
+		t.Errorf("pk key on the private intent view: status=%d, want 401; body=%s", resp.status, resp.body)
 	}
 
 	// Cancelling a stranger's checkouts from a key printed in their own page.
 	resp = doJSON(t, srv.URL, "POST", "/v1/settlement_intents/"+intent.ID+"/cancel", pkKey, "", "")
-	if resp.status != http.StatusForbidden {
-		t.Errorf("pk POST cancel: status=%d, want 403; body=%s", resp.status, resp.body)
+	if resp.status != http.StatusUnauthorized {
+		t.Errorf("pk key on cancel: status=%d, want 401; body=%s", resp.status, resp.body)
 	}
 
 	// Creating a charge is the sk_ key's job -- it is what fixes the amount
 	// server-side so the browser cannot tamper with it.
 	resp = doJSON(t, srv.URL, "POST", "/v1/settlement_intents", pkKey,
 		`{"amount":1,"settle_currency":"USD","settle_address":"0x0000000000000000000000000000000000000009"}`, "")
-	if resp.status != http.StatusForbidden {
-		t.Errorf("pk POST create intent: status=%d, want 403; body=%s", resp.status, resp.body)
+	if resp.status != http.StatusUnauthorized {
+		t.Errorf("pk key creating a charge: status=%d, want 401; body=%s", resp.status, resp.body)
 	}
 
 	// Nothing outside the intents tree at all.
 	resp = doJSON(t, srv.URL, "GET", "/v1/accounts/me", pkKey, "", "")
-	if resp.status != http.StatusForbidden {
-		t.Errorf("pk GET accounts/me: status=%d, want 403; body=%s", resp.status, resp.body)
+	if resp.status != http.StatusUnauthorized {
+		t.Errorf("pk key on accounts/me: status=%d, want 401; body=%s", resp.status, resp.body)
 	}
 
 	// The sk_ key must still reach every one of those, or the fix has simply

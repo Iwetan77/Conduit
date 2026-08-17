@@ -292,6 +292,36 @@ export function CrossChainBridge({ intentId, intent }: CrossChainBridgeProps) {
     }
   }
 
+  // Disconnect and stay disconnected.
+  //
+  // switchWallet above drops the wallet and immediately asks for another one,
+  // which is the right move mid-payment but is not the same thing as leaving.
+  // A payer who connected the wrong wallet -- or who simply changed their mind
+  // on someone else's machine -- had no way to hand the connection back: every
+  // control led to picking again. Connecting is easy to undo only if undoing it
+  // is offered.
+  async function disconnectWallet() {
+    const kind = sourceChain ? chainToSourceSlug(sourceChain) : null;
+    setAdapter(null);
+    setUnified(null);
+    setError("");
+    setSourceChain(null);
+    try {
+      if (kind === "solana") {
+        await disconnectSolanaWallet();
+      } else if (evmConnected) {
+        await disconnectAsync();
+      } else {
+        // Kind unknown (nothing chosen yet) -- drop whichever is live.
+        await disconnectSolanaWallet().catch(() => {});
+        if (evmConnected) await disconnectAsync();
+      }
+    } catch {
+      // A wallet that refuses to let go must not trap the payer on this screen.
+    }
+    setPhase("choose_source");
+  }
+
   function startPolling() {
     if (pollRef.current) clearInterval(pollRef.current);
     pollRef.current = setInterval(async () => {
@@ -802,12 +832,21 @@ export function CrossChainBridge({ intentId, intent }: CrossChainBridgeProps) {
         {/* Last chance to change wallet before anything is signed. The address
             about to spend is shown above; if it is not the one the payer meant,
             this is where they notice. */}
-        <button
-          onClick={() => void switchWallet()}
-          className="w-full text-xs font-mono text-ink-dim hover:text-ink"
-        >
-          Use a different wallet
-        </button>
+        <div className="flex items-center justify-center gap-4">
+          <button
+            onClick={() => void switchWallet()}
+            className="text-xs font-mono text-ink-dim hover:text-ink"
+          >
+            Use a different wallet
+          </button>
+          <span className="text-ink-dim/40" aria-hidden>·</span>
+          <button
+            onClick={() => void disconnectWallet()}
+            className="text-xs font-mono text-ink-dim hover:text-ink"
+          >
+            Disconnect
+          </button>
+        </div>
         {error && <p className="text-danger text-sm">{error}</p>}
       </div>
     );

@@ -33,7 +33,7 @@ failure is translated through this registry first.
 | `invalid_request` | 400 | Malformed request body or missing required field. | `param` on the error names the offending field. |
 | `not_found` | 404 | The resource doesn't exist, or exists but isn't visible to this API key (wrong account, wrong livemode). | Double-check the ID and that your key's `livemode` matches. |
 | `unauthorized` | 401 | Missing or invalid API key. | Check the `Authorization: Bearer` header. |
-| `forbidden` | 403 | Your key is valid but isn't allowed to do this — e.g. a `pk_` key calling an `sk_`-only endpoint, or a cross-tenant `Conduit-Account` header. | Use the right key type / account. |
+| `forbidden` | 403 | Your key is valid but isn't allowed to do this — e.g. a cross-tenant `Conduit-Account` header. | Use the right account. |
 | `internal_error` | 500 | Something broke on our end. | Retry with backoff; if it persists, report it — this code intentionally carries no detail because a raw internal error should never leak to a client. |
 
 ## `rate_limited` (429)
@@ -45,5 +45,5 @@ comfortably inside that; a script looping over a link URL does not.
 The response carries `Retry-After: 1`. Back off and retry rather than tightening the
 loop — the budget refills continuously, so a client that waits recovers within a second.
 
-Authenticated routes (`sk_`/`pk_` keys, dashboard sessions) are not limited this way:
+Authenticated routes (`sk_` keys, dashboard sessions) are limited separately, per account:
 a key is already a credential and can be revoked.

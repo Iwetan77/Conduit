@@ -11,7 +11,9 @@ and listens for the result.
 The model is deliberately the one you already know from Paystack/Stripe: your
 **server** creates the charge with your secret key (so the amount is fixed and
 the browser can't tamper with it), and the **browser** opens the returned
-checkout. Your publishable key never has to create a charge.
+checkout. Nothing in the browser needs a Conduit key at all: driving an existing
+charge (quote, prepare, confirm) is scoped by the charge's own id, so the
+checkout works with no credential in the page.
 
 ## The pieces
 
@@ -19,8 +21,7 @@ checkout. Your publishable key never has to create a charge.
 |---|---|
 | **API base** | `https://conduit-z56x.onrender.com` |
 | **Checkout script** | `https://useconduit-app.vercel.app/conduit.js` |
-| **Secret key** (`sk_…`) | Server-side only. Creates a charge. |
-| **Publishable key** (`pk_…`) | Browser-safe. Can drive an existing charge (quote/prepare/confirm), never create one. |
+| **Secret key** (`sk_…`) | Server-side only. Creates a charge. Never put it in a page. |
 
 ## 1. Create the charge (your server, `sk_`)
 

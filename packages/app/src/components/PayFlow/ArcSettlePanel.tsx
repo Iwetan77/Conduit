@@ -1,9 +1,9 @@
 "use client";
 
-import { ARC_RPC_URL } from "@/lib/wagmi";
+import { ARC_RPC_URL, arcTestnet } from "@/lib/wagmi";
 
 import { useEffect, useRef, useState } from "react";
-import { useAccount } from "wagmi";
+import { useAccount, useSwitchChain } from "wagmi";
 import type { Currency, PaymentReceipt } from "@conduit/sdk/lite";
 import { currencyDecimals } from "@conduit/sdk/lite";
 import { formatAmount, formatAmountRaw } from "@/lib/format";
@@ -57,7 +57,8 @@ export function ArcSettlePanel({
   disabledReason,
   children,
 }: ArcSettlePanelProps) {
-  const { address, isConnected, connector } = useAccount();
+  const { address, isConnected, connector, chainId } = useAccount();
+  const { switchChainAsync } = useSwitchChain();
   const [mounted, setMounted] = useState(false);
   const [payerCurrency, setPayerCurrency] = useState<Currency>("USDC");
   const [step, setStep] = useState<"idle" | "pending" | "success" | "error">("idle");
@@ -82,6 +83,33 @@ export function ArcSettlePanel({
     setStep("pending");
     setTxError("");
     try {
+      // Both routes below settle on Arc, so the wallet has to be on Arc first.
+      //
+      // The page-level ChainGuard deliberately does NOT cover /pay/: paying
+      // from another chain is a feature on that page, and gating it would break
+      // the cross-chain panel sitting right next to this one. So the check
+      // belongs here, at the only point that actually requires Arc.
+      //
+      // Without it the send failed inside the wallet and classifyTxError read
+      // that as "Couldn't reach the network. Check your connection" -- a
+      // connectivity message for a wallet that is simply on Ethereum, which
+      // sends the payer to look at their wifi. A payer is a stranger: they do
+      // not report it, they leave.
+      //
+      // Offers the switch rather than only complaining, since the wallet can
+      // usually just move.
+      if (chainId !== undefined && chainId !== arcTestnet.id) {
+        try {
+          await switchChainAsync({ chainId: arcTestnet.id });
+        } catch {
+          setStep("idle");
+          setTxError(
+            `Your wallet is on another network. Switch it to Arc Testnet to pay, ` +
+            `or choose "Pay with USDC on another chain".`
+          );
+          return;
+        }
+      }
       if (payerCurrency === settleToken) {
         // Same currency: mark the underlying intent (creating it for a link),
         // then settle straight on-chain to the recipient. No FX.

@@ -1,5 +1,5 @@
 // Package auth implements API key generation, hashing, and the bearer-auth
-// middleware. Keys are sk_test_/sk_live_/pk_test_/pk_live_ + 32 random bytes
+// middleware. Keys are sk_test_/sk_live_ + 32 random bytes
 // base62. Only the SHA-256 hash and a 4-char display suffix are ever stored —
 // the full key is returned exactly once, at creation.
 package auth
@@ -23,6 +23,8 @@ import (
 type KeyType string
 
 const (
+	// Retained for the api_keys.type CHECK constraint and for old rows. Nothing
+	// mints one and nothing accepts one -- see lookupKey.
 	KeyTypePublishable KeyType = "pk"
 	KeyTypeSecret      KeyType = "sk"
 )
@@ -80,65 +82,9 @@ func FromContext(ctx context.Context) (Principal, bool) {
 	return p, ok
 }
 
-// pk_ keys may only reach the hosted-checkout actions on an intent that already
-// exists: quote, prepare, confirm, record. That is the documented contract --
-// "can drive an existing charge, never create one" (docs/payment-gateway.md) --
-// and it is the whole of it.
-//
-// Matched on the ACTION, not on a path prefix. The previous implementation
-// compared only the method and never read the prefix field it stored, so it
-// reduced to "any GET or POST under /v1/settlement_intents/". Two authenticated
-// routes live there, and a pk_ key is by design pasted into a public web page:
-//
-//	GET  /v1/settlement_intents/{id}         the PRIVATE view -- settle_address,
-//	                                         reference, metadata. The /public
-//	                                         variant exists precisely to withhold
-//	                                         those, so granting this defeated it.
-//	POST /v1/settlement_intents/{id}/cancel  cancel any of that merchant's
-//	                                         checkouts, at will.
-//
-// Both are now denied. cancel is called out by name below so that a future
-// action added to this list can never quietly re-admit it.
-//
-// Note that quote/prepare/confirm/record are currently registered in the PUBLIC
-// route group, so auth.Middleware does not run on them and this allowlist is
-// not what admits a pk_ key to them today. It is kept as the statement of
-// policy: if those routes are ever moved behind auth, the pk_ key keeps working
-// and nothing else opens up with it.
-var pkAllowedActions = map[string]bool{
-	"quote":   true,
-	"prepare": true,
-	"confirm": true,
-	"record":  true,
-}
-
-// pkDeniedActions can never be admitted, whatever else changes above.
-var pkDeniedActions = map[string]bool{
-	"cancel": true,
-}
-
-const intentPathPrefix = "/v1/settlement_intents/"
-
-func isPkAllowed(method, path string) bool {
-	// Only POST, and only under the intents prefix. A bare GET of an intent is
-	// the private view; the payer surface has /{id}/public for that.
-	if method != http.MethodPost || !strings.HasPrefix(path, intentPathPrefix) {
-		return false
-	}
-
-	rest := strings.TrimPrefix(path, intentPathPrefix)
-	// Expect exactly "{id}/{action}" -- two segments, nothing deeper. This is
-	// what keeps /{id}/bridge/report_spend and any future nested route out
-	// without needing to enumerate them.
-	id, action, found := strings.Cut(rest, "/")
-	if !found || id == "" || action == "" || strings.Contains(action, "/") {
-		return false
-	}
-	if pkDeniedActions[action] {
-		return false
-	}
-	return pkAllowedActions[action]
-}
+// The pk_ scope predicate that used to live here is gone with the concept --
+// see lookupKey. Publishable keys are refused outright, so there is no longer a
+// set of routes they may reach.
 
 // Middleware validates the Authorization: Bearer <key> header. The bearer value
 // is either one of this codebase's own sk_/pk_ API keys (looked up by hash) or
@@ -206,11 +152,6 @@ func finishAuth(
 	pool *pgxpool.Pool,
 	principal Principal,
 ) {
-	if principal.KeyType == KeyTypePublishable && !isPkAllowed(r.Method, r.URL.Path) {
-		writeErr(w, apierrors.E(apierrors.CodeForbidden, ""))
-		return
-	}
-
 	// Subaccount switching via Conduit-Account header — only valid if
 	// the key's account IS the parent of the requested subaccount.
 	if sub := r.Header.Get("Conduit-Account"); sub != "" && sub != principal.AccountID {
@@ -309,10 +250,24 @@ func lookupKey(ctx context.Context, pool *pgxpool.Pool, key string) (Principal, 
 		return Principal{}, errors.New("hash mismatch")
 	}
 
-	keyType := KeyTypeSecret
+	// A pk_ key is not a credential.
+	//
+	// Publishable keys were documented as a product surface and never issued --
+	// every GenerateKey call site mints sk_ -- and they would have granted
+	// access to routes that need no credential at all, since the hosted-checkout
+	// actions live in the public route group. That is surface area with no
+	// capability behind it, so the concept is gone.
+	//
+	// Rejected here rather than simply forgotten. keyType below defaults to
+	// SECRET, so dropping the pk_ branch without this would have promoted any
+	// row that already carries a pk_ prefix from "scoped" to "full access" --
+	// deleting a restriction instead of the feature. Failing closed means an
+	// existing row, or one inserted by hand, authenticates nothing.
 	if strings.HasPrefix(prefix, "pk_") {
-		keyType = KeyTypePublishable
+		return Principal{}, errors.New("publishable keys are not accepted")
 	}
+
+	keyType := KeyTypeSecret
 
 	return Principal{AccountID: accountID, KeyID: keyID, KeyType: keyType, Livemode: livemode}, nil
 }

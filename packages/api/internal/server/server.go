@@ -138,29 +138,36 @@ func New(cfg Config) http.Handler {
 	trustProxyHeaders := os.Getenv("CONDUIT_TRUSTED_PROXY") != ""
 
 	r := chi.NewRouter()
-	// The app (packages/app) calls this API directly from browser JS on a
-	// different origin/port -- a genuinely cross-origin request browsers
-	// block without CORS headers. Most acute for the public payer-facing
-	// routes (bridge/*, settlement_intents/:id/public), which by definition
-	// are hit from a browser with no prior same-origin context at all. Found
-	// this live-testing the payer page for real, not caught by any static
-	// check. AllowedOrigins is a wildcard here because this is a testnet
-	// product with no cookie-based auth to leak (API keys are bearer tokens
-	// in a header, never sent implicitly) -- tighten to an explicit
-	// allowlist before any mainnet/production deployment.
-	// Explicit allowlist when CONDUIT_ALLOWED_ORIGINS is set (comma-separated,
-	// e.g. "https://conduit.vercel.app"); wildcard only as the local/testnet
-	// default. Bearer tokens are sent in a header and AllowCredentials is
-	// false, so a wildcard leaks no ambient credentials — but a public
-	// deployment should still name its origins rather than accept every site.
-	allowedOrigins := []string{"*"}
+	// The app calls this API from browser JS on a different origin, so CORS is
+	// load-bearing for the public payer routes (bridge/*, /public) -- they are
+	// opened by a browser with no same-origin context at all.
+	// Origins are named explicitly, or there are none.
+	//
+	// The wildcard used to be the default whenever CONDUIT_ALLOWED_ORIGINS was
+	// unset, so a forgotten variable opened the API to every site on the
+	// internet -- silently, on exactly the deployments nobody is watching.
+	// Absence of configuration is not consent.
+	//
+	// The wildcard now requires someone to say CONDUIT_DEV=1, which is a
+	// statement about the environment rather than an oversight. Without it and
+	// without an allowlist, no cross-origin headers are served at all:
+	// same-origin callers and server-side clients are unaffected (API keys are
+	// bearer tokens in a header, never sent implicitly), and a browser on
+	// another origin is refused. Logged loudly, because a real deployment
+	// reaching that branch is misconfigured.
+	var allowedOrigins []string
 	if raw := strings.TrimSpace(os.Getenv("CONDUIT_ALLOWED_ORIGINS")); raw != "" {
-		allowedOrigins = nil
 		for _, o := range strings.Split(raw, ",") {
 			if o = strings.TrimSpace(o); o != "" {
 				allowedOrigins = append(allowedOrigins, o)
 			}
 		}
+	} else if os.Getenv("CONDUIT_DEV") != "" {
+		allowedOrigins = []string{"*"}
+		log.Printf("cors: CONDUIT_DEV is set - allowing every origin. Never set this in production.")
+	} else {
+		log.Printf("cors: CONDUIT_ALLOWED_ORIGINS is not set - refusing cross-origin browser requests. " +
+			"Set it to the app's origin, or set CONDUIT_DEV=1 for local development.")
 	}
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins: allowedOrigins,

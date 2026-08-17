@@ -80,6 +80,13 @@ func main() {
 	// judge a secret that had not been loaded yet.
 	auth.CheckSessionSecret()
 
+	// The devserver IS the development environment, so it says so rather than
+	// making every developer remember to. Production runs cmd/api, which never
+	// sets this and therefore requires CONDUIT_ALLOWED_ORIGINS to be named.
+	if os.Getenv("CONDUIT_DEV") == "" && os.Getenv("CONDUIT_ALLOWED_ORIGINS") == "" {
+		os.Setenv("CONDUIT_DEV", "1")
+	}
+
 	handler := server.New(cfg)
 
 	server.StartBackgroundWorkers(ctx, pool, cfg.ArcRPC, os.Getenv("CONDUIT_ROUTER_ADDRESS"), cfg)

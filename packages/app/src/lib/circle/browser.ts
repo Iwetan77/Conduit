@@ -145,6 +145,25 @@ export function onCircleChange(l: Listener): () => void {
 }
 export function clearCircleSession() {
   session = null;
+  // The memoised restore MUST die with the session.
+  //
+  // restoreSession() returns `restoring` whenever it is set, and a settled
+  // promise keeps resolving to the session it resolved to the first time. So
+  // clearing only `session` left a disconnect that the very next connect()
+  // undid: currentSession() was null, restoreSession() handed back the cached
+  // promise, and the connector reported the OLD account as connected without
+  // ever going near Google. That is why signing in after a disconnect never
+  // asked which account -- there was no sign-in, just a stale promise.
+  restoring = null;
+  // Same reasoning for the SDK's authentication: it still holds the cleared
+  // user token, and a challenge run after this would be signed by the account
+  // the user just disconnected from.
+  try {
+    sdk?.setAuthentication({ userToken: "", encryptionKey: "" });
+  } catch {
+    // Older SDK builds reject an empty pair. The token is gone from our side
+    // either way, and nothing can reach the SDK without one.
+  }
   try {
     localStorage.removeItem(SESSION_KEY);
   } catch {

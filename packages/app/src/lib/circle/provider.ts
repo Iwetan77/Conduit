@@ -34,6 +34,9 @@
 
 import { ARC_RPC_URL, arcTestnet } from "@/lib/chain";
 import { chainByCircleId, chainByEvmId, type CircleChain } from "@/lib/circle/chains";
+// Session state only -- this file still never imports Circle's SDK, which is
+// what the injected executeChallenge above is for.
+import { clearCircleSession } from "@/lib/circle/browser";
 
 /** Circle's challenge execution, injected so this file never imports the SDK. */
 export type ExecuteChallenge = (challengeId: string) => Promise<unknown>;
@@ -122,6 +125,24 @@ export function createCircleProvider(config: CircleProviderConfig) {
     const json = text ? JSON.parse(text) : {};
     if (!res.ok) {
       const e = json?.error as { message?: string; param?: string } | undefined;
+      // A Circle user token lasts 60 minutes and cannot be renewed from the
+      // browser. Nothing was watching for that, so a merchant who had been
+      // signed in longer than an hour hit it at the worst possible moment --
+      // on the signing call, mid-payment -- and the API's generic 401 text
+      // reached the payer as "Missing or invalid API key", which classified as
+      // Error 900 and named nothing they could act on.
+      //
+      // Clearing the session here is what makes it recoverable: the connector
+      // and the dashboard both watch this, so the UI falls back to sign-in
+      // instead of leaving a dead session that fails every subsequent attempt
+      // the same way.
+      if (res.status === 401) {
+        clearCircleSession();
+        throw new ProviderRpcError(
+          -32603,
+          "Your sign-in expired. Sign in again and retry this payment."
+        );
+      }
       throw new ProviderRpcError(
         -32603,
         [e?.message ?? `HTTP ${res.status}`, e?.param].filter(Boolean).join(" — ")

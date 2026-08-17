@@ -12,7 +12,13 @@ import {
   setSessionToken,
 } from "@/lib/conduit-api";
 import { CIRCLE_CONNECTOR_ID } from "@/lib/circle/connector";
-import { clearCircleSession, currentSession } from "@/lib/circle/browser";
+import {
+  clearCircleSession,
+  currentSession,
+  hasPendingResume,
+  hasPersistedSession,
+  restoreSession,
+} from "@/lib/circle/browser";
 import { SETTLE_CURRENCIES, settleCurrencyLabel } from "@/lib/currencies";
 import { Logo } from "@/components/Shared/Logo";
 import { PaymentToasts } from "@/components/Dashboard/PaymentToasts";
@@ -120,6 +126,18 @@ function DashboardChrome({
     setMenuOpen(false);
   }, [pathname]);
 
+  // The page behind a covering menu must not scroll with it. Without this the
+  // menu is a fixed layer over a document that still responds to the swipe,
+  // so closing it lands the merchant somewhere they never scrolled to.
+  useEffect(() => {
+    if (!menuOpen) return;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previous;
+    };
+  }, [menuOpen]);
+
   return (
     <div className="min-h-screen text-ink flex flex-col md:flex-row">
       <GridSignature />
@@ -171,9 +189,19 @@ function DashboardChrome({
       </aside>
 
       {/* Mobile: a proper top bar with a hamburger, not a cramped horizontal
-          scroll strip that hid half the items off-screen. The menu opens as a
-          full-width panel below the bar. */}
-      <div className="md:hidden flex flex-col border-b border-border shrink-0">
+          scroll strip that hid half the items off-screen.
+
+          The open menu covers the page rather than pushing it down. In flow it
+          simply added itself above the content, so the page it was covering
+          scrolled along underneath and the two read as one column of stacked
+          text -- nav items sitting on top of the Settlements page, with no
+          sense of which layer you were looking at. Fixed and full-height makes
+          it a surface you are either in or out of. */}
+      <div
+        className={`md:hidden flex flex-col border-b border-border shrink-0 bg-bg ${
+          menuOpen ? "fixed inset-0 z-50 overflow-y-auto" : ""
+        }`}
+      >
         <div className="flex items-center justify-between px-4 py-3">
           <div className="inline-block"><Logo size="sm" /></div>
           <button
@@ -293,6 +321,35 @@ function CircleDashboard({ children }: { children: React.ReactNode }) {
   const [needsOnboarding, setNeedsOnboarding] = useState(false);
   const onCircle = isConnected && connector?.id === CIRCLE_CONNECTOR_ID;
 
+  // Is a sign-in still being resolved?
+  //
+  // Reattaching a stored session is asynchronous -- it builds the SDK and
+  // re-validates the token against Circle -- and wagmi reports "not connected"
+  // for the whole of that. Rendering the sign-in screen on that meant every
+  // reload of an authenticated page flashed "Sign in to continue" at a merchant
+  // who was already signed in, on the way to the page they asked for. It looked
+  // like being signed out and then rescued.
+  //
+  // Starts false and is set in an effect on purpose: the answer comes from
+  // localStorage, which does not exist during prerender, so reading it while
+  // rendering would make the server and client disagree.
+  const [resolvingSession, setResolvingSession] = useState(false);
+  useEffect(() => {
+    if (!hasPendingResume() && !hasPersistedSession()) return;
+    setResolvingSession(true);
+    let cancelled = false;
+    // Memoised inside the module -- this joins the restore the connector's
+    // setup() already started rather than beginning a second one.
+    restoreSession()
+      .catch(() => null)
+      .finally(() => {
+        if (!cancelled) setResolvingSession(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // Resolve (or create) the Conduit account for this Circle identity.
   useEffect(() => {
     if (!onCircle || !address) {
@@ -343,6 +400,10 @@ function CircleDashboard({ children }: { children: React.ReactNode }) {
     clearCircleSession();
   };
 
+  // Nothing rather than the sign-in screen while the answer is still unknown.
+  // The dashboard's own null-until-ready below already renders as a blank
+  // frame, so this is the same silence one step earlier, not a new spinner.
+  if (!onCircle && resolvingSession) return null;
   if (!onCircle) return <CircleLoginGate />;
   if (needsOnboarding) {
     return (

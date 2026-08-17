@@ -43,6 +43,22 @@ export function classifyTxError(err: unknown): TxError {
   if (contains(raw, "no wallet", "no account is connected", "connect a wallet")) {
     return { code: 403, message: "No wallet connected. Connect a wallet or sign in, then try again." };
   }
+  // An expired credential, not a failed payment. A Circle user token lasts 60
+  // minutes, so this is what a merchant signing a payment after an hour on the
+  // same tab actually hits. Untriaged it fell to 900 ("something went wrong"),
+  // which sent people looking for a problem with the payment -- there is none,
+  // and signing in again fixes it every time.
+  if (
+    contains(
+      raw,
+      "sign-in expired",
+      "session expired",
+      "missing or invalid api key",
+      "x-circle-user-token"
+    )
+  ) {
+    return { code: 404, message: "Your sign-in expired. Sign in again, then retry this payment." };
+  }
 
   // 5xx — refused on purpose. Not a failure: the contract did what it was told.
   //

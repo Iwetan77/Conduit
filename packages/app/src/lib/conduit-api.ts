@@ -60,6 +60,35 @@ export class ConduitApiError extends Error {
   }
 }
 
+// Re-mint the dashboard session from the live Circle session.
+//
+// A cs_ token can stop being accepted while the merchant is still very much
+// signed in: it carries a 12-hour expiry, and it also dies whenever the API's
+// signing secret changes under it. Neither is visible from here -- both arrive
+// as a bare 401, which the dashboard rendered as "Missing or invalid API key"
+// over a session the user had no reason to think was over. They were then
+// stuck: nothing re-mints on its own, so every subsequent action failed the
+// same way until a full page reload happened to run the login bootstrap again.
+//
+// Circle's own token is the authority, so if it is still good this is silent.
+// If it is not, there is nothing to recover and the caller gets an honest
+// "sign in again" instead.
+async function remintSession(): Promise<string | null> {
+  try {
+    const { currentSession } = await import("@/lib/circle/browser");
+    const s = currentSession();
+    if (!s) return null;
+    const account = await createAccountFromCircle(s.userToken, {
+      login_wallet: s.wallet.address,
+    });
+    if (!account.session_token) return null;
+    setSessionToken(account.session_token);
+    return account.session_token;
+  } catch {
+    return null;
+  }
+}
+
 async function request<T>(
   path: string,
   options: {
@@ -68,6 +97,8 @@ async function request<T>(
     apiKey?: string;
     circleToken?: string;
     idempotencyKey?: string;
+    /** Internal: set on the one retry after a re-mint, so it cannot loop. */
+    retried?: boolean;
   } = {}
 ): Promise<T> {
   const apiKey = options.apiKey ?? getSessionToken();
@@ -105,6 +136,25 @@ async function request<T>(
         res.status === 404 ? "not_available" : "bad_response"
       );
     }
+  }
+
+  // An expired or no-longer-valid dashboard session, on a call that used the
+  // stored one. Recover once, then report it in words the merchant can act on
+  // -- "Missing or invalid API key" describes a key they never held.
+  //
+  // Only when the token was ours to replace: a caller that passed an explicit
+  // sk_ key gets the server's answer unchanged, because re-minting a session
+  // would silently run their request as somebody else.
+  // `circleToken` excluded because that IS the bootstrap: it authenticates with
+  // Circle's credential, and recovering from its 401 by calling the bootstrap
+  // again would recurse into the same failure.
+  if (res.status === 401 && !options.apiKey && !options.circleToken && !options.retried) {
+    const fresh = await remintSession();
+    if (fresh) return request<T>(path, { ...options, apiKey: fresh, retried: true });
+    throw new ConduitApiError(
+      "Your session expired. Sign in again to continue.",
+      "session_expired"
+    );
   }
 
   if (!res.ok) {

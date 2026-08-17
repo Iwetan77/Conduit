@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"context"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -131,7 +130,14 @@ func (h *WalletHistory) List(w http.ResponseWriter, r *http.Request) {
 	//     of a cross-currency or bridged payment sees the money arrive. Before
 	//     this, an off-chain settlement was visible only to the sender —
 	//     a merchant paid this way had no record of it anywhere.
-	rows, err := h.Pool.Query(context.Background(),
+	// The request's context, not a detached one.
+	//
+	// context.Background() here meant a client that hung up left the query
+	// running to completion with nobody to receive it. On an unauthenticated
+	// route that is a way to hold database work open for free: disconnect
+	// early, repeat. Tying it to the request means a cancelled request cancels
+	// the query.
+	rows, err := h.Pool.Query(r.Context(),
 		`SELECT s.id, s.tx_hash, s.pay_currency, s.pay_amount::text,
 		        si.settle_currency, s.settle_amount::text, si.settle_address,
 		        s.rate_applied::text, s.settled_at,

@@ -305,14 +305,25 @@ export function createCircleProvider(config: CircleProviderConfig) {
       throw new ProviderRpcError(-32602, `this wallet is ${address()}, not ${who}`);
     }
     progress("waiting for you to approve the signature…");
+    // Pass the document through byte for byte.
+    //
+    // This said it passed the document untouched and then did
+    // JSON.parse(payload) inside a JSON.stringify -- a full round trip. It
+    // survives today only because StableFX sends amount and nonce as JSON
+    // strings. A provider that ever emitted a uint256 as a JSON *number* would
+    // lose precision in the parse (2^53) and the payer would sign a different
+    // document from the one quoted, silently, with a valid signature over the
+    // wrong amount.
+    //
+    // The body is assembled by hand so the payload's own bytes reach the API,
+    // which takes `data` as raw JSON and forwards it to Circle unchanged. Key
+    // order and numeric literals survive, and key order is part of what gets
+    // hashed.
+    const rawDocument =
+      typeof payload === "string" ? payload : JSON.stringify(payload);
     const { challenge_id } = await api("/v1/auth/circle/sign_typed_data", {
       method: "POST",
-      body: JSON.stringify({
-        wallet_id: walletId(),
-        // Pass the document through untouched. Re-serialising it would reorder
-        // keys and change the hash that gets signed.
-        data: typeof payload === "string" ? JSON.parse(payload) : payload,
-      }),
+      body: `{"wallet_id":${JSON.stringify(walletId())},"data":${rawDocument}}`,
     });
     const result = (await execute(challenge_id)) as { data?: { signature?: string } } | undefined;
     const sig = result?.data?.signature;

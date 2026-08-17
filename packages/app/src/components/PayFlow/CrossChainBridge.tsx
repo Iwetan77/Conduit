@@ -740,12 +740,22 @@ export function CrossChainBridge({ intentId, intent }: CrossChainBridgeProps) {
         )}
         {/* This said "use a different wallet" and sent the payer back to the
             CHAIN list, which was the only screen that existed. It now does what
-            it says. */}
+            it says.
+
+            Disconnect belongs here most of all: "you don't have enough USDC" is
+            where someone who connected the wrong wallet actually finds out, and
+            offering only "pick another" leaves the wrong one connected. */}
         <button
           onClick={() => void switchWallet()}
           className="text-xs font-mono text-ink-dim hover:text-ink"
         >
           ← Use a different wallet
+        </button>
+        <button
+          onClick={() => void disconnectWallet()}
+          className="block text-xs font-mono text-ink-dim hover:text-ink"
+        >
+          Disconnect this wallet
         </button>
         <button
           onClick={() => setPhase("choose_source")}

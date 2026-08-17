@@ -8,7 +8,6 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
-	"crypto/subtle"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -242,13 +241,16 @@ func lookupKey(ctx context.Context, pool *pgxpool.Pool, key string) (Principal, 
 		return Principal{}, errors.New("key revoked")
 	}
 
-	// Constant-time re-check of the hash to avoid any timing side-channel from
-	// the DB lookup path length (defense in depth; the query above is already
-	// exact-match on a unique index).
-	expected := HashKey(key)
-	if subtle.ConstantTimeCompare([]byte(hash), []byte(expected)) != 1 {
-		return Principal{}, errors.New("hash mismatch")
-	}
+	// A "constant-time re-check of the hash" stood here. It computed
+	// HashKey(key) a second time and compared it to the first -- a value
+	// against itself, which is equal by construction and can only ever pass.
+	// It documented a defence it did not provide, which is worse than no
+	// comment: the next reader treats the timing question as handled.
+	//
+	// Nothing replaces it because nothing needs to. The lookup is an
+	// exact-match on a unique index over the SHA-256 of the key, so the
+	// database never sees the key and there is no comparison here to leak
+	// through timing -- the row is found or it is not.
 
 	// A pk_ key is not a credential.
 	//

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -56,6 +57,43 @@ type CircleAuth struct {
 func (h *CircleAuth) upstream(w http.ResponseWriter, op string, err error) {
 	log.Printf("circle: %s failed: %v", op, err)
 	writeErr(w, apierrors.E(apierrors.CodeInternal, op))
+}
+
+// approvalSpender reports whether calldata is an ERC-20 approve, and to whom.
+//
+// approve(address,uint256) is 4 bytes of selector, then the spender left-padded
+// into 32 bytes, then the amount. Anything shorter is not a well-formed approve
+// and is left alone -- this is a targeted refusal, not a calldata parser.
+func approvalSpender(data string) (string, bool) {
+	raw := strings.TrimPrefix(strings.TrimSpace(data), "0x")
+	// 8 hex chars of selector + 64 of spender + 64 of amount.
+	if len(raw) < 8+64+64 {
+		return "", false
+	}
+	if !strings.EqualFold(raw[:8], "095ea7b3") { // approve(address,uint256)
+		return "", false
+	}
+	return "0x" + raw[8+24:8+64], true
+}
+
+// The only spenders this app ever asks a payer to approve. Lowercase for
+// comparison; addresses are compared case-insensitively because callers send
+// mixed-case checksummed forms.
+func allowedApprovalSpender(spender string) bool {
+	allowed := []string{
+		strings.ToLower(strings.TrimSpace(os.Getenv("CONDUIT_ROUTER_ADDRESS"))),
+		"0x000000000022d473030f116ddee9f6b43ac78ba3", // Permit2
+		"0x0077777d7eba4688bdef3e311b846f25870a19b9", // Circle Gateway Wallet
+		"0x0022222abe238cc2c7bb1f21003f0a260052475b", // Circle Gateway Minter
+		"0x867650f5eae8df91445971f14d89fd84f0c9a9f8", // Circle StableFX FxEscrow
+	}
+	s := strings.ToLower(strings.TrimSpace(spender))
+	for _, a := range allowed {
+		if a != "" && a == s {
+			return true
+		}
+	}
+	return false
 }
 
 func (h *CircleAuth) available(w http.ResponseWriter) bool {
@@ -270,6 +308,26 @@ func (h *CircleAuth) ContractExecution(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.WalletID == "" || req.To == "" {
 		writeErr(w, apierrors.E(apierrors.CodeInvalidRequest, "wallet_id, to"))
+		return
+	}
+
+	// Refuse to build an approval in favour of a stranger.
+	//
+	// This route forwards an arbitrary `to` and an arbitrary `data` to Circle
+	// for anyone holding a user token. Circle still demands the user's PIN, so
+	// it cannot move funds on its own -- but it will happily construct
+	// `approve(attacker, max)` and present it to the user as a Conduit prompt,
+	// which is the whole of a social-engineering attack against a stolen token.
+	//
+	// Constrained by SPENDER rather than by an allowlist of target addresses:
+	// this app approves only its own contracts, while the token being approved
+	// differs per chain, so an address allowlist would have to enumerate USDC
+	// on every supported chain and would break a cross-chain deposit the day one
+	// was missed. The spender set is small, fixed and chain-independent.
+	if spender, isApprove := approvalSpender(req.Data); isApprove && !allowedApprovalSpender(spender) {
+		log.Printf("circle: refused an approval to a non-Conduit spender %s", spender)
+		writeErr(w, apierrors.E(apierrors.CodeInvalidRequest,
+			"approvals are only built for Conduit's own contracts"))
 		return
 	}
 	// Calldata is forwarded verbatim. Re-encoding a call we were handed is the

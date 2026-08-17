@@ -742,7 +742,36 @@ func (h *SettlementIntents) Confirm(w http.ResponseWriter, r *http.Request) {
 		StableFXWitnessMessage: []byte(witnessMessage),
 	}
 
-	_, _ = h.Pool.Exec(r.Context(), `UPDATE fx_trades SET state = 'submitted', funding_signature = $1, updated_at = now() WHERE id = $2`, req.FundingSignature, tradeID)
+	// Claim the trade before submitting it, and let the database decide who won.
+	//
+	// The SELECT above only observed that the trade was 'presigned'; two
+	// requests arriving together both saw that, and this write did not care what
+	// state it was overwriting -- so both went on to Submit the same funding
+	// signature to StableFX. The `WHERE state = 'presigned'` makes the
+	// transition itself the claim: exactly one caller can move a trade out of
+	// presigned, and the other is told so.
+	//
+	// The result is checked rather than discarded. Every other write in this
+	// handler can be lost without changing what happened; this one IS what
+	// happened, and a silent failure here would submit a payment believing it
+	// had recorded that it was doing so.
+	tag, err := h.Pool.Exec(r.Context(),
+		`UPDATE fx_trades SET state = 'submitted', funding_signature = $1, updated_at = now()
+		 WHERE id = $2 AND state = 'presigned'`,
+		req.FundingSignature, tradeID)
+	if err != nil {
+		log.Printf("fx: intent=%s stage=claim trade=%s err=%v", id, tradeID, err)
+		writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
+		return
+	}
+	if tag.RowsAffected() != 1 {
+		// Someone else took it between the read and here. Not an error the
+		// payer can act on -- their payment is already in flight -- so report
+		// the conflict rather than inviting a retry that would double-submit.
+		log.Printf("fx: intent=%s trade=%s already claimed by a concurrent confirm", id, tradeID)
+		writeErr(w, apierrors.E(apierrors.CodeIntentAlreadySettled, "id"))
+		return
+	}
 
 	makerTxHash, err := h.StableFX.Submit(r.Context(), prep, req.FundingSignature)
 	if err != nil {

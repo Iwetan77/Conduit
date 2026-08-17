@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kzn-labs/conduit/api/internal/auth"
 	apierrors "github.com/kzn-labs/conduit/api/internal/errors"
 	"golang.org/x/time/rate"
 )
@@ -36,6 +37,19 @@ const (
 	// hammering quotes is not.
 	publicRatePerSecond = 5
 	publicBurst         = 20
+
+	// Authenticated callers get their own, far more generous allowance, keyed
+	// on the account rather than the IP.
+	//
+	// A merchant's dashboard polls, a POS mints links, an integrator backfills;
+	// none of that should be throttled at payer rates, and an office behind one
+	// NAT must not share a bucket. But "already authenticated" is not the same
+	// as "unlimited": POST /v1/accounts needs no credential, so anyone can mint
+	// an sk_ key and then hammer every authenticated route with it. This is what
+	// bounds that, and a key -- unlike an IP -- can be revoked once it is
+	// obviously the source.
+	authedRatePerSecond = 50
+	authedBurst         = 200
 
 	// A client is forgotten after this long idle, so the map cannot grow
 	// without bound. Without eviction the limiter would itself be the memory
@@ -153,6 +167,36 @@ func clientIP(r *http.Request, trustProxy bool) string {
 		return r.RemoteAddr
 	}
 	return host
+}
+
+// rateLimitByAccount limits authenticated traffic per account.
+//
+// Runs AFTER auth.Middleware, so the principal is resolved and the key is the
+// account id. Falls back to the client address when there is no principal,
+// which should not happen on this group but must not become an unlimited path
+// if it ever does.
+func rateLimitByAccount(rl *rateLimiter, trustProxy bool) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodOptions {
+				next.ServeHTTP(w, r)
+				return
+			}
+			key := "ip:" + clientIP(r, trustProxy)
+			if p, ok := auth.FromContext(r.Context()); ok && p.AccountID != "" {
+				key = "acct:" + p.AccountID
+			}
+			if !rl.allow(key) {
+				e := apierrors.E(apierrors.CodeRateLimited, "")
+				w.Header().Set("Retry-After", "1")
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(e.Status)
+				json.NewEncoder(w).Encode(map[string]any{"error": e})
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 // rateLimit is the middleware. Applied to a route group rather than globally:

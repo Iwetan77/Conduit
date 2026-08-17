@@ -129,6 +129,9 @@ func New(cfg Config) http.Handler {
 	// One limiter for the whole process, so a client cannot reset its budget by
 	// moving between public routes.
 	publicLimiter := newRateLimiter(publicRatePerSecond, publicBurst)
+	// Separate bucket set, so a merchant's own traffic can never exhaust the
+	// payer allowance or the other way round.
+	authedLimiter := newRateLimiter(authedRatePerSecond, authedBurst)
 	// Only honour X-Forwarded-For when an operator confirms a proxy is in front.
 	// The header is caller-supplied; trusting it unconditionally would let
 	// anyone bypass the limit by inventing an IP per request.
@@ -348,6 +351,10 @@ func New(cfg Config) http.Handler {
 
 		r.Group(func(r chi.Router) {
 			r.Use(auth.Middleware(cfg.Pool, circleVerifier))
+			// After auth, so it can key on the account. Anyone can mint an sk_
+			// key from the open POST /v1/accounts, so authenticated did not
+			// mean bounded.
+			r.Use(rateLimitByAccount(authedLimiter, trustProxyHeaders))
 			r.Use(idempotency.Middleware(cfg.Pool))
 
 			r.Get("/accounts", accountsH.List)

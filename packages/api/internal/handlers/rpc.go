@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -80,8 +82,8 @@ func (p *RPCProxy) Handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !rpcMethodsAllowed(body) {
-		writeRPCError(w, http.StatusForbidden, "method not allowed via proxy")
+	if reason := rpcRequestAllowed(body); reason != "" {
+		writeRPCError(w, http.StatusForbidden, reason)
 		return
 	}
 
@@ -106,30 +108,109 @@ func (p *RPCProxy) Handle(w http.ResponseWriter, r *http.Request) {
 	_, _ = io.Copy(w, io.LimitReader(resp.Body, 8*1024*1024))
 }
 
-// rpcMethodsAllowed accepts a request only if EVERY method in it is on the
-// allowlist. Handles both a single call and a JSON-RPC batch array; a body
-// that is neither, or names a disallowed method, is rejected.
-func rpcMethodsAllowed(body []byte) bool {
+const (
+	// A batch is one HTTP request and therefore one token against the rate
+	// limiter, whatever it contains. Without a cap, the 256 KiB body limit
+	// above is the only bound, and that is thousands of calls -- so the cheap
+	// way past the limiter was to batch rather than to loop. Twenty is far
+	// above anything this app sends and far below anything worth amplifying.
+	maxRPCBatchCalls = 20
+
+	// eth_getLogs is the one allowlisted method whose cost is set by its
+	// arguments rather than by the call itself. An unbounded range asks the
+	// node to scan the chain; a few of those in a batch is a denial of service
+	// aimed at Arc's public endpoint using our proxy as the amplifier.
+	maxLogBlockRange = 5_000
+)
+
+// rpcRequestAllowed returns "" when the request may be forwarded, or the reason
+// it may not. Every method in it must be on the allowlist, a batch must be
+// short, and eth_getLogs must name a bounded block range.
+func rpcRequestAllowed(body []byte) string {
 	type call struct {
-		Method string `json:"method"`
+		Method string            `json:"method"`
+		Params []json.RawMessage `json:"params"`
 	}
 
 	var single call
 	if err := json.Unmarshal(body, &single); err == nil && single.Method != "" {
-		return allowedRPCMethods[single.Method]
+		return callAllowed(single.Method, single.Params)
 	}
 
 	var batch []call
 	if err := json.Unmarshal(body, &batch); err == nil && len(batch) > 0 {
+		if len(batch) > maxRPCBatchCalls {
+			return "too many calls in one batch"
+		}
 		for _, c := range batch {
-			if !allowedRPCMethods[c.Method] {
-				return false
+			if reason := callAllowed(c.Method, c.Params); reason != "" {
+				return reason
 			}
 		}
-		return true
+		return ""
 	}
 
-	return false
+	return "unrecognised JSON-RPC request"
+}
+
+func callAllowed(method string, params []json.RawMessage) string {
+	if !allowedRPCMethods[method] {
+		return "method not allowed via proxy"
+	}
+	if method == "eth_getLogs" {
+		return logRangeAllowed(params)
+	}
+	return ""
+}
+
+// logRangeAllowed bounds the span an eth_getLogs may scan.
+//
+// Tags are fine: "latest"/"pending"/"safe"/"finalized" name one block, and a
+// filter with neither bound defaults to latest. "earliest" is the whole chain
+// and is refused. Two explicit heights must be close enough together to be a
+// query about recent activity rather than a scan.
+func logRangeAllowed(params []json.RawMessage) string {
+	if len(params) == 0 {
+		return ""
+	}
+	var filter struct {
+		FromBlock string `json:"fromBlock"`
+		ToBlock   string `json:"toBlock"`
+	}
+	if err := json.Unmarshal(params[0], &filter); err != nil {
+		return "" // not a shape we can read; the upstream will reject it
+	}
+
+	from, fromOK := parseBlockNumber(filter.FromBlock)
+	to, toOK := parseBlockNumber(filter.ToBlock)
+
+	if filter.FromBlock == "earliest" || filter.ToBlock == "earliest" {
+		return "eth_getLogs range is too wide"
+	}
+	// One explicit height against an open end is still open-ended.
+	if fromOK && !toOK && filter.ToBlock != "" {
+		return ""
+	}
+	if fromOK && toOK {
+		if to < from {
+			return "" // upstream's error to give
+		}
+		if to-from > maxLogBlockRange {
+			return "eth_getLogs range is too wide"
+		}
+	}
+	return ""
+}
+
+func parseBlockNumber(v string) (uint64, bool) {
+	if !strings.HasPrefix(v, "0x") {
+		return 0, false
+	}
+	n, err := strconv.ParseUint(strings.TrimPrefix(v, "0x"), 16, 64)
+	if err != nil {
+		return 0, false
+	}
+	return n, true
 }
 
 func writeRPCError(w http.ResponseWriter, status int, message string) {

@@ -10,6 +10,7 @@ import (
 	"math/big"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	ethereum "github.com/ethereum/go-ethereum"
@@ -262,8 +263,19 @@ func (h *Bridge) pollAndCompleteFunding(ctx context.Context, intentID, transferI
 		log.Printf("bridge: read state for transfer %s: %v", transferID, err)
 		return
 	}
-	if state == string(bridgepkg.StateMinted) || state == string(bridgepkg.StateHandoffToSettlement) {
-		return // already done, e.g. a race between a live session and the reconciler
+	// Only a completed HANDOFF means there is nothing left to do.
+	//
+	// 'minted' used to skip here too, which quietly stranded money: the state is
+	// persisted before settlement runs, so a process dying in between left a row
+	// at 'minted' with the merchant unpaid, and every later attempt -- including
+	// the reconciler, which calls through here -- read 'minted' and returned
+	// immediately. USDC bridged, nobody paid, nothing marked failed, no alert.
+	//
+	// A minted row now falls through to settleBridgedIntent, which is safe to
+	// re-enter: the settled-status check and the relayer transfer are keyed on
+	// the intent, so a genuine duplicate does not pay twice.
+	if state == string(bridgepkg.StateHandoffToSettlement) {
+		return // settled already; the only truly terminal success state here
 	}
 
 	h.setState(ctx, transferID, bridgepkg.StateMintSubmitted)
@@ -342,11 +354,23 @@ func (h *Bridge) settleBridgedIntent(ctx context.Context, intentID string, minte
 		return fmt.Errorf("refusing to settle intent %s: no verified funding amount", intentID)
 	}
 
-	var amountStr, settleCurrencyISO, settleAddress string
+	var amountStr, settleCurrencyISO, settleAddress, intentStatus string
 	if err := h.Pool.QueryRow(ctx,
-		`SELECT amount::text, settle_currency, settle_address FROM settlement_intents WHERE id = $1`, intentID,
-	).Scan(&amountStr, &settleCurrencyISO, &settleAddress); err != nil {
+		`SELECT amount::text, settle_currency, settle_address, status FROM settlement_intents WHERE id = $1`, intentID,
+	).Scan(&amountStr, &settleCurrencyISO, &settleAddress, &intentStatus); err != nil {
 		return fmt.Errorf("read intent: %w", err)
+	}
+
+	// Never pay an intent that is already settled.
+	//
+	// This function moves real USDC out of the relayer and had no guard against
+	// running twice for the same intent -- it read the amount and paid. That was
+	// survivable only because the caller returned early on a 'minted' transfer;
+	// now that a stranded 'minted' row is deliberately re-driven (so a process
+	// death between mint and settlement no longer leaves a merchant unpaid),
+	// re-entry is expected and the guard has to live here, next to the payment.
+	if intentStatus == "settled" {
+		return nil
 	}
 	settleInfo, ok := currency.ByISO(settleCurrencyISO)
 	if !ok {
@@ -568,10 +592,29 @@ func (h *Bridge) verifyMintToRelayer(ctx context.Context, mintTxHash string) (*b
 	return total, nil
 }
 
+// relayerNonceMu serialises relayer transactions.
+//
+// PendingNonceAt + SendTransaction is read-modify-write against an account only
+// this process spends from. Two settlements running together -- the live path
+// and the orphan reconciler, or simply two bridged intents completing at once --
+// both read the same pending nonce and build transactions with it. One replaces
+// the other in the mempool, and the merchant whose transaction lost is never
+// paid, with nothing recorded as failed: the payout looks sent.
+//
+// A process-level mutex is the right scope because the relayer key lives in one
+// process. If the API is ever run as more than one instance this stops being
+// sufficient and the nonce has to move into Postgres behind SELECT ... FOR
+// UPDATE -- noted here so that is a decision rather than a discovery.
+var relayerNonceMu sync.Mutex
+
 func (h *Bridge) transferUSDCFromRelayer(ctx context.Context, to string, amount *big.Int) (string, error) {
 	if h.ArcRPC == "" {
 		return "", fmt.Errorf("no Arc RPC configured for relayer transfer")
 	}
+
+	// Locked below, around nonce read + send only -- not around WaitMined,
+	// which would serialise every payout on block time for no extra safety:
+	// PendingNonceAt already counts transactions sitting in the mempool.
 	client, err := ethclient.DialContext(ctx, h.ArcRPC)
 	if err != nil {
 		return "", fmt.Errorf("dial arc: %w", err)
@@ -592,36 +635,53 @@ func (h *Bridge) transferUSDCFromRelayer(ctx context.Context, to string, amount 
 	if err != nil {
 		return "", fmt.Errorf("chain id: %w", err)
 	}
-	nonce, err := client.PendingNonceAt(ctx, h.RelayerAddr)
-	if err != nil {
-		return "", fmt.Errorf("nonce: %w", err)
-	}
-	tip, err := client.SuggestGasTipCap(ctx)
-	if err != nil {
-		tip = big.NewInt(1_000_000_000)
-	}
-	head, err := client.HeaderByNumber(ctx, nil)
-	if err != nil {
-		return "", fmt.Errorf("head: %w", err)
-	}
-	// maxFee = 2*baseFee + tip, generous enough to survive a base-fee bump.
-	maxFee := new(big.Int).Add(new(big.Int).Mul(head.BaseFee, big.NewInt(2)), tip)
+	// Nonce read and send in one critical section, in a closure so every exit
+	// path releases the lock. An early return that skipped the unlock would not
+	// fail here -- it would deadlock every later payout, permanently, with the
+	// relayer simply appearing to stop.
+	var signed *types.Transaction
+	sendErr := func() error {
+		relayerNonceMu.Lock()
+		defer relayerNonceMu.Unlock()
 
-	gasLimit, err := client.EstimateGas(ctx, ethereum.CallMsg{From: h.RelayerAddr, To: &usdc, Data: data})
-	if err != nil {
-		gasLimit = 120_000
-	}
+		nonce, err := client.PendingNonceAt(ctx, h.RelayerAddr)
+		if err != nil {
+			return fmt.Errorf("nonce: %w", err)
+		}
+		tip, err := client.SuggestGasTipCap(ctx)
+		if err != nil {
+			tip = big.NewInt(1_000_000_000)
+		}
+		head, err := client.HeaderByNumber(ctx, nil)
+		if err != nil {
+			return fmt.Errorf("head: %w", err)
+		}
+		// maxFee = 2*baseFee + tip, generous enough to survive a base-fee bump.
+		maxFee := new(big.Int).Add(new(big.Int).Mul(head.BaseFee, big.NewInt(2)), tip)
 
-	tx := types.NewTx(&types.DynamicFeeTx{
-		ChainID: chainID, Nonce: nonce, To: &usdc, Value: big.NewInt(0),
-		Gas: gasLimit, GasTipCap: tip, GasFeeCap: maxFee, Data: data,
-	})
-	signed, err := types.SignTx(tx, types.LatestSignerForChainID(chainID), h.RelayerKey)
-	if err != nil {
-		return "", fmt.Errorf("sign: %w", err)
-	}
-	if err := client.SendTransaction(ctx, signed); err != nil {
-		return "", fmt.Errorf("send: %w", err)
+		gasLimit, err := client.EstimateGas(ctx, ethereum.CallMsg{From: h.RelayerAddr, To: &usdc, Data: data})
+		if err != nil {
+			gasLimit = 120_000
+		}
+
+		tx := types.NewTx(&types.DynamicFeeTx{
+			ChainID: chainID, Nonce: nonce, To: &usdc, Value: big.NewInt(0),
+			Gas: gasLimit, GasTipCap: tip, GasFeeCap: maxFee, Data: data,
+		})
+		signed, err = types.SignTx(tx, types.LatestSignerForChainID(chainID), h.RelayerKey)
+		if err != nil {
+			return fmt.Errorf("sign: %w", err)
+		}
+		// Sent inside the lock: once it is in the mempool the next caller's
+		// PendingNonceAt sees it and takes the following nonce.
+		if err := client.SendTransaction(ctx, signed); err != nil {
+			return fmt.Errorf("send: %w", err)
+		}
+		return nil
+	}()
+
+	if sendErr != nil {
+		return "", sendErr
 	}
 	receipt, err := bind.WaitMined(ctx, client, signed)
 	if err != nil {

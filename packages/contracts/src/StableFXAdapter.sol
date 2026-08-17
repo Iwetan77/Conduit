@@ -14,7 +14,6 @@ import {IPermit2SignatureTransfer} from "./interfaces/IFxEscrow.sol";
 /// @title StableFXAdapter
 /// @notice Handles cross-currency settlement.
 ///
-/// Same-currency: transferDirect (pull tokenIn → push to recipient)
 /// Permit2 path (Circle FxEscrow): submitFXFunding — kept for institutional use.
 ///
 /// An on-chain AMM swap path (swapWithPermit / swapDirect / _doSwap) was
@@ -36,7 +35,6 @@ contract StableFXAdapter is Ownable2Step {
 
     // ── Events ────────────────────────────────────────────────────────────────
 
-    event DirectTransfer(address indexed token, address indexed from, address indexed to, uint256 amount);
     event FXFundingSubmitted(address indexed taker, address indexed token, uint256 amount);
     event CallerAuthorized(address indexed caller, bool authorized);
 
@@ -57,16 +55,17 @@ contract StableFXAdapter is Ownable2Step {
         emit CallerAuthorized(caller, authorized);
     }
 
-    // ── Same-currency direct transfer ─────────────────────────────────────────
-
-    function transferDirect(address token, address from, address to, uint256 amount) external {
-        if (!authorizedCallers[msg.sender]) revert UnauthorizedCaller(msg.sender);
-        if (amount == 0) revert ZeroAmount();
-        if (to == address(0)) revert ZeroAddress();
-
-        IERC20(token).safeTransferFrom(from, to, amount);
-        emit DirectTransfer(token, from, to, amount);
-    }
+    // transferDirect was removed.
+    //
+    // It took an arbitrary `from` and `to` and moved tokens between them, so
+    // any authorized caller held a general spending power over every allowance
+    // ever granted to this contract -- limited only by who is authorized, not by
+    // what the transfer was for. Nothing called it: same-currency settlement
+    // goes through AtomicSettler.
+    //
+    // Unreachable and dangerous is still dangerous; it is deployed, and an
+    // authorization added later for some other purpose would have silently
+    // carried this with it.
 
     // ── Cross-currency via Permit2 (Circle FxEscrow — institutional) ─────────
 

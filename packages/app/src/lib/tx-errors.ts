@@ -108,7 +108,17 @@ export function classifyTxError(err: unknown): TxError {
 }
 
 // "Error 101 — Not enough balance to cover this payment."
+//
+// The raw error goes to the console on the way past. Every payment path in the
+// app formats through here and none of them logged the cause, so a failure in
+// production left nothing to diagnose from -- least of all a 900, which means
+// "matched no rule above" and so is exactly the case where the original message
+// is the only thing that would identify it. The payer still sees the clean
+// sentence; the developer console gets what actually happened.
 export function formatTxError(err: unknown): string {
   const { code, message } = classifyTxError(err);
+  if (typeof console !== "undefined") {
+    console.error(`Conduit payment failed [Error ${code}]:`, err);
+  }
   return `Error ${code} — ${message}`;
 }

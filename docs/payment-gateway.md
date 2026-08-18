@@ -20,7 +20,7 @@ checkout works with no credential in the page.
 | | |
 |---|---|
 | **API base** | `https://conduit-z56x.onrender.com` |
-| **Checkout script** | `https://useconduit-app.vercel.app/conduit.js` |
+| **Checkout script** | `https://useconduit.xyz/conduit.js` |
 | **Secret key** (`sk_…`) | Server-side only. Creates a charge. Never put it in a page. |
 
 ## 1. Create the charge (your server, `sk_`)
@@ -65,7 +65,7 @@ The response carries what the browser needs:
 {
   "id": "si_…",
   "status": "created",
-  "hosted_url": "https://useconduit-app.vercel.app/pay/si_…",
+  "hosted_url": "https://useconduit.xyz/pay/si_…",
   "qr_payload": "si_…",
   "amount": "7000000",
   "settle_currency": "USD",
@@ -87,7 +87,7 @@ navigates it once the charge exists. This matters — a `window.open` that runs
 *after* an `await` is blocked by the browser as an unsolicited popup.
 
 ```html
-<script src="https://useconduit-app.vercel.app/conduit.js"></script>
+<script src="https://useconduit.xyz/conduit.js"></script>
 <script>
   function pay() {
     Conduit.checkout({

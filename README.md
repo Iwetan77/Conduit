@@ -6,7 +6,7 @@ Conduit is a pipe. A payer sends whatever stablecoin they hold, on whatever chai
 
 Same-currency payments on Arc settle in about a second. Cross-currency and cross-chain take longer, and the product reports real progress rather than claiming to be instant.
 
-[App](https://useconduit-app.vercel.app) · [Docs](https://useconduit-app.vercel.app/docs) · Arc Testnet, chain ID 5042002
+[App](https://useconduit.xyz) · [Docs](https://useconduit.xyz/docs) · Arc Testnet, chain ID 5042002
 
 ```
 USDC ────────────────────────────────────────────────→ USDC     direct, ~1s on Arc

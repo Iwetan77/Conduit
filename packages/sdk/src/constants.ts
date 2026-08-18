@@ -135,7 +135,7 @@ export const ARC_TESTNET = {
 export const DEFAULT_APP_URL =
   (typeof window !== "undefined" && window.location.origin) ||
   process.env.NEXT_PUBLIC_APP_URL ||
-  "https://useconduit-app.vercel.app";
+  "https://useconduit.xyz";
 
 // Default quote TTL (seconds) — same-currency quote() call, not StableFX RFQ
 // (StableFX quotes are ~3.5s TTL, measured live in Phase 0 — see docs/fx-capability.md).

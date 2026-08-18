@@ -20,7 +20,7 @@ import { DEFAULT_APP_URL } from '@conduit/sdk/lite'
 // different image than it rendered, so the origin is adopted after mount and
 // the configured URL is what SSR emits.
 const CONFIGURED_APP_URL =
-  process.env.NEXT_PUBLIC_APP_URL || 'https://useconduit-app.vercel.app'
+  process.env.NEXT_PUBLIC_APP_URL || 'https://useconduit.xyz'
 
 function useAppUrl() {
   const [url, setUrl] = useState(CONFIGURED_APP_URL)

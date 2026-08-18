@@ -24,7 +24,7 @@ services:
         sync: false
 
       # ── Strongly recommended ──────────────────────────────────────────
-      # CORS allowlist -- the app's origin, e.g. https://useconduit-app.vercel.app
+      # CORS allowlist -- the app's origin, e.g. https://useconduit.xyz
       # Required for the browser app to reach this API. Unset, no cross-origin
       # headers are served at all and browser calls are refused; it no longer
       # falls back to a wildcard, so a forgotten value fails visibly here

@@ -104,10 +104,23 @@ func New(cfg Config) http.Handler {
 	// environment here for the same reason StartBackgroundWorkers does: it is
 	// deployment configuration, and the indexer and the record route must agree
 	// on which router is ours.
+	routerAddr := strings.TrimSpace(os.Getenv("CONDUIT_ROUTER_ADDRESS"))
+	// Unset, this does not degrade one feature -- it breaks paying and
+	// recording, and it does both silently.
+	//
+	// The approval guard builds its allowlist from this value, so an empty one
+	// matches nothing: every approve a Circle wallet asks for is refused, and
+	// that reaches the payer as an opaque network error three layers from the
+	// cause. Recording a direct settlement refuses for the same reason. Neither
+	// failure names the variable, so it is worth one line at boot that does.
+	if routerAddr == "" {
+		log.Printf("config: CONDUIT_ROUTER_ADDRESS is not set — token approvals will be refused and " +
+			"direct settlements will not be recorded. Set it to the deployed ConduitRouter address.")
+	}
 	intentsH := &handlers.SettlementIntents{
 		Pool: cfg.Pool, StableFX: stableFX, AppBaseURL: cfg.AppBaseURL,
 		Webhooks: dispatcher, ArcRPC: arcRPCForBalances,
-		RouterAddr: strings.TrimSpace(os.Getenv("CONDUIT_ROUTER_ADDRESS")),
+		RouterAddr: routerAddr,
 	}
 	currenciesH := &handlers.Currencies{}
 	fxRatesH := &handlers.FxRates{StableFX: stableFX}

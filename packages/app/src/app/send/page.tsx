@@ -16,7 +16,6 @@ import { SendConfirm } from "@/components/SendFlow/SendConfirm";
 import { CrossChainBridge } from "@/components/PayFlow/CrossChainBridge";
 import type { PublicSettlementIntent } from "@/lib/conduit-api";
 import { PayerCurrencyPicker } from "@/components/SendFlow/PayerCurrencyPicker";
-import { WalletConnect } from "@/components/Shared/WalletConnect";
 import { ScanToPay } from "@/components/PayFlow/ScanToPay";
 import type { Currency } from "@conduit/sdk/lite";
 import { motion, AnimatePresence } from "framer-motion";
@@ -250,21 +249,22 @@ export default function SendPage() {
               </div>
 
               {!mounted || !identity ? (
-                <div className="text-center space-y-3">
-                  <p className="text-ink-dim text-sm">
+                // A prompt, not a second set of buttons.
+                //
+                // This used to render its own <WalletConnect/>, which put two
+                // connect controls on one screen -- and once a Solana wallet
+                // was connected they disagreed, the nav still offering
+                // "Connect Wallet" while this one showed the chip. The nav is
+                // the single place a wallet is connected or disconnected; this
+                // says what to do and points at it.
+                <div className="text-center space-y-2 border border-border bg-surface/40 py-6 px-4">
+                  <p className="text-ink text-sm font-mono">
                     Connect the wallet holding your USDC
                   </p>
-                  {/* solana: a Solana wallet is a first class way in here, not
-                      a route discovered later. The copy above changed with it
-                      -- "pay from Arc" described a requirement that was never
-                      true for a payer funding through Gateway. */}
-                  <div className="flex justify-center">
-                    <WalletConnect solana />
-                  </div>
-                  {/* The "— or —" that stood here pointed at the second
-                      button below, which is gone: connecting is now the only
-                      way in for every payer, so there is no alternative to
-                      point at. */}
+                  <p className="text-ink-dim text-xs font-mono">
+                    Use Connect Wallet at the top of the page. Any chain works — Arc,
+                    Solana, Base and nine others.
+                  </p>
                 </div>
               ) : (
                 <>

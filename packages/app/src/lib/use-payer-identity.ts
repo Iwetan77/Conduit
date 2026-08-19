@@ -21,6 +21,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useAccount, useDisconnect } from "wagmi";
+import { CIRCLE_CONNECTOR_ID } from "@/lib/circle/connector";
 import {
   connectSolanaWallet,
   disconnectSolanaWallet,
@@ -58,7 +59,7 @@ export interface UsePayerIdentity {
 }
 
 export function usePayerIdentity(): UsePayerIdentity {
-  const { address: evmAddress, isConnected: evmConnected, chainId } = useAccount();
+  const { address: evmAddress, isConnected: evmConnected, chainId, connector } = useAccount();
   const { disconnectAsync } = useDisconnect();
 
   const [solanaAddress, setSolanaAddress] = useState<string | null>(null);
@@ -114,14 +115,21 @@ export function usePayerIdentity(): UsePayerIdentity {
     }
   }, [solanaAddress, evmConnected, disconnectAsync]);
 
-  // Solana wins when both are present.
+  // Solana wins when both are present, with one exception.
   //
   // Connecting a Solana wallet is an explicit act -- an EVM wallet is often
   // just auto reconnected from a previous visit -- so the deliberate choice is
   // the one to honour. Picking Solana also says something specific: the payer
   // means to spend Solana USDC.
+  //
+  // The exception is a Circle session. That is a signed-in merchant, and their
+  // wallet is their identity across the whole dashboard; letting a browser
+  // extension outrank it would show a merchant somebody else's address in
+  // their own nav, next to the links and settlements belonging to the account
+  // they are actually signed in as.
+  const signedInWithGoogle = evmConnected && connector?.id === CIRCLE_CONNECTOR_ID;
   let identity: PayerIdentity | null = null;
-  if (solanaAddress) {
+  if (solanaAddress && !signedInWithGoogle) {
     identity = { kind: "solana", address: solanaAddress, canSettleOnArc: false };
   } else if (evmConnected && evmAddress) {
     identity = { kind: "evm", address: evmAddress, chainId, canSettleOnArc: true };

@@ -180,15 +180,20 @@ function ConnectedChip({ address, compact = false }: { address: string; compact?
   );
 }
 
-/**
- * @param solana Offer Solana wallets alongside the EVM ones.
- *
- * Off by default, and deliberately not everywhere. A Solana wallet cannot sign
- * on Arc, so it is a valid identity only on surfaces where funding a payment
- * through Gateway is a real route -- the payer flow. Offering it in the
- * merchant nav would connect a wallet that cannot do anything a merchant needs.
- */
-export function WalletConnect({ solana = false }: { solana?: boolean } = {}) {
+// Every wallet family, everywhere this renders.
+//
+// Solana was briefly opt-in per surface, which broke the one promise this
+// component exists to keep: the nav rendered it without the flag and the send
+// page with it, so a connected Solana wallet showed as a chip at the bottom of
+// the page and as "Connect Wallet" at the top. Two controls disagreeing about
+// the same wallet is worse than either answer alone.
+//
+// A Solana wallet genuinely cannot do everything an EVM one can -- it cannot
+// sign on Arc -- but that is a fact about specific ACTIONS, and actions are
+// where it belongs. Refusing the connection outright to prevent a later
+// failure means the payer cannot connect the only wallet they own.
+export function WalletConnect() {
+  const solana = true;
   const [mounted, setMounted] = useState(false);
   const { address, isConnected } = useAccount();
   const { connect, connectors, isPending } = useConnect();
@@ -300,10 +305,28 @@ export function WalletConnectCompact() {
   const { address, isConnected } = useAccount();
   const { connect, connectors, isPending } = useConnect();
   const { walletSettled } = useWalletGate();
+  // Same identity as the desktop nav. Reading wagmi alone here would recreate
+  // the split on mobile: connected on Solana, still asking you to connect.
+  const { identity, solanaWallets, connectSolana, disconnect, connecting } = usePayerIdentity();
 
   useEffect(() => { setMounted(true); }, []);
   if (!mounted) return null;
   if (!walletSettled) return null;
+
+  if (identity?.kind === "solana") {
+    return (
+      <div className="flex items-center gap-2">
+        <ConnectedChip address={identity.address} compact />
+        <button
+          onClick={() => void disconnect()}
+          className="px-2 py-1.5 text-scale-1 font-mono border border-border
+                     text-ink-dim hover:text-ink transition-colors whitespace-nowrap"
+        >
+          Disconnect
+        </button>
+      </div>
+    );
+  }
 
   if (isConnected && address) {
     return <ConnectedChip address={address} compact />;
@@ -327,6 +350,16 @@ export function WalletConnectCompact() {
         </button>
       </div>
       {CIRCLE_ENABLED && <GoogleSignIn short />}
+      {solanaWallets.length > 0 && (
+        <button
+          onClick={() => void connectSolana(solanaWallets[0])}
+          disabled={connecting}
+          className="px-3 py-2 text-scale-2 font-mono border border-border text-ink
+                     hover:border-ink-dim transition-colors disabled:opacity-50 whitespace-nowrap"
+        >
+          {connecting ? "…" : "Solana"}
+        </button>
+      )}
     </div>
   );
 }

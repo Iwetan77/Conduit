@@ -6,7 +6,7 @@ import { useState, useEffect } from "react";
 import { useAccount } from "wagmi";
 import { usePayerIdentity } from "@/lib/use-payer-identity";
 import { usePayerUsdc, routeForAmount } from "@/lib/use-payer-usdc";
-import { chainLabel } from "@/lib/unified-balance";
+import { chainLabel, usdcDisplay } from "@/lib/unified-balance";
 import { isAddress } from "viem";
 import { Nav, MobileNav } from "@/components/Shared/Nav";
 import { AddressInput } from "@/components/SendFlow/AddressInput";
@@ -156,7 +156,14 @@ export default function SendPage() {
         <AnimatePresence mode="wait">
           {bridgeIntent && (
             <div className="space-y-4">
-              <CrossChainBridge intentId={bridgeIntent.id} intent={bridgeIntent} />
+              <CrossChainBridge
+                intentId={bridgeIntent.id}
+                intent={bridgeIntent}
+                /* Already read when the wallet connected. Without this the
+                   payer waits through the same twelve chain fan out a second
+                   time, after pressing Send, for the same answer. */
+                knownUsdc={sourceUsdc.unified}
+              />
               <button
                 onClick={() => setBridgeIntent(null)}
                 className="w-full py-3 border border-border text-ink-dim hover:text-ink
@@ -189,6 +196,32 @@ export default function SendPage() {
                   onCurrencyChange={(c) => setRecipientCurrency(c)}
                   label="They receive"
                 />
+
+                {/* What this wallet actually holds, per chain.
+                    A connected wallet used to show nothing but an x to
+                    disconnect, so the one question a payer has at this point --
+                    do I have the money, and where -- had no answer on screen.
+                    Per chain, never summed: one payment draws from one chain,
+                    so a total would promise something the rails cannot do. */}
+                {mounted && identity && (sourceUsdc.funded.length > 0 || sourceUsdc.loading) && (
+                  <div className="border border-border bg-surface px-3 py-2 space-y-1">
+                    <p className="text-scale-1 font-mono text-ink-dim uppercase tracking-wider">
+                      Your USDC
+                    </p>
+                    {sourceUsdc.loading && sourceUsdc.funded.length === 0 ? (
+                      <p className="text-scale-1 font-mono text-ink-dim">Reading your balances…</p>
+                    ) : (
+                      <div className="flex flex-wrap gap-x-3 gap-y-1">
+                        {sourceUsdc.funded.map((c) => (
+                          <span key={c.chain} className="text-scale-1 font-mono text-ink">
+                            {usdcDisplay(c.minor)}{" "}
+                            <span className="text-ink-dim">on {chainLabel(c.chain)}</span>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {/* Balance-aware: only what this wallet actually holds on Arc.
                     Meaningless without a connected Arc wallet -- a payer whose

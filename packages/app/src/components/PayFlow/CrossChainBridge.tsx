@@ -59,6 +59,16 @@ import { Rocket } from "@/components/Shared/Rocket";
 interface CrossChainBridgeProps {
   intentId: string;
   intent: PublicSettlementIntent;
+  /**
+   * Balances the caller has already read, if it has.
+   *
+   * The page reads these when the wallet connects, so re-reading them after
+   * Send meant a fan out across twelve chains that the payer waited on for a
+   * second time, having already waited once -- and it is the same answer. Pass
+   * them in and this skips straight to confirm. Omitted, it reads them itself,
+   * which is still what happens when a payer arrives with nothing connected.
+   */
+  knownUsdc?: UnifiedUsdc | null;
 }
 
 type Phase =
@@ -207,7 +217,7 @@ function WalletSheet({
   );
 }
 
-export function CrossChainBridge({ intentId, intent }: CrossChainBridgeProps) {
+export function CrossChainBridge({ intentId, intent, knownUsdc }: CrossChainBridgeProps) {
   const [phase, setPhase] = useState<Phase>("choose_source");
   const [adapter, setAdapter] = useState<PayerAdapter | null>(null);
   const [unified, setUnified] = useState<UnifiedUsdc | null>(null);
@@ -477,15 +487,24 @@ export function CrossChainBridge({ intentId, intent }: CrossChainBridgeProps) {
       // retries with "Maximum retry attempts (10) exceeded". Letting that kill
       // the whole screen stranded a payer whose USDC was sitting right there in
       // their wallet, readable without Circle being involved at all.
-      const [plan, deposited, wallet] = await Promise.all([
+      // Reuse what the caller already read. Only fall back to reading here
+      // when nobody handed us an answer -- the picker path, where the wallet
+      // was connected inside this component and the page never saw it.
+      const [plan, bal] = await Promise.all([
         getBridgePlan(intentId),
-        getUnifiedUsdc(payer).catch((err) => {
-          console.warn("circle gateway balance unavailable, using wallet balance only:", err);
-          return {} as UnifiedUsdc;
-        }),
-        getWalletUsdc(payer),
+        knownUsdc
+          ? Promise.resolve(knownUsdc)
+          : (async () => {
+              const [deposited, wallet] = await Promise.all([
+                getUnifiedUsdc(payer).catch((err) => {
+                  console.warn("circle gateway balance unavailable, using wallet balance only:", err);
+                  return {} as UnifiedUsdc;
+                }),
+                getWalletUsdc(payer),
+              ]);
+              return mergeUsdc(deposited, wallet);
+            })(),
       ]);
-      const bal = mergeUsdc(deposited, wallet);
       setRequiredUSDC(plan.required_usdc);
       setRecipient(plan.recipient_address);
       setUnified(bal);
@@ -639,6 +658,10 @@ export function CrossChainBridge({ intentId, intent }: CrossChainBridgeProps) {
       setPhase("bridging");
       startPolling();
     } catch (err) {
+      // The raw cause, kept. gatewayUnavailable below matches three strings
+      // Circle's SDK emits, so a failure of ours that happens to contain one
+      // would be reported as Circle being down and leave nothing to debug.
+      console.error("cross-chain spend failed:", err);
       const message = gatewayUnavailable(err)
         ? "Circle's bridge isn't responding right now. Nothing has left your wallet — wait a moment and try again."
         : err instanceof ConduitApiError

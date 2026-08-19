@@ -11,6 +11,7 @@ import {
   GOOGLE_LOGIN_STARTED,
 } from "@/lib/wallet-gate";
 import { shortenAddress } from "@/lib/format";
+import { usePayerIdentity } from "@/lib/use-payer-identity";
 
 // Google sign-in exists when Circle is configured. There is no provider flag
 // any more: Privy was removed in Phase 7, so this is the only Google path and
@@ -179,14 +180,44 @@ function ConnectedChip({ address, compact = false }: { address: string; compact?
   );
 }
 
-export function WalletConnect() {
+/**
+ * @param solana Offer Solana wallets alongside the EVM ones.
+ *
+ * Off by default, and deliberately not everywhere. A Solana wallet cannot sign
+ * on Arc, so it is a valid identity only on surfaces where funding a payment
+ * through Gateway is a real route -- the payer flow. Offering it in the
+ * merchant nav would connect a wallet that cannot do anything a merchant needs.
+ */
+export function WalletConnect({ solana = false }: { solana?: boolean } = {}) {
   const [mounted, setMounted] = useState(false);
   const { address, isConnected } = useAccount();
   const { connect, connectors, isPending } = useConnect();
   const { walletSettled } = useWalletGate();
+  const { identity, solanaWallets, connectSolana, disconnect, connecting, error } =
+    usePayerIdentity();
+  const [picking, setPicking] = useState(false);
 
   useEffect(() => { setMounted(true); }, []);
   if (!mounted) return null;
+
+  // A connected Solana wallet is the answer to "who is paying", so it is shown
+  // in place of the connect buttons exactly as an EVM one is. Checked before
+  // the EVM branch below because usePayerIdentity gives Solana precedence when
+  // both happen to be attached.
+  if (solana && identity?.kind === "solana") {
+    return (
+      <div className="flex items-center gap-2">
+        <ConnectedChip address={identity.address} />
+        <button
+          onClick={() => void disconnect()}
+          className="px-3 py-2 text-scale-1 font-mono border border-border
+                     text-ink-dim hover:text-ink transition-colors whitespace-nowrap"
+        >
+          Disconnect
+        </button>
+      </div>
+    );
+  }
 
   // Same reason as the nav: before the Circle session has been adopted,
   // `address` may be whatever wallet an extension auto-connected rather than
@@ -201,8 +232,9 @@ export function WalletConnect() {
   const injected = connectors.find((c) => c.id === "injected" || c.type === "injected");
 
   return (
-    // nowrap: wrapping put Connect Wallet and Google on separate lines on
-    // mobile, reading as two stacked competing CTAs.
+    <div className="flex flex-col items-center gap-2">
+    {/* nowrap: wrapping put Connect Wallet and Google on separate lines on
+        mobile, reading as two stacked competing CTAs. */}
     <div className="flex flex-nowrap items-center justify-center gap-2">
       {injected && (
         <button
@@ -215,6 +247,50 @@ export function WalletConnect() {
         </button>
       )}
       {CIRCLE_ENABLED && <GoogleSignIn />}
+
+      {/* Solana, as a peer of the other two rather than a route hidden behind
+          a later step. A payer holding USDC on Solana has no EVM wallet to
+          connect, so without this the only way in was the cross chain button
+          placed outside the connect gate specifically to work around it. */}
+      {solana && (
+        <div className="relative">
+          <button
+            onClick={() => {
+              if (solanaWallets.length === 1) void connectSolana(solanaWallets[0]);
+              else setPicking((p) => !p);
+            }}
+            disabled={connecting}
+            className="px-4 py-2 text-scale-2 font-mono border border-border text-ink
+                       hover:border-ink-dim transition-colors disabled:opacity-50 whitespace-nowrap"
+          >
+            {connecting ? "Connecting..." : "Solana"}
+          </button>
+
+          {picking && solanaWallets.length > 1 && (
+            <div className="absolute left-0 top-full mt-1 z-40 min-w-[12rem] border border-border bg-surface">
+              {solanaWallets.map((w) => (
+                <button
+                  key={w.id}
+                  onClick={() => { setPicking(false); void connectSolana(w); }}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-scale-2 font-mono
+                             text-left text-ink-dim hover:text-ink hover:bg-bg/40 transition-colors"
+                >
+                  {/* The wallet's own icon, when it registered one. Plain img:
+                      these are data URIs from the extension, not our assets. */}
+                  {w.icon && <img src={w.icon} alt="" width={16} height={16} />}
+                  {w.label}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+    {/* Under the buttons rather than inside them: "no Solana wallet found" is
+        advice about this browser, not a failure of the click. */}
+    {solana && error && (
+      <p className="text-scale-1 text-danger max-w-xs text-center">{error}</p>
+    )}
     </div>
   );
 }

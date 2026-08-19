@@ -220,10 +220,14 @@ export default function SendPage() {
               {!mounted || !isConnected ? (
                 <div className="text-center space-y-3">
                   <p className="text-ink-dim text-sm">
-                    Connect a wallet to pay from Arc
+                    Connect the wallet holding your USDC
                   </p>
+                  {/* solana: a Solana wallet is a first class way in here, not
+                      a route discovered later. The copy above changed with it
+                      -- "pay from Arc" described a requirement that was never
+                      true for a payer funding through Gateway. */}
                   <div className="flex justify-center">
-                    <WalletConnect />
+                    <WalletConnect solana />
                   </div>
                   {/* Reads as "one of two ways", not "the requirement". Without
                       this the prompt above looked mandatory, so a Solana payer

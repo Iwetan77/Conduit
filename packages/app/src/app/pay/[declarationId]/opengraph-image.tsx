@@ -22,22 +22,24 @@ const SYMBOLS: Record<string, string> = {
   CAD: "C$", GBP: "£", ZAR: "R", KRW: "₩", CHF: "Fr",
 };
 
-// The real mark, not an approximation of it.
+// The wordmark lockup, not a drawing of it.
 //
-// This used to draw a green circle with a "D" in it, which is not the logo and
-// never was -- the brand mark is a filled signal disc with a bar cut through
-// it. Loaded through import.meta.url rather than read out of public/ so Next
-// traces it into the serverless bundle; public/ is not guaranteed to be there
-// at render time, and a missing file would silently fall back to no logo at
-// all on the one surface whose entire job is being seen by strangers.
+// Two earlier attempts were wrong in instructive ways. The first drew a green
+// circle with a letter in it, which is not the logo. The second used the ⊙D
+// mark, whose bar and counter are BLACK -- fine on a light page, half invisible
+// on this one. The wordmark is the variant built for dark backgrounds: CON in
+// signal green, DUIT in white, the bar cutting through both.
 //
-// The bar reads as a notch here rather than a bar: it is black, the card is
-// black, so the part that extends past the disc disappears. That is how the
-// mark already renders in the app's nav on the same background, so the share
-// card and the page a payer lands on agree.
-async function markDataUri(): Promise<string | null> {
+// Cropped to its content (1628x480) and otherwise untouched. Nothing is
+// recoloured: the white here is the DUIT letterforms, not a background.
+//
+// Loaded through import.meta.url rather than out of public/ so Next traces it
+// into the serverless bundle. public/ is not guaranteed to be readable at
+// render time, and a missing file would mean no logo at all on the one surface
+// whose whole job is being seen by strangers.
+async function wordmarkDataUri(): Promise<string | null> {
   try {
-    const res = await fetch(new URL("./conduit-mark.png", import.meta.url));
+    const res = await fetch(new URL("./conduit-wordmark.png", import.meta.url));
     const buf = await res.arrayBuffer();
     return `data:image/png;base64,${Buffer.from(buf).toString("base64")}`;
   } catch {
@@ -62,7 +64,7 @@ async function fetchInfo(id: string) {
 }
 
 export default async function Image({ params }: { params: { declarationId: string } }) {
-  const [info, mark] = await Promise.all([fetchInfo(params.declarationId), markDataUri()]);
+  const [info, wordmark] = await Promise.all([fetchInfo(params.declarationId), wordmarkDataUri()]);
   const merchant = info?.display_name?.trim() || "A Conduit merchant";
 
   // Amount and token are kept apart so the token can carry its own coin mark,
@@ -100,12 +102,14 @@ export default async function Image({ params }: { params: { declarationId: strin
           fontFamily: "sans-serif",
         }}
       >
-        {/* Brand mark */}
-        <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
-          {/* Cropped to the mark itself (1349x926), so it fills its box instead
-              of floating inside the source file's transparent padding. */}
-          {mark ? <img src={mark} width={105} height={72} alt="" /> : null}
-          <div style={{ color: "#B2F55A", fontSize: 30, fontWeight: 700, letterSpacing: 2 }}>CONDUIT™</div>
+        {/* Brand. The wordmark carries the name and the ™ itself, so there is
+            no text beside it to drift out of sync with the artwork. */}
+        <div style={{ display: "flex", alignItems: "center" }}>
+          {wordmark ? (
+            <img src={wordmark} width={244} height={72} alt="Conduit" />
+          ) : (
+            <div style={{ color: "#B2F55A", fontSize: 30, fontWeight: 700, letterSpacing: 2 }}>CONDUIT™</div>
+          )}
         </div>
 
         {/* Ask */}

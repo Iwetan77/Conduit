@@ -72,10 +72,10 @@ export function Hero() {
         animate={{ opacity: 1 }}
         transition={{ duration: 0.4 }}
       >
-        {/* Eyebrow */}
-        <p className="font-mono text-[11px] text-signal uppercase tracking-[0.22em] mb-8">
-          B2B Stablecoin Settlement · Built on Arc · Testnet 2026
-        </p>
+        {/* The eyebrow that stood here read "B2B Stablecoin Settlement ·
+            Built on Arc · Testnet 2026". Removed: it spent the first line of
+            the page on category, stack and stage, none of which a visitor is
+            asking yet, and the headline below says what this is anyway. */}
 
         {/* Headline — the signature entrance, per-word stagger, once */}
         <motion.h1

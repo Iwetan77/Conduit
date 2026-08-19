@@ -47,15 +47,35 @@ export function ChainGuard({ children }: ChainGuardProps) {
   // the one that fixed this component.
   if (pathname.startsWith("/pay/")) return <>{children}</>;
 
+  // /send is the same surface with a different entry point, and it was being
+  // walled for the exact reason it exists.
+  //
+  // The page offers "Pay with USDC from another chain", backed by Circle
+  // Gateway across twelve source chains (see lib/unified-balance.ts). Ethereum
+  // is one of them. So a payer arriving on Ethereum -- holding the balance the
+  // feature is built to spend -- was told they were on the wrong network and
+  // asked to switch away from it. The guard was refusing the supported case.
+  //
+  // A chain is an INPUT to routing here, not a precondition: Arc settles
+  // directly, the Gateway chains settle by depositing where the payer already
+  // is, and only a chain in neither set is actually a problem. A page cannot
+  // know which route the payer will pick, so it is the wrong place to decide.
+  // SendConfirm now switches the chain itself at send time, which is the point
+  // where the requirement is actually known.
+  if (pathname.startsWith("/send")) return <>{children}</>;
+
   // Dashboard work — creating payment links, viewing settlements/
   // reconciliation, editing settings — is pure Conduit API traffic and never
   // signs an Arc transaction, so it must NOT be network-gated: a merchant
   // signed in with Google/email (or on any wallet network) was hitting the
   // "Wrong Network" wall and could not create links at all. Only the Send
   // flow actually submits an Arc tx; it guards its own chain at send time.
-  if (pathname.startsWith("/dashboard") && !pathname.startsWith("/dashboard/send")) {
-    return <>{children}</>;
-  }
+  // The whole dashboard passes now, /dashboard/send included. That route
+  // renders the same SendConfirm, which switches the chain at send time, so
+  // the wall bought nothing except hiding the page from a merchant whose
+  // wallet happened to be pointed elsewhere -- including a Google sign in,
+  // whose Circle wallet switches silently anyway.
+  if (pathname.startsWith("/dashboard")) return <>{children}</>;
 
   // Not connected — let the page handle its own connect state
   if (!isConnected || !chainId) return <>{children}</>;

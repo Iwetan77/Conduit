@@ -1,9 +1,9 @@
 "use client";
 
-import { ARC_RPC_URL } from "@/lib/wagmi";
+import { ARC_RPC_URL, arcTestnet } from "@/lib/wagmi";
 
 import { useState } from "react";
-import { useAccount } from "wagmi";
+import { useAccount, useSwitchChain } from "wagmi";
 import type { Currency, PaymentReceipt } from "@conduit/sdk/lite";
 import { parseAmount, formatAmount, shortenAddress } from "@/lib/format";
 import { RoutePreview } from "./RoutePreview";
@@ -30,7 +30,8 @@ export function SendConfirm({
   onBack,
   onReset,
 }: SendConfirmProps) {
-  const { address, connector } = useAccount();
+  const { address, connector, chainId } = useAccount();
+  const { switchChainAsync } = useSwitchChain();
   const [step, setStep] = useState<"confirm" | "pending" | "success" | "error">("confirm");
   const [receipt, setReceipt] = useState<PaymentReceipt | null>(null);
   const [error, setError] = useState<string>("");
@@ -47,6 +48,31 @@ export function SendConfirm({
     setStep("pending");
 
     try {
+      // Both paths below sign on Arc, so this is where the chain has to be
+      // right -- at the action, not at the page.
+      //
+      // There was no check here at all. The only thing stopping a wrong chain
+      // send was the app wide ChainGuard, a wall that also blocked the payer
+      // whose whole reason for being here is that their USDC lives on another
+      // chain. Guarding at the moment of signing is what lets that wall come
+      // down: this knows it needs Arc, whereas the page cannot know which
+      // route the payer is about to take.
+      //
+      // Asks the wallet to move rather than refusing. Most wallets switch
+      // silently; the ones that prompt are asking a question the payer can
+      // answer. Only a refusal is worth surfacing.
+      if (chainId !== undefined && chainId !== arcTestnet.id) {
+        try {
+          await switchChainAsync({ chainId: arcTestnet.id });
+        } catch {
+          setError(
+            `Your wallet is on another network. Switch it to Arc Testnet to send, ` +
+              `or use "Pay with USDC from another chain" to spend the balance you already hold.`,
+          );
+          setStep("error");
+          return;
+        }
+      }
       if (isCrossCurrency) {
         // Cross-currency needs a settlement intent for StableFX to price and
         // deliver against. A connected wallet is the only requirement — the

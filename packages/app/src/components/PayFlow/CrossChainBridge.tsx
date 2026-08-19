@@ -441,7 +441,11 @@ export function CrossChainBridge({ intentId, intent, knownUsdc }: CrossChainBrid
   async function adoptConnected() {
     if (!identity) return;
     setError("");
-    setPhase("connecting");
+    // Only announce work there is. With balances handed in, all that remains is
+    // building an adapter -- microseconds -- so "Connecting your wallet" and
+    // "Reading your USDC across chains" were two screens flashing past for a
+    // read that no longer happens.
+    if (!knownUsdc) setPhase("connecting");
     try {
       let payer: PayerAdapter;
       if (identity.kind === "solana") {
@@ -471,7 +475,7 @@ export function CrossChainBridge({ intentId, intent, knownUsdc }: CrossChainBrid
   // greedy default) are exactly the kind that get fixed in one copy only.
   async function settleOn(payer: PayerAdapter, picked?: string) {
     setAdapter(payer);
-      setPhase("checking_balance");
+      if (!knownUsdc) setPhase("checking_balance");
 
       // Size against deposited Gateway balance AND raw wallet balance: the
       // wallet portion is deposited on demand at spend time, so counting only

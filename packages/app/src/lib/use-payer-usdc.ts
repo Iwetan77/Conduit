@@ -51,6 +51,24 @@ export interface PayerUsdc {
   totalAcrossChainsMinor: bigint;
 }
 
+// One read per wallet, shared by every component that asks.
+//
+// The nav wants this to show a balance and the send form wants it to pick a
+// route, and each mounting its own copy meant two fan outs across twelve
+// chains for one answer -- doubling the wait the payer already noticed. Keyed
+// by address so switching wallets never serves the previous one's balance.
+const cache = new Map<string, PayerUsdc>();
+const inflight = new Map<string, Promise<PayerUsdc>>();
+
+/** Drop a cached read, so the next mount fetches fresh. */
+export function invalidatePayerUsdc(address?: string) {
+  if (address) {
+    for (const k of [...cache.keys()]) if (k.startsWith(address)) cache.delete(k);
+  } else {
+    cache.clear();
+  }
+}
+
 const EMPTY: PayerUsdc = {
   loading: false,
   error: "",
@@ -89,46 +107,64 @@ export function usePayerUsdc({
       setState(EMPTY);
       return;
     }
+    const key = `${address}:${family}:${provider ? "p" : "-"}`;
+
+    const cached = cache.get(key);
+    if (cached) {
+      setState(cached);
+      return;
+    }
+
     let cancelled = false;
     setState((s) => ({ ...s, loading: true, error: "" }));
 
-    (async () => {
-      // getWalletUsdc reads only .family and .address for the EVM branch, so a
-      // provider-less handle is enough for the part that matters.
-      const payer: PayerAdapter = { adapter: null, address, family, provider };
+    // Join a read already in flight rather than starting a second one. Two
+    // components mounting in the same tick is the normal case, not the edge.
+    const run =
+      inflight.get(key) ??
+      (async (): Promise<PayerUsdc> => {
+        // getWalletUsdc reads only .family and .address for the EVM branch, so
+        // a provider-less handle is enough for the part that matters.
+        const payer: PayerAdapter = { adapter: null, address, family, provider };
 
-      // Both reads are allowed to fail independently.
-      //
-      // Circle's testnet Gateway API flaps -- the SDK gives up after ten
-      // retries -- and that must not hide a wallet balance readable without
-      // Circle being involved at all. Equally, a failed wallet read should
-      // still show whatever was already deposited.
-      const [deposited, wallet] = await Promise.all([
-        provider
-          ? getUnifiedUsdc(payer).catch(() => null)
-          : Promise.resolve(null),
-        getWalletUsdc(payer).catch(() => null),
-      ]);
+        // Both reads are allowed to fail independently. Circle's testnet
+        // Gateway flaps, and that must not hide a wallet balance readable
+        // without Circle being involved at all; equally a failed wallet read
+        // should still show whatever was already deposited.
+        const [deposited, wallet] = await Promise.all([
+          provider ? getUnifiedUsdc(payer).catch(() => null) : Promise.resolve(null),
+          getWalletUsdc(payer).catch(() => null),
+        ]);
 
-      if (cancelled) return;
+        if (!deposited && !wallet) {
+          return { ...EMPTY, error: "Couldn't read your USDC balances. Try again in a moment." };
+        }
+        const unified = mergeUsdc(deposited ?? ({} as UnifiedUsdc), wallet ?? []);
+        // Richest first, so the head of the list IS the spendable ceiling.
+        const funded = fundedChains(unified);
+        return {
+          loading: false,
+          error: "",
+          unified,
+          funded,
+          maxSingleChainMinor: funded[0]?.minor ?? 0n,
+          totalAcrossChainsMinor: funded.reduce((sum, c) => sum + c.minor, 0n),
+        };
+      })();
 
-      if (!deposited && !wallet) {
-        setState({ ...EMPTY, error: "Couldn't read your USDC balances. Try again in a moment." });
-        return;
-      }
-
-      const unified = mergeUsdc(deposited ?? ({} as UnifiedUsdc), wallet ?? []);
-      // Richest first, so the head of the list IS the spendable ceiling.
-      const funded = fundedChains(unified);
-      setState({
-        loading: false,
-        error: "",
-        unified,
-        funded,
-        maxSingleChainMinor: funded[0]?.minor ?? 0n,
-        totalAcrossChainsMinor: funded.reduce((sum, c) => sum + c.minor, 0n),
+    inflight.set(key, run);
+    void run
+      .then((result) => {
+        inflight.delete(key);
+        // Only a good read is worth remembering; caching a failure would make
+        // one bad moment permanent for the life of the page.
+        if (!result.error) cache.set(key, result);
+        if (!cancelled) setState(result);
+      })
+      .catch(() => {
+        inflight.delete(key);
+        if (!cancelled) setState({ ...EMPTY, error: "Couldn't read your USDC balances." });
       });
-    })();
 
     return () => {
       cancelled = true;

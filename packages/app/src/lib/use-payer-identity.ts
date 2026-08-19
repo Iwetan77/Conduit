@@ -45,6 +45,17 @@ export interface PayerIdentity {
    * wallet, not of where their money happens to sit.
    */
   canSettleOnArc: boolean;
+  /**
+   * Can this wallet authorise a Circle Gateway burn intent?
+   *
+   * False for Phantom, which refuses to signMessage a transaction shaped
+   * payload -- the exact shape Gateway uses. Carried on the identity because
+   * the check has to happen where the wallet is CHOSEN, not where the payment
+   * is signed: Circle's SDK retries the refusal until it exhausts, and the
+   * resulting "maximum retry attempts" is indistinguishable from Circle being
+   * down. A payer then gets told to wait and try again, forever.
+   */
+  gatewayCapable: boolean;
 }
 
 export interface UsePayerIdentity {
@@ -132,9 +143,29 @@ export function usePayerIdentity(): UsePayerIdentity {
   const signedInWithGoogle = evmConnected && connector?.id === CIRCLE_CONNECTOR_ID;
   let identity: PayerIdentity | null = null;
   if (evmConnected && evmAddress && (signedInWithGoogle || !pickedSolana)) {
-    identity = { kind: "evm", address: evmAddress, chainId, canSettleOnArc: true };
+    identity = {
+      kind: "evm",
+      address: evmAddress,
+      chainId,
+      canSettleOnArc: true,
+      gatewayCapable: true,
+    };
   } else if (solanaAddress) {
-    identity = { kind: "solana", address: solanaAddress, canSettleOnArc: false };
+    // Which detected wallet is actually connected, so its capability travels
+    // with the identity. Matched on the provider object rather than the label:
+    // the label is the wallet's own string and can change, the object is the
+    // thing we will be asking to sign.
+    const active = getSolanaProvider();
+    const option = solanaWallets.find((w) => w.provider === active);
+    identity = {
+      kind: "solana",
+      address: solanaAddress,
+      canSettleOnArc: false,
+      // Unknown wallets are assumed capable, matching lib/solana-wallet: the
+      // failure is loud and recoverable, whereas refusing an unlisted wallet
+      // blocks one that probably works.
+      gatewayCapable: option?.gatewayCapable ?? true,
+    };
   }
 
   return { identity, solanaWallets, connectSolana, disconnect, connecting, error };

@@ -12,6 +12,8 @@ import {
 } from "@/lib/wallet-gate";
 import { shortenAddress } from "@/lib/format";
 import { usePayerIdentity } from "@/lib/use-payer-identity";
+import { usePayerUsdc } from "@/lib/use-payer-usdc";
+import { chainLabel, usdcDisplay } from "@/lib/unified-balance";
 
 // Google sign-in exists when Circle is configured. There is no provider flag
 // any more: Privy was removed in Phase 7, so this is the only Google path and
@@ -151,31 +153,63 @@ function GoogleSignIn({ fullWidth = false, short = false }: { fullWidth?: boolea
 // localStorage, the connector's isAuthorized() still says yes, and the next
 // page load silently signs the user back in. So sign-out goes through the
 // event, which CircleStack handles by disconnecting AND clearing the session.
-function DisconnectX() {
-  const { disconnect } = useDisconnect();
-  return (
-    <button
-      onClick={() => (CIRCLE_ENABLED ? requestSignOut() : disconnect())}
-      className="ml-1 text-scale-2 font-mono text-ink-dim hover:text-danger transition-colors leading-none"
-      title="Disconnect"
-      aria-label="Disconnect"
-    >
-      ×
-    </button>
-  );
-}
+// A bare x inside the chip stood here. Removed: the chip is the balance
+// control now, so a tap has to mean "show me my money", and Disconnect is a
+// labelled button beside it rather than a glyph competing with it.
 
+// The connected wallet, and what it holds.
+//
+// This used to be an address and an x. The x was redundant -- Disconnect sits
+// beside it -- and the balance, the one thing a payer wants to know before
+// typing an amount, was nowhere on the page. Tapping the chip now answers it.
+//
+// Per chain, never summed. One payment draws from a single chain, so a total
+// would promise an amount that cannot be sent.
 function ConnectedChip({ address, compact = false }: { address: string; compact?: boolean }) {
+  const [open, setOpen] = useState(false);
+  const { identity } = usePayerIdentity();
+  const usdc = usePayerUsdc({
+    address: identity?.address,
+    family: identity?.kind,
+    enabled: !!identity && open,
+  });
+
   return (
-    <div
-      className={`inline-flex items-center ${compact ? "gap-1.5 px-3 py-1.5" : "gap-2 px-3 py-2"}
-                  bg-surface border border-border`}
-    >
-      <span className={`${compact ? "w-1.5 h-1.5" : "w-2 h-2 animate-pulse"} bg-signal`} />
-      <span className={`${compact ? "text-scale-1" : "text-scale-2"} font-mono text-ink`}>
-        {shortenAddress(address, compact ? 3 : 4)}
-      </span>
-      <DisconnectX />
+    <div className="relative">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        aria-label="Show balances"
+        className={`inline-flex items-center ${compact ? "gap-1.5 px-3 py-1.5" : "gap-2 px-3 py-2"}
+                    bg-surface border border-border hover:border-ink-dim transition-colors`}
+      >
+        <span className={`${compact ? "w-1.5 h-1.5" : "w-2 h-2 animate-pulse"} bg-signal`} />
+        <span className={`${compact ? "text-scale-1" : "text-scale-2"} font-mono text-ink`}>
+          {shortenAddress(address, compact ? 3 : 4)}
+        </span>
+      </button>
+
+      {open && (
+        <div className="absolute right-0 top-full mt-1 z-40 min-w-[13rem] border border-border bg-surface p-3 space-y-1.5">
+          <p className="font-mono text-[10px] uppercase tracking-widest text-ink-dim">
+            Your USDC
+          </p>
+          {usdc.loading && usdc.funded.length === 0 ? (
+            <p className="font-mono text-scale-1 text-ink-dim">Reading…</p>
+          ) : usdc.funded.length === 0 ? (
+            <p className="font-mono text-scale-1 text-ink-dim">
+              {usdc.error || "None found on any supported chain."}
+            </p>
+          ) : (
+            usdc.funded.map((c) => (
+              <div key={c.chain} className="flex items-baseline justify-between gap-4">
+                <span className="font-mono text-scale-1 text-ink-dim">{chainLabel(c.chain)}</span>
+                <span className="font-mono text-scale-2 text-ink">{usdcDisplay(c.minor)}</span>
+              </div>
+            ))
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -227,8 +261,21 @@ export function WalletConnect() {
   // wrong account.
   if (!walletSettled) return null;
 
+  // Same shape as the Solana branch above. The chip no longer carries an x, so
+  // without this an EVM payer had a balance to look at and no way to disconnect.
   if (isConnected && address) {
-    return <ConnectedChip address={address} />;
+    return (
+      <div className="flex items-center gap-2">
+        <ConnectedChip address={address} />
+        <button
+          onClick={() => (CIRCLE_ENABLED ? requestSignOut() : void disconnect())}
+          className="px-3 py-2 text-scale-1 font-mono border border-border
+                     text-ink-dim hover:text-ink transition-colors whitespace-nowrap"
+        >
+          Disconnect
+        </button>
+      </div>
+    );
   }
 
   const injected = connectors.find((c) => c.id === "injected" || c.type === "injected");
@@ -329,7 +376,18 @@ export function WalletConnectCompact() {
   }
 
   if (isConnected && address) {
-    return <ConnectedChip address={address} compact />;
+    return (
+      <div className="flex items-center gap-2">
+        <ConnectedChip address={address} compact />
+        <button
+          onClick={() => (CIRCLE_ENABLED ? requestSignOut() : void disconnect())}
+          className="px-2 py-1.5 text-scale-1 font-mono border border-border
+                     text-ink-dim hover:text-ink transition-colors whitespace-nowrap"
+        >
+          Disconnect
+        </button>
+      </div>
+    );
   }
 
   const connector =

@@ -13,6 +13,8 @@
 // currency — only USDC.
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useAccount, useConnect, useDisconnect, type Connector } from "wagmi";
+import { usePayerIdentity } from "@/lib/use-payer-identity";
+import { shortenAddress } from "@/lib/format";
 import {
   getSolanaProvider,
   connectSolanaWallet,
@@ -28,6 +30,8 @@ import {
   type PublicSettlementIntent,
 } from "@/lib/conduit-api";
 import { isoToToken } from "@/lib/currencies";
+import { formatAmount } from "@/lib/format";
+import type { Currency } from "@conduit/sdk/lite";
 import {
   buildEvmAdapter,
   ensureEvmChain,
@@ -228,6 +232,9 @@ export function CrossChainBridge({ intentId, intent }: CrossChainBridgeProps) {
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const { connector, address: evmAddress, isConnected: evmConnected } = useAccount();
+  // Who is already paying. This component used to be the thing that connected
+  // a wallet; the nav does that now, so its job here is to use the answer.
+  const { identity } = usePayerIdentity();
   const { connectAsync, connectors } = useConnect();
   const { disconnectAsync } = useDisconnect();
   const [solanaWallets, setSolanaWallets] = useState<ReturnType<typeof listSolanaWallets>>([]);
@@ -264,6 +271,36 @@ export function CrossChainBridge({ intentId, intent }: CrossChainBridgeProps) {
     setIntentStatus(intent.status);
   }, [intentId, intent.status]);
 
+  // Skip the chain picker when a wallet is already connected.
+  //
+  // The payer connected at the top of the page and the balance read already
+  // knows which chains hold their USDC, so "choose the chain your USDC is on"
+  // asks a question the app can answer itself -- and asking it right after a
+  // successful connect reads as though the connect did not register.
+  //
+  // Once per intent, and only from the entry phase: a payer who deliberately
+  // goes back to the picker must not be bounced straight out of it again.
+  const autoStarted = useRef(false);
+  useEffect(() => {
+    autoStarted.current = false;
+  }, [intentId]);
+  useEffect(() => {
+    if (autoStarted.current || phase !== "choose_source") return;
+    const solProvider = getSolanaProvider();
+    if (solProvider?.publicKey) {
+      const opt = solanaWallets.find((w) => w.provider === solProvider) ?? solanaWallets[0];
+      autoStarted.current = true;
+      void chooseSource("solana", undefined, opt ? { solana: opt } : undefined);
+      return;
+    }
+    if (evmConnected && connector) {
+      autoStarted.current = true;
+      void chooseSource("evm", undefined, { evm: { connector } as EvmChoice });
+    }
+    // chooseSource is a stable function declaration in this component body.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase, evmConnected, connector, solanaWallets, intentId]);
+
   // Drop the current wallet and ask again.
   //
   // Both halves matter. Clearing the adapter alone would leave the extension
@@ -292,35 +329,11 @@ export function CrossChainBridge({ intentId, intent }: CrossChainBridgeProps) {
     }
   }
 
-  // Disconnect and stay disconnected.
-  //
-  // switchWallet above drops the wallet and immediately asks for another one,
-  // which is the right move mid-payment but is not the same thing as leaving.
-  // A payer who connected the wrong wallet -- or who simply changed their mind
-  // on someone else's machine -- had no way to hand the connection back: every
-  // control led to picking again. Connecting is easy to undo only if undoing it
-  // is offered.
-  async function disconnectWallet() {
-    const kind = sourceChain ? chainToSourceSlug(sourceChain) : null;
-    setAdapter(null);
-    setUnified(null);
-    setError("");
-    setSourceChain(null);
-    try {
-      if (kind === "solana") {
-        await disconnectSolanaWallet();
-      } else if (evmConnected) {
-        await disconnectAsync();
-      } else {
-        // Kind unknown (nothing chosen yet) -- drop whichever is live.
-        await disconnectSolanaWallet().catch(() => {});
-        if (evmConnected) await disconnectAsync();
-      }
-    } catch {
-      // A wallet that refuses to let go must not trap the payer on this screen.
-    }
-    setPhase("choose_source");
-  }
+  // disconnectWallet stood here, offering "Disconnect" on the confirm and
+  // insufficient screens. Removed with them: disconnecting is the nav's job, and
+  // a payment in progress having its own copy meant two controls disagreeing
+  // about one connection -- which is how a payer ended up connected at the top
+  // of the page and asked to connect at the bottom of it.
 
   function startPolling() {
     if (pollRef.current) clearInterval(pollRef.current);
@@ -390,39 +403,64 @@ export function CrossChainBridge({ intentId, intent }: CrossChainBridgeProps) {
     setWalletPickerFor(kind);
   }
 
-  async function chooseSource(
-    kind: "solana" | "evm",
-    picked?: string,
-    pickedWallet?: { solana?: SolanaChoice; evm?: EvmChoice }
-  ) {
+  // The wallet is already connected; stop asking which one.
+  //
+  // choose_source was the entry phase for everyone, which made sense when this
+  // component owned connecting. It no longer does -- the nav connects, and
+  // usePayerIdentity already knows both who is paying and (via the balance
+  // read) where their USDC is. Asking again after that is asking a question we
+  // have the answer to, and on a phone it is a full screen of it.
+  //
+  // The picker is not gone: it is what "use a different wallet" and the
+  // insufficient screen fall back to, and it is still the entry point for a
+  // payer who arrived with nothing connected.
+  const adopted = useRef(false);
+  useEffect(() => {
+    if (adopted.current || !identity || adapter) return;
+    adopted.current = true;
+    void adoptConnected();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [identity?.address, identity?.kind, adapter]);
+
+  // Reset the latch when the intent changes, so a second payment on the same
+  // page adopts the wallet again rather than falling back to the picker.
+  useEffect(() => {
+    adopted.current = false;
+  }, [intentId]);
+
+  async function adoptConnected() {
+    if (!identity) return;
     setError("");
     setPhase("connecting");
     try {
       let payer: PayerAdapter;
-      if (kind === "solana") {
-        // Solana address, never an ETH address.
-        const addr = await connectSolanaWallet(pickedWallet?.solana?.provider);
-        const provider = pickedWallet?.solana?.provider ?? getSolanaProvider();
-        payer = await buildSolanaAdapter(provider, addr);
+      if (identity.kind === "solana") {
+        const provider = getSolanaProvider();
+        if (!provider) throw new Error("Solana wallet is no longer available.");
+        payer = await buildSolanaAdapter(provider, identity.address);
       } else {
-        const target = pickedWallet?.evm;
-        if (!target) throw new Error("Choose a wallet to pay from.");
-        // Switch wagmi over when the payer picked a different wallet than the
-        // one already connected. Without the disconnect, wagmi keeps the old
-        // connector and the payment signs from the wrong account.
-        let active = connector;
-        let addr = evmAddress;
-        if (!evmConnected || connector?.id !== target.connector.id) {
-          if (evmConnected) await disconnectAsync();
-          const res = await connectAsync({ connector: target.connector });
-          active = target.connector;
-          addr = res.accounts[0];
-        }
-        if (!active || !addr) throw new Error("That wallet did not connect.");
-        const provider = await active.getProvider();
-        payer = await buildEvmAdapter(provider, addr);
+        if (!connector) throw new Error("No connected wallet.");
+        payer = await buildEvmAdapter(await connector.getProvider(), identity.address);
       }
-      setAdapter(payer);
+      await settleOn(payer);
+    } catch (err) {
+      // Falling back to the picker rather than to an error screen: whatever
+      // went wrong with the connected wallet, choosing another one is a real
+      // way forward.
+      setError(err instanceof Error ? err.message : "Could not read that wallet.");
+      setPhase("choose_source");
+    }
+  }
+
+  // Everything after "we have a wallet": read the plan and the balances, pick
+  // the chain that can actually cover the amount, and land on confirm.
+  //
+  // Extracted so the connected-wallet path and the picker path cannot drift.
+  // They were the same twenty lines twice, and the balance rules in here (one
+  // chain must cover the whole amount, a payer's explicit pick outranks the
+  // greedy default) are exactly the kind that get fixed in one copy only.
+  async function settleOn(payer: PayerAdapter, picked?: string) {
+    setAdapter(payer);
       setPhase("checking_balance");
 
       // Size against deposited Gateway balance AND raw wallet balance: the
@@ -478,6 +516,41 @@ export function CrossChainBridge({ intentId, intent }: CrossChainBridgeProps) {
       } else {
         setPhase("insufficient");
       }
+  }
+
+  async function chooseSource(
+    kind: "solana" | "evm",
+    picked?: string,
+    pickedWallet?: { solana?: SolanaChoice; evm?: EvmChoice }
+  ) {
+    setError("");
+    setPhase("connecting");
+    try {
+      let payer: PayerAdapter;
+      if (kind === "solana") {
+        // Solana address, never an ETH address.
+        const addr = await connectSolanaWallet(pickedWallet?.solana?.provider);
+        const provider = pickedWallet?.solana?.provider ?? getSolanaProvider();
+        payer = await buildSolanaAdapter(provider, addr);
+      } else {
+        const target = pickedWallet?.evm;
+        if (!target) throw new Error("Choose a wallet to pay from.");
+        // Switch wagmi over when the payer picked a different wallet than the
+        // one already connected. Without the disconnect, wagmi keeps the old
+        // connector and the payment signs from the wrong account.
+        let active = connector;
+        let addr = evmAddress;
+        if (!evmConnected || connector?.id !== target.connector.id) {
+          if (evmConnected) await disconnectAsync();
+          const res = await connectAsync({ connector: target.connector });
+          active = target.connector;
+          addr = res.accounts[0];
+        }
+        if (!active || !addr) throw new Error("That wallet did not connect.");
+        const provider = await active.getProvider();
+        payer = await buildEvmAdapter(provider, addr);
+      }
+      await settleOn(payer, picked);
     } catch (err) {
       const notAvailable =
         err instanceof ConduitApiError && err.code === "not_available";
@@ -752,12 +825,6 @@ export function CrossChainBridge({ intentId, intent }: CrossChainBridgeProps) {
           ← Use a different wallet
         </button>
         <button
-          onClick={() => void disconnectWallet()}
-          className="block text-xs font-mono text-ink-dim hover:text-ink"
-        >
-          Disconnect this wallet
-        </button>
-        <button
           onClick={() => setPhase("choose_source")}
           className="block text-xs font-mono text-ink-dim hover:text-ink"
         >
@@ -770,25 +837,61 @@ export function CrossChainBridge({ intentId, intent }: CrossChainBridgeProps) {
   if (phase === "confirm") {
     const funded = unified ? fundedChains(unified) : [];
     const need = BigInt(requiredUSDC ?? "0");
+    // The chain the spend will actually draw from: the payer's pick when they
+    // made one, otherwise the default chosen after the balance read.
+    const activeChain = funded.find((c) => c.chain === sourceChain) ?? funded[0];
     return (
       <div className="space-y-4">
-        <div className="inline-flex items-center gap-2 px-3 py-1.5 border border-border bg-surface">
-          <span className="w-1.5 h-1.5 bg-signal animate-pulse" />
-          <span className="text-ink-dim text-xs font-mono">Connected</span>
-          <span className="text-ink text-xs font-mono">
-            {adapter?.address ? `${adapter.address.slice(0, 5)}…${adapter.address.slice(-4)}` : "—"}
-          </span>
-        </div>
-        <div className="border border-border bg-surface p-4 space-y-2">
-          <p className="text-ink-dim text-xs uppercase tracking-wider font-mono">Paying with</p>
-          <p className="text-ink font-mono text-xl">
-            {usdcDisplay(BigInt(requiredUSDC ?? "0"))} USDC
-          </p>
-          {funded.length === 1 && (
-            <p className="text-ink-dim text-xs font-mono">
-              from {chainLabel(funded[0].chain)} · {usdcDisplay(funded[0].minor)} USDC available
+        {/* The payment, not the plumbing.
+            This led with a "Connected 3KyT…g6nd" chip, duplicating the nav, and
+            then labelled the amount "Paying with" -- so the largest text on the
+            last screen before signing was a wallet address, and the route the
+            money takes was a footnote. What a payer needs here is what leaves,
+            where it leaves from, and what lands. */}
+        <div className="border border-border bg-surface p-5 space-y-4">
+          <div>
+            <p className="text-ink-dim text-xs uppercase tracking-wider font-mono">You pay</p>
+            <p className="text-ink font-mono text-3xl mt-1">
+              {usdcDisplay(BigInt(requiredUSDC ?? "0"))} USDC
             </p>
-          )}
+            {activeChain && (
+              <p className="text-ink-dim text-xs font-mono mt-1">
+                from {chainLabel(activeChain.chain)} · {usdcDisplay(activeChain.minor)} available
+              </p>
+            )}
+          </div>
+
+          <div className="h-px bg-border" />
+
+          {/* The hops, named. A payer who can see Base then Arc then EURC
+              understands why this takes longer than a same chain send, which is
+              the single most common thing to be confused about here. */}
+          <div className="flex items-center gap-2 font-mono text-xs text-ink-dim flex-wrap">
+            <span className="text-ink">{activeChain ? chainLabel(activeChain.chain) : "your chain"}</span>
+            <span aria-hidden>→</span>
+            <span className="text-ink">Arc</span>
+            {isoToToken(intent.settle_currency) !== "USDC" && (
+              <>
+                <span aria-hidden>→</span>
+                <span className="text-ink">{isoToToken(intent.settle_currency)}</span>
+              </>
+            )}
+          </div>
+
+          <div className="h-px bg-border" />
+
+          <div>
+            <p className="text-ink-dim text-xs uppercase tracking-wider font-mono">They receive</p>
+            <p className="text-signal font-mono text-xl mt-1">
+              {/* formatAmount, not usdcDisplay: that one is 6dp by definition
+                  and three settle tokens (BRLA, ZARU, KRW1) are 18, which would
+                  misprint the recipient's amount by a factor of a trillion. */}
+              {formatAmount(
+                BigInt(intent.amount),
+                isoToToken(intent.settle_currency) as Currency,
+              )}
+            </p>
+          </div>
         </div>
 
         {/* More than one funded chain — let the payer choose, rather than
@@ -830,31 +933,23 @@ export function CrossChainBridge({ intentId, intent }: CrossChainBridgeProps) {
             })}
           </div>
         )}
-        <p className="text-ink-dim text-xs">
-          Your USDC moves to Arc, then converts to {isoToToken(intent.settle_currency)} and settles to the recipient.
-        </p>
         <button
           onClick={handleSpend}
           className="w-full py-4 bg-signal text-signal-ink font-mono hover:bg-signal/90 transition-colors"
         >
           Pay {usdcDisplay(BigInt(requiredUSDC ?? "0"))} USDC
         </button>
-        {/* Last chance to change wallet before anything is signed. The address
-            about to spend is shown above; if it is not the one the payer meant,
-            this is where they notice. */}
-        <div className="flex items-center justify-center gap-4">
+        {/* Changing wallet stays -- this is the last moment before signing, and
+            the address about to spend is named above, so this is where a payer
+            notices it is not the one they meant. Disconnecting does not: it
+            lives in the nav, and a second control for it mid payment meant two
+            places disagreeing about one connection. */}
+        <div className="flex items-center justify-center">
           <button
             onClick={() => void switchWallet()}
             className="text-xs font-mono text-ink-dim hover:text-ink"
           >
-            Use a different wallet
-          </button>
-          <span className="text-ink-dim/40" aria-hidden>·</span>
-          <button
-            onClick={() => void disconnectWallet()}
-            className="text-xs font-mono text-ink-dim hover:text-ink"
-          >
-            Disconnect
+            Pay from a different wallet
           </button>
         </div>
         {error && <p className="text-danger text-sm">{error}</p>}
@@ -874,39 +969,98 @@ export function CrossChainBridge({ intentId, intent }: CrossChainBridgeProps) {
   if (phase === "bridging" || phase === "settled" || phase === "error") {
     const step1Done = phase === "bridging" || phase === "settled";
     const step2Done = intentStatus === "settled";
+    const settleToken = isoToToken(intent.settle_currency);
+    const from = sourceChain ? chainLabel(sourceChain) : null;
+
+    // Settled gets a receipt, not a sentence.
+    //
+    // It used to be "Settled. Thank you." over a progress list. That is the one
+    // moment the payer wants the facts back -- how much left, from where, who
+    // has it now -- and it is also the screen they screenshot when something
+    // later goes wrong. A thank you is not a record.
+    if (phase === "settled" && step2Done) {
+      return (
+        <div className="space-y-5">
+          <div className="flex flex-col items-center gap-2">
+            <Rocket state="launch" size={56} />
+            <p className="text-signal font-mono text-lg">Paid</p>
+          </div>
+
+          <dl className="border border-border bg-surface divide-y divide-border font-mono text-sm">
+            <Fact label="Amount" value={`${usdcDisplay(BigInt(requiredUSDC ?? "0"))} USDC`} />
+            {from && <Fact label="Paid from" value={from} />}
+            <Fact label="Settled in" value={settleToken} />
+            {recipient && <Fact label="To" value={shortenAddress(recipient)} />}
+          </dl>
+
+          {mintTx && (
+            <a
+              href={`https://testnet.arcscan.app/tx/${mintTx}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="block w-full py-3 text-center text-scale-2 font-mono
+                         border border-border text-ink-dim
+                         hover:text-ink hover:border-ink-dim transition-colors"
+            >
+              View on ArcScan →
+            </a>
+          )}
+        </div>
+      );
+    }
+
     return (
-      <div className="space-y-6">
-        <p className="text-ink-dim text-xs font-mono">
-          Your USDC is moving to Arc and converting to {isoToToken(intent.settle_currency)}. You won&apos;t need to sign again.
-        </p>
+      <div className="space-y-5">
+        <div>
+          <p className="text-ink font-mono text-sm">
+            {from ? `Moving your USDC from ${from} to Arc` : "Moving your USDC to Arc"}
+          </p>
+          <p className="text-ink-dim text-xs font-mono mt-1">
+            Converting to {settleToken} on arrival. You won&apos;t need to sign again.
+          </p>
+        </div>
+
         <ol className="space-y-3 font-mono text-sm border border-border bg-surface p-4">
           <BridgeStep n={1} label="Bridging your USDC to Arc" done={step1Done && step2Done} active={step1Done && !step2Done} />
-          <BridgeStep n={2} label={`Converting to ${isoToToken(intent.settle_currency)} & settling`} done={step2Done} active={step1Done && !step2Done} />
+          <BridgeStep n={2} label={`Converting to ${settleToken} & settling`} done={step2Done} active={step1Done && !step2Done} />
         </ol>
-        {phase === "settled" && (
+
+        {/* Worth saying, because it is true and because watching a spinner you
+            believe you must not interrupt is its own kind of cost. The transfer
+            is tracked server side through deposit, mint and handoff, with
+            orphan recovery, so it resumes rather than being lost. */}
+        {phase === "bridging" && (
+          <p className="text-ink-dim text-xs font-mono">
+            You can close this page. The transfer carries on and settles without you.
+          </p>
+        )}
+
+        {error && (
           <div className="space-y-3">
-            <Rocket state="launch" size={56} />
-            <p className="text-signal font-mono">Settled. Thank you.</p>
-            {mintTx && (
-              <a
-                href={`https://testnet.arcscan.app/tx/${mintTx}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="block w-full py-3 text-center text-scale-2 font-mono
-                           border border-border text-ink-dim
-                           hover:text-ink hover:border-ink-dim transition-colors"
-              >
-                View on ArcScan →
-              </a>
-            )}
+            <p className="text-danger text-sm">{error}</p>
+            <button
+              onClick={() => void adoptConnected()}
+              className="w-full py-3 border border-border font-mono text-sm
+                         text-ink-dim hover:text-ink hover:border-ink-dim transition-colors"
+            >
+              Try again
+            </button>
           </div>
         )}
-        {error && <p className="text-danger text-sm">{error}</p>}
       </div>
     );
   }
 
   return null;
+}
+
+function Fact({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-center justify-between px-4 py-3">
+      <dt className="text-ink-dim text-xs uppercase tracking-wider">{label}</dt>
+      <dd className="text-ink">{value}</dd>
+    </div>
+  );
 }
 
 function BridgeStep({ n, label, done, active }: { n: number; label: string; done: boolean; active: boolean }) {

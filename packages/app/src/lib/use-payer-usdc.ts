@@ -1,0 +1,166 @@
+"use client";
+
+// Where the payer's USDC actually is, across every chain Conduit can source
+// from.
+//
+// This read already existed, buried inside CrossChainBridge -- which meant the
+// app only learned where the money was AFTER the payer had committed to the
+// cross-chain flow. So the route was a thing the payer chose up front and the
+// balance merely confirmed, when it should be the other way round: the balance
+// is the fact, and the route follows from it.
+//
+// Deliberately does NOT cover Arc. Arc balances come from useBalances, which
+// reads every settle currency rather than USDC alone, and SOURCE_CHAINS is the
+// Gateway source list with Arc excluded on purpose (Arc is the destination).
+// Callers combine the two -- see routeForAmount below.
+
+import { useEffect, useState } from "react";
+import {
+  fundedChains,
+  getUnifiedUsdc,
+  getWalletUsdc,
+  mergeUsdc,
+  type PayerAdapter,
+  type UnifiedUsdc,
+} from "@/lib/unified-balance";
+
+export interface PayerUsdc {
+  loading: boolean;
+  /** Non-empty only when BOTH reads failed; a partial read is still useful. */
+  error: string;
+  unified: UnifiedUsdc | null;
+  /** Chains holding a non-zero balance, richest first. */
+  funded: Array<{ chain: string; minor: bigint }>;
+  /**
+   * The largest amount a single payment could actually draw.
+   *
+   * This, not a sum, is what an amount should be checked against. A payer
+   * holding 20 on Arc and 20 on Ethereum cannot pay 30: spendUsdcToArc
+   * deposits the full amount on ONE chain and spends it there, so two
+   * half-funded chains never combine however inviting the total looks.
+   */
+  maxSingleChainMinor: bigint;
+  /**
+   * Everything held off Arc, summed.
+   *
+   * Deliberately named so it cannot be mistaken for a balance. It is a
+   * portfolio figure, never a spendable one -- showing it as "you have X"
+   * promises a payment the rails cannot make. Show funded[] per chain
+   * instead.
+   */
+  totalAcrossChainsMinor: bigint;
+}
+
+const EMPTY: PayerUsdc = {
+  loading: false,
+  error: "",
+  unified: null,
+  funded: [],
+  maxSingleChainMinor: 0n,
+  totalAcrossChainsMinor: 0n,
+};
+
+export interface UsePayerUsdcOptions {
+  address?: string;
+  family?: "evm" | "solana";
+  /**
+   * The EIP-1193 (or Solana) provider, when one is available.
+   *
+   * Optional on purpose. The wallet read only needs an address -- it goes
+   * straight to each chain's RPC -- so a page can show a payer where their
+   * money is the moment they connect, without asking the wallet for anything.
+   * With a provider we can additionally ask Circle what has already been
+   * deposited into Gateway, which is usually nothing.
+   */
+  provider?: unknown;
+  enabled?: boolean;
+}
+
+export function usePayerUsdc({
+  address,
+  family = "evm",
+  provider,
+  enabled = true,
+}: UsePayerUsdcOptions): PayerUsdc {
+  const [state, setState] = useState<PayerUsdc>(EMPTY);
+
+  useEffect(() => {
+    if (!enabled || !address) {
+      setState(EMPTY);
+      return;
+    }
+    let cancelled = false;
+    setState((s) => ({ ...s, loading: true, error: "" }));
+
+    (async () => {
+      // getWalletUsdc reads only .family and .address for the EVM branch, so a
+      // provider-less handle is enough for the part that matters.
+      const payer: PayerAdapter = { adapter: null, address, family, provider };
+
+      // Both reads are allowed to fail independently.
+      //
+      // Circle's testnet Gateway API flaps -- the SDK gives up after ten
+      // retries -- and that must not hide a wallet balance readable without
+      // Circle being involved at all. Equally, a failed wallet read should
+      // still show whatever was already deposited.
+      const [deposited, wallet] = await Promise.all([
+        provider
+          ? getUnifiedUsdc(payer).catch(() => null)
+          : Promise.resolve(null),
+        getWalletUsdc(payer).catch(() => null),
+      ]);
+
+      if (cancelled) return;
+
+      if (!deposited && !wallet) {
+        setState({ ...EMPTY, error: "Couldn't read your USDC balances. Try again in a moment." });
+        return;
+      }
+
+      const unified = mergeUsdc(deposited ?? ({} as UnifiedUsdc), wallet ?? []);
+      // Richest first, so the head of the list IS the spendable ceiling.
+      const funded = fundedChains(unified);
+      setState({
+        loading: false,
+        error: "",
+        unified,
+        funded,
+        maxSingleChainMinor: funded[0]?.minor ?? 0n,
+        totalAcrossChainsMinor: funded.reduce((sum, c) => sum + c.minor, 0n),
+      });
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [address, family, provider, enabled]);
+
+  return state;
+}
+
+export type PayerRoute =
+  | { kind: "arc" }
+  | { kind: "cross_chain"; chain: string; minor: bigint }
+  | { kind: "insufficient"; bestMinor: bigint };
+
+/**
+ * Which route can actually settle this amount.
+ *
+ * Arc wins when it can cover the amount on its own, because it is one
+ * transaction with nothing in between. Otherwise the payment comes from the
+ * richest single source chain that covers it -- ONE chain, never a sum of
+ * several: spendUsdcToArc deposits the full amount on one chain and spends it
+ * there, so two half-funded chains cannot combine into one payment however
+ * appealing the total looks.
+ */
+export function routeForAmount(
+  needMinor: bigint,
+  arcMinor: bigint,
+  funded: Array<{ chain: string; minor: bigint }>,
+): PayerRoute {
+  if (arcMinor >= needMinor) return { kind: "arc" };
+  const payable = funded.find((c) => c.minor >= needMinor);
+  if (payable) return { kind: "cross_chain", chain: payable.chain, minor: payable.minor };
+  const best = funded.reduce((m, c) => (c.minor > m ? c.minor : m), 0n);
+  return { kind: "insufficient", bestMinor: arcMinor > best ? arcMinor : best };
+}

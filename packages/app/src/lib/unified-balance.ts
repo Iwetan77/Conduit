@@ -443,7 +443,14 @@ async function erc20BalanceOf(rpcUrl: string, token: string, owner: string): Pro
 // spend time (its deposit-if-needed loop covers the shortfall between the two).
 export function mergeUsdc(deposited: UnifiedUsdc, wallet: ChainUsdc[]): UnifiedUsdc {
   const minorByChain = new Map<string, bigint>();
-  for (const c of [...deposited.byChain, ...wallet]) {
+  // `deposited` may legitimately be an empty object.
+  //
+  // Its callers hand one over when the Gateway read fails, on purpose: Circle's
+  // testnet API flaps, and the wallet balance is readable without it. But the
+  // spread below did not survive that -- `[...undefined]` throws, so the
+  // tolerant path took the screen down exactly when it was supposed to be
+  // rescuing it, and only when Circle was already having a bad day.
+  for (const c of [...(deposited?.byChain ?? []), ...wallet]) {
     minorByChain.set(c.chain, (minorByChain.get(c.chain) ?? 0n) + usdcHumanToMinor(c.confirmed));
   }
   const byChain = [...minorByChain].map(([chain, minor]) => ({

@@ -4,6 +4,9 @@ import Link from "next/link";
 
 import { useState, useEffect } from "react";
 import { useAccount } from "wagmi";
+import { usePayerIdentity } from "@/lib/use-payer-identity";
+import { usePayerUsdc, routeForAmount } from "@/lib/use-payer-usdc";
+import { chainLabel } from "@/lib/unified-balance";
 import { isAddress } from "viem";
 import { Nav, MobileNav } from "@/components/Shared/Nav";
 import { AddressInput } from "@/components/SendFlow/AddressInput";
@@ -29,6 +32,16 @@ type Step = "input" | "confirm";
 export default function SendPage() {
   const [mounted, setMounted] = useState(false);
   const { isConnected } = useAccount();
+  // Who is paying, across both wallet families. isConnected above is still
+  // wagmi's answer for EVM specifically; identity is the answer for the page.
+  const { identity } = usePayerIdentity();
+  // Where their USDC is, off Arc. Read at connect time so the route is known
+  // before the payer commits to one, rather than discovered inside it.
+  const sourceUsdc = usePayerUsdc({
+    address: identity?.address,
+    family: identity?.kind,
+    enabled: !!identity,
+  });
   const [step, setStep] = useState<Step>("input");
 
   useEffect(() => { setMounted(true); }, []);
@@ -38,11 +51,14 @@ export default function SendPage() {
   const [recipientCurrency, setRecipientCurrency] = useState<Currency>("USDC");
   const [payerCurrency, setPayerCurrency] = useState<Currency>("USDC");
   const [payerBalances, setPayerBalances] = useState<BalanceMap>({});
-  // Cross-CHAIN funding lives on THIS step, not the confirm step, and is not
-  // gated on isConnected. Someone whose USDC is on Solana has no Arc/EVM
-  // wallet at all -- putting this behind "Connect your wallet to send" made the
-  // one path built for them reachable only by first connecting the exact wallet
-  // they don't have.
+  // Cross-CHAIN funding still lives on THIS step rather than the confirm one,
+  // but it is no longer a separate door.
+  //
+  // It used to sit outside the connect gate entirely, because a payer whose
+  // USDC is on Solana had no wallet the gate would accept -- so the one path
+  // built for them was reachable only by first connecting the exact wallet
+  // they did not have. They can connect that wallet now (usePayerIdentity), so
+  // this is simply where the Send button lands when the money is off Arc.
   const [bridgeIntent, setBridgeIntent] = useState<PublicSettlementIntent | null>(null);
   const [bridgeBusy, setBridgeBusy] = useState(false);
   const [bridgeError, setBridgeError] = useState("");
@@ -92,16 +108,32 @@ export default function SendPage() {
   const insufficient =
     required.data !== undefined && payerBalance !== undefined && payerBalance < required.data;
 
+  // Which route can actually settle this, decided from where the money is
+  // rather than from which network the wallet happens to be pointed at.
+  //
+  // Arc only counts for an EVM wallet: payerBalances is read against the wagmi
+  // address, and a Solana wallet cannot sign on Arc at all, so crediting it an
+  // Arc balance would offer a route that fails at the last step.
+  const arcUsdc = identity?.kind === "evm" ? (payerBalances.USDC ?? 0n) : 0n;
+  const route =
+    required.data !== undefined
+      ? routeForAmount(required.data, arcUsdc, sourceUsdc.funded)
+      : null;
+
   // Cross-currency is a first-class send, not a merchant-only feature: it
   // settles through Circle StableFX against a settlement intent that /send
   // creates against its own personal account. No payment link, no merchant
   // dashboard. SendConfirm drives it end to end.
   const crossCurrency = payerCurrency !== recipientCurrency;
+  // "Insufficient" now means insufficient EVERYWHERE, not just on Arc. A payer
+  // holding nothing on Arc but plenty on Base was previously blocked by the
+  // Arc-only check before the cross chain route was ever considered.
   const canProceed =
     isAddress(recipient) &&
     parseFloat(amount) > 0 &&
-    isConnected &&
-    !insufficient;
+    identity !== null &&
+    route?.kind !== "insufficient" &&
+    (route?.kind === "cross_chain" || !insufficient);
 
   return (
     <div className="min-h-screen">
@@ -217,7 +249,7 @@ export default function SendPage() {
                 )}
               </div>
 
-              {!mounted || !isConnected ? (
+              {!mounted || !identity ? (
                 <div className="text-center space-y-3">
                   <p className="text-ink-dim text-sm">
                     Connect the wallet holding your USDC
@@ -229,50 +261,48 @@ export default function SendPage() {
                   <div className="flex justify-center">
                     <WalletConnect solana />
                   </div>
-                  {/* Reads as "one of two ways", not "the requirement". Without
-                      this the prompt above looked mandatory, so a Solana payer
-                      stopped here -- at a wallet they don't have -- instead of
-                      using the cross-chain option right below. */}
-                  <p className="text-ink-dim text-xs font-mono pt-1">
-                    — or —
-                  </p>
+                  {/* The "— or —" that stood here pointed at the second
+                      button below, which is gone: connecting is now the only
+                      way in for every payer, so there is no alternative to
+                      point at. */}
                 </div>
               ) : (
-                <button
-                  onClick={() => setStep("confirm")}
-                  disabled={!canProceed}
-                  className="w-full py-4 bg-signal text-signal-ink
-                             font-mono text-xl hover:bg-signal/90 transition-colors
-                             disabled:opacity-30 disabled:cursor-not-allowed"
-                >
-                  Review Payment →
-                </button>
+                <>
+                  {/* The route, named before anything happens.
+                      A payer should know they are about to spend their Base
+                      balance before they press the button, not discover it on
+                      the next screen. */}
+                  {route?.kind === "cross_chain" && (
+                    <p className="text-center text-scale-1 font-mono text-signal">
+                      Paying from {chainLabel(route.chain)}
+                    </p>
+                  )}
+                  {sourceUsdc.loading && !route && (
+                    <p className="text-center text-scale-1 font-mono text-ink-dim">
+                      Checking your balances…
+                    </p>
+                  )}
+
+                  {/* One button, whichever route wins.
+                      There used to be a second one here for paying from
+                      another chain. It existed because a Solana payer had no
+                      wallet to connect and so could never reach this one; now
+                      that they can connect, it is the same action. */}
+                  <button
+                    onClick={() => {
+                      if (route?.kind === "cross_chain") void startCrossChain();
+                      else setStep("confirm");
+                    }}
+                    disabled={!canProceed || bridgeBusy}
+                    className="w-full py-4 bg-signal text-signal-ink
+                               font-mono text-xl hover:bg-signal/90 transition-colors
+                               disabled:opacity-30 disabled:cursor-not-allowed"
+                  >
+                    {bridgeBusy ? "Preparing…" : "Review Payment →"}
+                  </button>
+                </>
               )}
 
-              {/* Deliberately OUTSIDE the isConnected gate: this is the path for
-                  a payer holding USDC on another chain, who by definition may
-                  have no Arc wallet to connect. Needs only a recipient and an
-                  amount. */}
-              <button
-                type="button"
-                onClick={startCrossChain}
-                disabled={bridgeBusy}
-                className="w-full flex flex-col items-center gap-1 py-3.5 px-4 border border-signal/40
-                           bg-signal/5 hover:bg-signal/10 hover:border-signal/60 transition-colors
-                           disabled:opacity-30 disabled:cursor-not-allowed"
-              >
-                <span className="flex items-center gap-2 text-signal font-mono text-sm">
-                  <span aria-hidden className="text-base leading-none">⇄</span>
-                  {bridgeBusy ? "Preparing…" : "Pay with USDC from another chain"}
-                </span>
-                <span className="text-ink-dim text-[11px] font-mono tracking-wide">
-                  {/* Only the Solana route genuinely needs no EVM wallet -- the
-                      Base/Polygon route signs with the connected one. The old
-                      blanket "no Arc wallet needed" was true for one of the
-                      three. */}
-                  Solana · Base · Arbitrum · Optimism · Avalanche · +7 more
-                </span>
-              </button>
               {bridgeError && (
                 <p className="text-danger text-sm font-mono text-center">{bridgeError}</p>
               )}

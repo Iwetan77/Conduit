@@ -165,7 +165,15 @@ function GoogleSignIn({ fullWidth = false, short = false }: { fullWidth?: boolea
 //
 // Per chain, never summed. One payment draws from a single chain, so a total
 // would promise an amount that cannot be sent.
-function ConnectedChip({ address, compact = false }: { address: string; compact?: boolean }) {
+function ConnectedChip({
+  address,
+  compact = false,
+  onDisconnect,
+}: {
+  address: string;
+  compact?: boolean;
+  onDisconnect: () => void;
+}) {
   const [open, setOpen] = useState(false);
   const { identity } = usePayerIdentity();
   const usdc = usePayerUsdc({
@@ -208,6 +216,18 @@ function ConnectedChip({ address, compact = false }: { address: string; compact?
               </div>
             ))
           )}
+          {/* Disconnect lives in here, not beside the chip.
+              That is the pattern the Google session already used, and a payer
+              should not have to learn two. It also keeps a destructive action
+              behind a deliberate tap rather than one stray thumb from the
+              address. */}
+          <button
+            onClick={onDisconnect}
+            className="w-full mt-2 pt-2 border-t border-border text-left
+                       font-mono text-scale-1 text-ink-dim hover:text-danger transition-colors"
+          >
+            Disconnect
+          </button>
         </div>
       )}
     </div>
@@ -242,16 +262,7 @@ export function WalletConnect() {
   // in place of the connect buttons exactly as an EVM one is.
   if (identity?.kind === "solana") {
     return (
-      <div className="flex items-center gap-2">
-        <ConnectedChip address={identity.address} />
-        <button
-          onClick={() => void disconnect()}
-          className="px-3 py-2 text-scale-1 font-mono border border-border
-                     text-ink-dim hover:text-ink transition-colors whitespace-nowrap"
-        >
-          Disconnect
-        </button>
-      </div>
+      <ConnectedChip address={identity.address} onDisconnect={() => void disconnect()} />
     );
   }
 
@@ -265,16 +276,10 @@ export function WalletConnect() {
   // without this an EVM payer had a balance to look at and no way to disconnect.
   if (isConnected && address) {
     return (
-      <div className="flex items-center gap-2">
-        <ConnectedChip address={address} />
-        <button
-          onClick={() => (CIRCLE_ENABLED ? requestSignOut() : void disconnect())}
-          className="px-3 py-2 text-scale-1 font-mono border border-border
-                     text-ink-dim hover:text-ink transition-colors whitespace-nowrap"
-        >
-          Disconnect
-        </button>
-      </div>
+      <ConnectedChip
+        address={address}
+        onDisconnect={() => (CIRCLE_ENABLED ? requestSignOut() : void disconnect())}
+      />
     );
   }
 
@@ -362,31 +367,17 @@ export function WalletConnectCompact() {
 
   if (identity?.kind === "solana") {
     return (
-      <div className="flex items-center gap-2">
-        <ConnectedChip address={identity.address} compact />
-        <button
-          onClick={() => void disconnect()}
-          className="px-2 py-1.5 text-scale-1 font-mono border border-border
-                     text-ink-dim hover:text-ink transition-colors whitespace-nowrap"
-        >
-          Disconnect
-        </button>
-      </div>
+      <ConnectedChip address={identity.address} compact onDisconnect={() => void disconnect()} />
     );
   }
 
   if (isConnected && address) {
     return (
-      <div className="flex items-center gap-2">
-        <ConnectedChip address={address} compact />
-        <button
-          onClick={() => (CIRCLE_ENABLED ? requestSignOut() : void disconnect())}
-          className="px-2 py-1.5 text-scale-1 font-mono border border-border
-                     text-ink-dim hover:text-ink transition-colors whitespace-nowrap"
-        >
-          Disconnect
-        </button>
-      </div>
+      <ConnectedChip
+        address={address}
+        compact
+        onDisconnect={() => (CIRCLE_ENABLED ? requestSignOut() : void disconnect())}
+      />
     );
   }
 

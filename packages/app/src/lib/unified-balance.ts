@@ -305,6 +305,33 @@ const SOLANA_DEVNET_USDC_MINT = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
 // Phantom (nothing deposited yet) is wrongly told "insufficient" before the
 // deposit step ever runs -- the exact "found 0.000" bug. Covers BOTH families:
 // Solana below, every EVM source chain via getEvmWalletUsdc.
+/**
+ * Lamports the payer holds, for the gas a Solana deposit actually costs.
+ *
+ * A Gateway deposit from Solana is a Solana transaction and pays a fee in SOL.
+ * A wallet funded from Circle's USDC faucet routinely has plenty of USDC and
+ * zero SOL, so the deposit cannot be submitted -- and the way that surfaces is
+ * Circle's SDK retrying until it reports "Maximum retry attempts exceeded",
+ * which we then translate to "the bridge isn't responding". The payer is told
+ * to wait for a service that is fine, about a problem one faucet visit fixes.
+ *
+ * Returns null when the balance cannot be read: unknown is not the same as
+ * empty, and blocking a payment on a failed RPC read would be worse than
+ * letting the deposit try.
+ */
+export async function getSolanaLamports(address: string): Promise<bigint | null> {
+  try {
+    const { Connection, PublicKey } = await import("@solana/web3.js");
+    const conn = new Connection("https://api.devnet.solana.com", "confirmed");
+    return BigInt(await conn.getBalance(new PublicKey(address)));
+  } catch {
+    return null;
+  }
+}
+
+/** Enough SOL to submit a deposit and its burn intent, with headroom. */
+export const MIN_SOLANA_LAMPORTS = 2_000_000n; // 0.002 SOL
+
 export async function getWalletUsdc(payer: PayerAdapter): Promise<ChainUsdc[]> {
   if (payer.family === "evm") return getEvmWalletUsdc(payer.address);
   try {

@@ -40,6 +40,8 @@ import {
   getWalletUsdc,
   mergeUsdc,
   spendUsdcToArc,
+  getSolanaLamports,
+  MIN_SOLANA_LAMPORTS,
   usdcMinorToHuman,
   usdcDisplay,
   chainLabel,
@@ -607,6 +609,23 @@ export function CrossChainBridge({ intentId, intent, knownUsdc }: CrossChainBrid
         primary: chainToSourceSlug(sourceChain),
       };
       if (!chosen.primary) throw new Error("Balance changed — no single chain holds enough USDC.");
+
+      // Gas, checked before signing rather than discovered by retry exhaustion.
+      //
+      // A Solana deposit pays its fee in SOL, and a wallet funded from Circle's
+      // USDC faucet usually has none. Without this the SDK retries the
+      // unsubmittable transaction, gives up, and the payer is told Circle's
+      // bridge is down -- about a wallet that simply cannot pay for a
+      // transaction. Unknown is not empty: a failed read lets the spend try.
+      if (adapter.family === "solana") {
+        const lamports = await getSolanaLamports(adapter.address);
+        if (lamports !== null && lamports < MIN_SOLANA_LAMPORTS) {
+          throw new Error(
+            "This Solana wallet has no SOL to pay the network fee for the deposit. " +
+              "Get devnet SOL from faucet.solana.com, then try again. Your USDC is untouched."
+          );
+        }
+      }
 
       // Depositing from an EVM chain requires the wallet to BE on that chain —
       // the payer is normally sitting on Arc, so without this the SDK rejects

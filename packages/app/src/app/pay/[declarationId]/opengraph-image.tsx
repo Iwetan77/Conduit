@@ -12,7 +12,38 @@ export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
 const API_BASE = process.env.NEXT_PUBLIC_CONDUIT_API_URL ?? "http://localhost:8080";
-const SYMBOLS: Record<string, string> = { EUR: "€", USD: "$", BRL: "R$", AUD: "A$", MXN: "MX$", CAD: "C$", GBP: "£", ZAR: "R", KRW: "₩" };
+
+// The currency's own symbol, shown inside the coin mark beside the amount.
+// Keyed by the ISO code the API sends, which is why EURAU appears here as
+// itself: it is a token symbol standing in for an ISO code, because EUR is
+// already EURC's (see lib/currencies.ts).
+const SYMBOLS: Record<string, string> = {
+  USD: "$", EUR: "€", EURAU: "€", BRL: "R$", AUD: "A$", MXN: "MX$",
+  CAD: "C$", GBP: "£", ZAR: "R", KRW: "₩", CHF: "Fr",
+};
+
+// The real mark, not an approximation of it.
+//
+// This used to draw a green circle with a "D" in it, which is not the logo and
+// never was -- the brand mark is a filled signal disc with a bar cut through
+// it. Loaded through import.meta.url rather than read out of public/ so Next
+// traces it into the serverless bundle; public/ is not guaranteed to be there
+// at render time, and a missing file would silently fall back to no logo at
+// all on the one surface whose entire job is being seen by strangers.
+//
+// The bar reads as a notch here rather than a bar: it is black, the card is
+// black, so the part that extends past the disc disappears. That is how the
+// mark already renders in the app's nav on the same background, so the share
+// card and the page a payer lands on agree.
+async function markDataUri(): Promise<string | null> {
+  try {
+    const res = await fetch(new URL("./conduit-mark.png", import.meta.url));
+    const buf = await res.arrayBuffer();
+    return `data:image/png;base64,${Buffer.from(buf).toString("base64")}`;
+  } catch {
+    return null;
+  }
+}
 
 async function fetchInfo(id: string) {
   const path = id.startsWith("pl_")
@@ -31,18 +62,27 @@ async function fetchInfo(id: string) {
 }
 
 export default async function Image({ params }: { params: { declarationId: string } }) {
-  const info = await fetchInfo(params.declarationId);
+  const [info, mark] = await Promise.all([fetchInfo(params.declarationId), markDataUri()]);
   const merchant = info?.display_name?.trim() || "A Conduit merchant";
 
-  let amountLine = "Pay with any stablecoin";
+  // Amount and token are kept apart so the token can carry its own coin mark,
+  // the way TokenBadge does everywhere else in the app. Rendering them as one
+  // string is what left the asset as bare text on the card.
+  let amount = "";
+  let token = "";
+  let glyph = "";
   if (info?.amount && info?.settle_currency) {
     try {
-      const token = isoToToken(info.settle_currency);
+      token = isoToToken(info.settle_currency);
       const human = toHumanAmount(BigInt(info.amount), currencyDecimals(token));
-      const pretty = Number(human).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-      amountLine = `${SYMBOLS[info.settle_currency] ?? ""}${pretty} ${token}`;
+      amount = Number(human).toLocaleString("en-US", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      });
+      glyph = SYMBOLS[info.settle_currency] ?? "";
     } catch {
-      /* fall back to the default line */
+      amount = "";
+      token = "";
     }
   }
 
@@ -61,31 +101,60 @@ export default async function Image({ params }: { params: { declarationId: strin
         }}
       >
         {/* Brand mark */}
-        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-          <div
-            style={{
-              width: 44,
-              height: 44,
-              borderRadius: 999,
-              border: "3px solid #B2F55A",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              color: "#B2F55A",
-              fontSize: 26,
-              fontWeight: 700,
-            }}
-          >
-            D
-          </div>
-          <div style={{ color: "#B2F55A", fontSize: 30, fontWeight: 700, letterSpacing: 2 }}>CONDUIT</div>
+        <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
+          {/* Cropped to the mark itself (1349x926), so it fills its box instead
+              of floating inside the source file's transparent padding. */}
+          {mark ? <img src={mark} width={105} height={72} alt="" /> : null}
+          <div style={{ color: "#B2F55A", fontSize: 30, fontWeight: 700, letterSpacing: 2 }}>CONDUIT™</div>
         </div>
 
         {/* Ask */}
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           <div style={{ color: "#8a8a8a", fontSize: 34 }}>Payment request from</div>
           <div style={{ color: "#f5f5f5", fontSize: 68, fontWeight: 800, lineHeight: 1.05 }}>{merchant}</div>
-          <div style={{ color: "#B2F55A", fontSize: 88, fontWeight: 800, marginTop: 12 }}>{amountLine}</div>
+
+          {amount && token ? (
+            <div style={{ display: "flex", alignItems: "center", gap: 24, marginTop: 16 }}>
+              {/* One interpolated child, not two. Satori throws on any div
+                  with multiple children that is not explicitly flex, and
+                  `{glyph}{amount}` counts as two -- which would have failed
+                  the render for every link that carries an amount. */}
+              <div style={{ color: "#B2F55A", fontSize: 88, fontWeight: 800 }}>{`${glyph}${amount}`}</div>
+              {/* The asset, as a badge rather than trailing text -- same coin
+                  mark and border the app uses next to every amount. */}
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 12,
+                  border: "2px solid #2a2a2a",
+                  padding: "10px 20px 10px 12px",
+                }}
+              >
+                <div
+                  style={{
+                    width: 52,
+                    height: 52,
+                    borderRadius: 999,
+                    border: "3px solid #B2F55A",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    color: "#B2F55A",
+                    fontSize: 26,
+                    fontWeight: 700,
+                  }}
+                >
+                  {glyph}
+                </div>
+                <div style={{ color: "#f5f5f5", fontSize: 38, fontWeight: 600, letterSpacing: 1 }}>{token}</div>
+              </div>
+            </div>
+          ) : (
+            <div style={{ color: "#B2F55A", fontSize: 72, fontWeight: 800, marginTop: 12 }}>
+              Pay with any stablecoin
+            </div>
+          )}
         </div>
 
         {/* Footer */}

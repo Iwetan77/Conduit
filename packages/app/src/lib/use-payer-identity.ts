@@ -63,6 +63,10 @@ export function usePayerIdentity(): UsePayerIdentity {
   const { disconnectAsync } = useDisconnect();
 
   const [solanaAddress, setSolanaAddress] = useState<string | null>(null);
+  // True only when the payer chose a Solana wallet from the connect list in
+  // this session. A wallet merely left authorised from a previous visit is
+  // detected (below) but must not silently displace an EVM connection.
+  const [pickedSolana, setPickedSolana] = useState(false);
   const [solanaWallets, setSolanaWallets] = useState<SolanaWalletOption[]>([]);
   const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState("");
@@ -91,6 +95,7 @@ export function usePayerIdentity(): UsePayerIdentity {
     try {
       const address = await connectSolanaWallet(choice?.provider);
       setSolanaAddress(address);
+      setPickedSolana(true);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not connect that wallet.");
     } finally {
@@ -105,6 +110,7 @@ export function usePayerIdentity(): UsePayerIdentity {
     if (solanaAddress) {
       await disconnectSolanaWallet();
       setSolanaAddress(null);
+      setPickedSolana(false);
     }
     if (evmConnected) {
       try {
@@ -115,24 +121,20 @@ export function usePayerIdentity(): UsePayerIdentity {
     }
   }, [solanaAddress, evmConnected, disconnectAsync]);
 
-  // Solana wins when both are present, with one exception.
+  // EVM is the default identity. Solana is never preferred.
   //
-  // Connecting a Solana wallet is an explicit act -- an EVM wallet is often
-  // just auto reconnected from a previous visit -- so the deliberate choice is
-  // the one to honour. Picking Solana also says something specific: the payer
-  // means to spend Solana USDC.
-  //
-  // The exception is a Circle session. That is a signed-in merchant, and their
-  // wallet is their identity across the whole dashboard; letting a browser
-  // extension outrank it would show a merchant somebody else's address in
-  // their own nav, next to the links and settlements belonging to the account
-  // they are actually signed in as.
+  // An earlier version had Solana outrank EVM on the theory that connecting it
+  // is the more deliberate act. That is wrong in the case that matters: a
+  // signed-in merchant whose browser also has Phantom would have found their
+  // own nav showing somebody else's address, beside their own account's
+  // settlements. Solana answers only when nothing else does, or when the payer
+  // explicitly picked it in this session and no Circle session is in play.
   const signedInWithGoogle = evmConnected && connector?.id === CIRCLE_CONNECTOR_ID;
   let identity: PayerIdentity | null = null;
-  if (solanaAddress && !signedInWithGoogle) {
-    identity = { kind: "solana", address: solanaAddress, canSettleOnArc: false };
-  } else if (evmConnected && evmAddress) {
+  if (evmConnected && evmAddress && (signedInWithGoogle || !pickedSolana)) {
     identity = { kind: "evm", address: evmAddress, chainId, canSettleOnArc: true };
+  } else if (solanaAddress) {
+    identity = { kind: "solana", address: solanaAddress, canSettleOnArc: false };
   }
 
   return { identity, solanaWallets, connectSolana, disconnect, connecting, error };

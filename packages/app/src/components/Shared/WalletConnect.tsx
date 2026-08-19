@@ -193,7 +193,6 @@ function ConnectedChip({ address, compact = false }: { address: string; compact?
 // where it belongs. Refusing the connection outright to prevent a later
 // failure means the payer cannot connect the only wallet they own.
 export function WalletConnect() {
-  const solana = true;
   const [mounted, setMounted] = useState(false);
   const { address, isConnected } = useAccount();
   const { connect, connectors, isPending } = useConnect();
@@ -206,10 +205,8 @@ export function WalletConnect() {
   if (!mounted) return null;
 
   // A connected Solana wallet is the answer to "who is paying", so it is shown
-  // in place of the connect buttons exactly as an EVM one is. Checked before
-  // the EVM branch below because usePayerIdentity gives Solana precedence when
-  // both happen to be attached.
-  if (solana && identity?.kind === "solana") {
+  // in place of the connect buttons exactly as an EVM one is.
+  if (identity?.kind === "solana") {
     return (
       <div className="flex items-center gap-2">
         <ConnectedChip address={identity.address} />
@@ -241,38 +238,38 @@ export function WalletConnect() {
     {/* nowrap: wrapping put Connect Wallet and Google on separate lines on
         mobile, reading as two stacked competing CTAs. */}
     <div className="flex flex-nowrap items-center justify-center gap-2">
-      {injected && (
-        <button
-          onClick={() => connect({ connector: injected })}
-          disabled={isPending}
-          className="px-4 py-2 text-scale-2 font-mono bg-signal text-signal-ink
-                     hover:bg-signal/90 transition-colors disabled:opacity-50 whitespace-nowrap"
-        >
-          {isPending ? "Connecting..." : "Connect Wallet"}
-        </button>
-      )}
-      {CIRCLE_ENABLED && <GoogleSignIn />}
-
-      {/* Solana, as a peer of the other two rather than a route hidden behind
-          a later step. A payer holding USDC on Solana has no EVM wallet to
-          connect, so without this the only way in was the cross chain button
-          placed outside the connect gate specifically to work around it. */}
-      {solana && (
+      {/* One Connect Wallet button, whatever the wallet is.
+          Solana wallets are choices INSIDE it, never a second button beside
+          it: "connect a wallet" is one intent, and splitting it by chain
+          family makes the payer answer a question about our plumbing before
+          they can answer the one they came with. With no Solana extension
+          present this behaves exactly as it always did -- one click, straight
+          into the browser wallet. */}
+      {(injected || solanaWallets.length > 0) && (
         <div className="relative">
           <button
             onClick={() => {
-              if (solanaWallets.length === 1) void connectSolana(solanaWallets[0]);
+              if (solanaWallets.length === 0 && injected) connect({ connector: injected });
               else setPicking((p) => !p);
             }}
-            disabled={connecting}
-            className="px-4 py-2 text-scale-2 font-mono border border-border text-ink
-                       hover:border-ink-dim transition-colors disabled:opacity-50 whitespace-nowrap"
+            disabled={isPending || connecting}
+            className="px-4 py-2 text-scale-2 font-mono bg-signal text-signal-ink
+                       hover:bg-signal/90 transition-colors disabled:opacity-50 whitespace-nowrap"
           >
-            {connecting ? "Connecting..." : "Solana"}
+            {isPending || connecting ? "Connecting..." : "Connect Wallet"}
           </button>
 
-          {picking && solanaWallets.length > 1 && (
-            <div className="absolute left-0 top-full mt-1 z-40 min-w-[12rem] border border-border bg-surface">
+          {picking && (
+            <div className="absolute left-0 top-full mt-1 z-40 min-w-[13rem] border border-border bg-surface">
+              {injected && (
+                <button
+                  onClick={() => { setPicking(false); connect({ connector: injected }); }}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-scale-2 font-mono
+                             text-left text-ink-dim hover:text-ink hover:bg-bg/40 transition-colors"
+                >
+                  Browser wallet
+                </button>
+              )}
               {solanaWallets.map((w) => (
                 <button
                   key={w.id}
@@ -281,7 +278,7 @@ export function WalletConnect() {
                              text-left text-ink-dim hover:text-ink hover:bg-bg/40 transition-colors"
                 >
                   {/* The wallet's own icon, when it registered one. Plain img:
-                      these are data URIs from the extension, not our assets. */}
+                      a data URI from the extension, not one of our assets. */}
                   {w.icon && <img src={w.icon} alt="" width={16} height={16} />}
                   {w.label}
                 </button>
@@ -290,10 +287,12 @@ export function WalletConnect() {
           )}
         </div>
       )}
+      {CIRCLE_ENABLED && <GoogleSignIn />}
+
     </div>
     {/* Under the buttons rather than inside them: "no Solana wallet found" is
         advice about this browser, not a failure of the click. */}
-    {solana && error && (
+    {error && (
       <p className="text-scale-1 text-danger max-w-xs text-center">{error}</p>
     )}
     </div>
@@ -308,6 +307,7 @@ export function WalletConnectCompact() {
   // Same identity as the desktop nav. Reading wagmi alone here would recreate
   // the split on mobile: connected on Solana, still asking you to connect.
   const { identity, solanaWallets, connectSolana, disconnect, connecting } = usePayerIdentity();
+  const [picking, setPicking] = useState(false);
 
   useEffect(() => { setMounted(true); }, []);
   if (!mounted) return null;
@@ -339,27 +339,44 @@ export function WalletConnectCompact() {
   // two competing CTAs on mobile.
   return (
     <div className="flex flex-row gap-2 w-full">
-      <div className="flex-1">
+      <div className="flex-1 relative">
         <button
-          onClick={() => connector && connect({ connector })}
-          disabled={isPending || !connector}
+          onClick={() => {
+            if (solanaWallets.length === 0 && connector) connect({ connector });
+            else setPicking((p) => !p);
+          }}
+          disabled={(isPending || connecting) || (!connector && solanaWallets.length === 0)}
           className="px-4 py-2 text-scale-2 font-medium font-mono bg-signal text-signal-ink
                      w-full hover:bg-signal/90 transition-colors disabled:opacity-50 whitespace-nowrap"
         >
-          {isPending ? "Connecting..." : "Connect Wallet"}
+          {isPending || connecting ? "Connecting..." : "Connect Wallet"}
         </button>
+        {picking && (
+          <div className="absolute left-0 right-0 top-full mt-1 z-40 border border-border bg-surface">
+            {connector && (
+              <button
+                onClick={() => { setPicking(false); connect({ connector }); }}
+                className="flex w-full items-center gap-2 px-3 py-2 text-scale-2 font-mono
+                           text-left text-ink-dim hover:text-ink hover:bg-bg/40 transition-colors"
+              >
+                Browser wallet
+              </button>
+            )}
+            {solanaWallets.map((w) => (
+              <button
+                key={w.id}
+                onClick={() => { setPicking(false); void connectSolana(w); }}
+                className="flex w-full items-center gap-2 px-3 py-2 text-scale-2 font-mono
+                           text-left text-ink-dim hover:text-ink hover:bg-bg/40 transition-colors"
+              >
+                {w.icon && <img src={w.icon} alt="" width={16} height={16} />}
+                {w.label}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
       {CIRCLE_ENABLED && <GoogleSignIn short />}
-      {solanaWallets.length > 0 && (
-        <button
-          onClick={() => void connectSolana(solanaWallets[0])}
-          disabled={connecting}
-          className="px-3 py-2 text-scale-2 font-mono border border-border text-ink
-                     hover:border-ink-dim transition-colors disabled:opacity-50 whitespace-nowrap"
-        >
-          {connecting ? "…" : "Solana"}
-        </button>
-      )}
     </div>
   );
 }

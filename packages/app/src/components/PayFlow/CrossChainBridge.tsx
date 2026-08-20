@@ -40,6 +40,7 @@ import {
   getWalletUsdc,
   mergeUsdc,
   spendUsdcToArc,
+  FundsInGatewayError,
   getSolanaLamports,
   MIN_SOLANA_LAMPORTS,
   usdcMinorToHuman,
@@ -687,7 +688,13 @@ export function CrossChainBridge({ intentId, intent, knownUsdc }: CrossChainBrid
       // Circle's SDK emits, so a failure of ours that happens to contain one
       // would be reported as Circle being down and leave nothing to debug.
       console.error("cross-chain spend failed:", err);
-      const message = gatewayUnavailable(err)
+      // Checked FIRST. Once the deposit has moved, no generic classifier gets
+      // to describe the payer's money -- "nothing has left your wallet" was
+      // being printed over a completed deposit.
+      const fundsMoved = err instanceof FundsInGatewayError;
+      const message = fundsMoved
+        ? err.message
+        : gatewayUnavailable(err)
         ? "Circle's bridge isn't responding right now. Nothing has left your wallet — wait a moment and try again."
         : err instanceof ConduitApiError
           ? err.message

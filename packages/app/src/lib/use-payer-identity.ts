@@ -19,7 +19,7 @@
 // payment through Gateway. It cannot sign anything on Arc, so any UI that
 // offers it an Arc route is offering a button that cannot work.
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { useAccount, useDisconnect } from "wagmi";
 import { CIRCLE_CONNECTOR_ID } from "@/lib/circle/connector";
 import {
@@ -29,6 +29,32 @@ import {
   listSolanaWallets,
   type SolanaWalletOption,
 } from "@/lib/solana-wallet";
+
+// The connected Solana wallet, held ONCE for the whole page.
+//
+// This was per-hook React state, which is wrong for a fact about the browser:
+// the nav connected a wallet and set its own copy, while the send page's copy
+// stayed null and kept asking the payer to connect a wallet they were plainly
+// already connected to -- visible in the same screenshot, connected top right
+// and requested in the middle. Every instance now reads one store.
+let solanaAddr: string | null = null;
+let pickedSolanaGlobal = false;
+const listeners = new Set<() => void>();
+function emit() {
+  listeners.forEach((l) => l());
+}
+function subscribe(l: () => void) {
+  listeners.add(l);
+  return () => listeners.delete(l);
+}
+function snapshot() {
+  return solanaAddr;
+}
+function setSolanaAddr(v: string | null, picked: boolean) {
+  solanaAddr = v;
+  pickedSolanaGlobal = picked;
+  emit();
+}
 
 export type PayerFamily = "evm" | "solana";
 
@@ -73,11 +99,12 @@ export function usePayerIdentity(): UsePayerIdentity {
   const { address: evmAddress, isConnected: evmConnected, chainId, connector } = useAccount();
   const { disconnectAsync } = useDisconnect();
 
-  const [solanaAddress, setSolanaAddress] = useState<string | null>(null);
+  // Shared across every instance, so the nav and the page cannot disagree.
+  const solanaAddress = useSyncExternalStore(subscribe, snapshot, () => null);
   // True only when the payer chose a Solana wallet from the connect list in
   // this session. A wallet merely left authorised from a previous visit is
   // detected (below) but must not silently displace an EVM connection.
-  const [pickedSolana, setPickedSolana] = useState(false);
+  const pickedSolana = pickedSolanaGlobal;
   const [solanaWallets, setSolanaWallets] = useState<SolanaWalletOption[]>([]);
   const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState("");
@@ -97,7 +124,7 @@ export function usePayerIdentity(): UsePayerIdentity {
   // with the extension still authorised should not look like being signed out.
   useEffect(() => {
     const pk = getSolanaProvider()?.publicKey;
-    if (pk) setSolanaAddress(pk.toString());
+    if (pk && !solanaAddr) setSolanaAddr(pk.toString(), false);
   }, [solanaWallets]);
 
   const connectSolana = useCallback(async (choice?: SolanaWalletOption) => {
@@ -105,8 +132,7 @@ export function usePayerIdentity(): UsePayerIdentity {
     setError("");
     try {
       const address = await connectSolanaWallet(choice?.provider);
-      setSolanaAddress(address);
-      setPickedSolana(true);
+      setSolanaAddr(address, true);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not connect that wallet.");
     } finally {
@@ -120,8 +146,7 @@ export function usePayerIdentity(): UsePayerIdentity {
     // quietly attached and paying.
     if (solanaAddress) {
       await disconnectSolanaWallet();
-      setSolanaAddress(null);
-      setPickedSolana(false);
+      setSolanaAddr(null, false);
     }
     if (evmConnected) {
       try {

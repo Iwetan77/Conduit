@@ -510,6 +510,22 @@ export function chainToSourceSlug(chain: string): SourceKind | null {
 // deliberately if it is ever wanted, rather than left half-present.
 
 
+/**
+ * Thrown once the deposit has left the payer's wallet.
+ *
+ * The distinction is the whole point: before the deposit, a failure means
+ * nothing happened and "try again" is free. After it, the money is in Circle
+ * Gateway, and telling the payer nothing left their wallet is both false and
+ * the exact sentence that makes them retry as though it were free.
+ */
+export class FundsInGatewayError extends Error {
+  readonly fundsInGateway = true;
+  constructor(message: string) {
+    super(message);
+    this.name = "FundsInGatewayError";
+  }
+}
+
 export interface SpendToArcResult {
   txHash: string;
   /** Gateway transfer id — handed to the API so it can poll + settle. */
@@ -584,6 +600,9 @@ export async function spendUsdcToArc(params: {
 
   // Deposit only if nothing already in Gateway (confirmed OR mid-confirmation)
   // covers the target.
+  // Whether the payer's money has moved. Everything after this point must tell
+  // the truth about that, however the failure arrives.
+  let deposited = confirmed + pending > 0n;
   if (confirmed + pending < target) {
     const shortfall = target - (confirmed + pending);
     say("Approve the deposit in your wallet…");
@@ -592,6 +611,7 @@ export async function spendUsdcToArc(params: {
       amount: usdcMinorToHuman(shortfall),
       token: TOKEN,
     } as never);
+    deposited = true;
   }
 
   // A Gateway deposit isn't spendable until it CONFIRMS. Wait for the confirmed
@@ -606,10 +626,24 @@ export async function spendUsdcToArc(params: {
     // look like a hang.
     say(`Deposit sent. Waiting for Circle to confirm… ${secs}s`);
     await new Promise((r) => setTimeout(r, 5000));
-    ({ confirmed, pending } = await gatewayBalance());
+    try {
+      ({ confirmed, pending } = await gatewayBalance());
+    } catch (e) {
+      // A failed balance READ after a successful deposit is the case that was
+      // being reported as "the bridge isn't responding, nothing has left your
+      // wallet". The first half was right; the second was a lie about the
+      // payer's money.
+      if (deposited) {
+        throw new FundsInGatewayError(
+          "Your USDC is in Circle Gateway and Circle stopped answering while we waited for it to confirm. " +
+            "It is safe and will not be deposited again. Press Pay to finish."
+        );
+      }
+      throw e;
+    }
   }
   if (confirmed < target) {
-    throw new Error(
+    throw new FundsInGatewayError(
       "Your USDC is deposited in Circle Gateway and still confirming — it's safe and won't deposit again. Wait ~30s and press Pay to finish."
     );
   }
@@ -647,11 +681,21 @@ export async function spendUsdcToArc(params: {
   // retrying (insufficient balance) was never transient anyway: it was the
   // unfunded fee, fixed above by depositing to `target`.
   say("Approve the payment in your wallet…");
-  const result = (await spend(ctx as never, spendParams as never)) as {
-    txHash: string;
-    transferId?: string;
-    explorerUrl?: string;
-  };
+  let result: { txHash: string; transferId?: string; explorerUrl?: string };
+  try {
+    result = (await spend(ctx as never, spendParams as never)) as {
+      txHash: string;
+      transferId?: string;
+      explorerUrl?: string;
+    };
+  } catch (e) {
+    // Same truth at the last step. The deposit is done by now, so a failed
+    // burn intent leaves funded Gateway balance, not an untouched wallet.
+    throw new FundsInGatewayError(
+      (e instanceof Error ? e.message : "The payment could not be authorised.") +
+        " Your USDC is in Circle Gateway and will not be deposited again — press Pay to retry."
+    );
+  }
 
   return { txHash: result.txHash, transferId: result.transferId, explorerUrl: result.explorerUrl };
 }

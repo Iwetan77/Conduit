@@ -595,6 +595,9 @@ export async function spendUsdcToArc(params: {
   // not a fee we charge and it is not lost.
   const buffer = (need * 12n) / 100n;
   const target = need + (buffer > 300_000n ? buffer : 300_000n);
+  // The 0.30 floor already exceeds any forwarding fee seen on devnet, so the
+  // headroom allocated at spend time is always funded. Kept as one number so
+  // the two cannot drift apart.
 
   let { confirmed, pending } = await gatewayBalance();
 
@@ -655,6 +658,47 @@ export async function spendUsdcToArc(params: {
   // (Base/Polygon/Solana) adapter as the Arc destination and omitted
   // useForwarder, so the SDK tried to sign the Arc mint with a wrong-family
   // wallet and never returned a transferId for the API to poll.
+  // The forwarding fee has to fit INSIDE the burn intent.
+  //
+  // Circle derives each intent's maxFee from the headroom between what is
+  // allocated and what is spent. Allocating exactly `need` left zero headroom,
+  // so maxFee came out at 0 and Gateway refused the whole transfer with
+  // "Insufficient total maxFee across intents to cover forwarding fee.
+  // Required additional: 0.000207" -- a fee of a fifth of a cent failing a
+  // payment, because the intent authorised nothing for it.
+  //
+  // estimateSpend is the SDK's own answer for what those fees are, so ask it
+  // rather than guessing. The floor exists because a refused estimate must not
+  // reintroduce a zero: it is a fraction of a cent, it stays in the payer's
+  // Gateway balance if unused, and the deposit target above already covers it.
+  const feeFloor = 50_000n; // 0.05 USDC
+  let feeHeadroom = feeFloor;
+  try {
+    const { estimateSpend } = await import("@circle-fin/unified-balance-kit");
+    const est = (await estimateSpend(ctx as never, {
+      token: TOKEN,
+      amount: usdcMinorToHuman(need),
+      from: {
+        adapter: params.payer.adapter as never,
+        allocations: [{ chain: primaryChain as never, amount: usdcMinorToHuman(need) }],
+      },
+      to: {
+        chain: ARC_CHAIN as never,
+        recipientAddress: params.recipientAddress,
+        useForwarder: true,
+      },
+    } as never)) as { fees?: Array<{ token?: string; amount?: string }> };
+    const quoted = (est.fees ?? [])
+      .filter((f) => (f.token ?? "USDC").toUpperCase() === "USDC")
+      .reduce((sum, f) => sum + usdcHumanToMinor(f.amount ?? "0"), 0n);
+    // Double the quote as headroom: these are flat fees quoted a moment before
+    // the intent is signed, and being a fraction under is what this whole
+    // branch exists to prevent.
+    if (quoted > 0n) feeHeadroom = quoted * 2n > feeFloor ? quoted * 2n : feeFloor;
+  } catch {
+    // Estimate unavailable -- the floor stands.
+  }
+
   const spendParams = {
     token: TOKEN,
     // Top-level total is REQUIRED by SpendParams (see estimateSpend's own
@@ -666,7 +710,12 @@ export async function spendUsdcToArc(params: {
       adapter: params.payer.adapter as never,
       // Spend the full amount from the chain we just confirmed the deposit on,
       // rather than the pre-deposit wallet allocation.
-      allocations: [{ chain: primaryChain as never, amount: usdcMinorToHuman(need) }],
+      // Allocated ABOVE the spend amount on purpose: the difference is the
+      // maxFee the intent authorises for Circle's forwarder. The recipient
+      // still receives `amount`; unused headroom stays in Gateway.
+      allocations: [
+        { chain: primaryChain as never, amount: usdcMinorToHuman(need + feeHeadroom) },
+      ],
     },
     to: {
       chain: ARC_CHAIN as never,
@@ -691,9 +740,19 @@ export async function spendUsdcToArc(params: {
   } catch (e) {
     // Same truth at the last step. The deposit is done by now, so a failed
     // burn intent leaves funded Gateway balance, not an untouched wallet.
+    const raw = e instanceof Error ? e.message : "The payment could not be authorised.";
+    // A replay, not a failure to authorise. Circle refuses a transfer spec it
+    // has already accepted, which means the FIRST attempt was committed --
+    // telling the payer to press Pay again would loop them on the same refusal.
+    if (/transfer spec has already been used/i.test(raw)) {
+      throw new FundsInGatewayError(
+        "This transfer was already submitted to Circle and cannot be sent twice. " +
+          "Your USDC is safe in Circle Gateway. Start a new payment to spend it, " +
+          "or check History -- the first attempt may still be settling."
+      );
+    }
     throw new FundsInGatewayError(
-      (e instanceof Error ? e.message : "The payment could not be authorised.") +
-        " Your USDC is in Circle Gateway and will not be deposited again — press Pay to retry."
+      raw + " Your USDC is in Circle Gateway and will not be deposited again — press Pay to retry."
     );
   }
 

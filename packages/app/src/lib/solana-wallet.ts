@@ -18,7 +18,7 @@ interface SolanaProvider {
   // Phantom resolves connect() to { publicKey }; Solflare resolves it WITHOUT
   // a return value and instead populates provider.publicKey. Type the return as
   // optional so we never assume Phantom's shape.
-  connect(): Promise<{ publicKey?: { toString(): string } } | void>;
+  connect(opts?: { onlyIfTrusted?: boolean }): Promise<{ publicKey?: { toString(): string } } | void>;
   signTransaction(tx: Transaction): Promise<Transaction>;
   signMessage(message: Uint8Array, encoding?: string): Promise<{ signature: Uint8Array }>;
 }
@@ -219,6 +219,10 @@ export function getSolanaProvider(): SolanaProvider | null {
 export async function disconnectSolanaWallet(): Promise<void> {
   const p = selected;
   selected = null;
+  // Deliberate disconnect is the ONE thing that should survive a reload as a
+  // disconnect. Without forgetting the wallet, the eager reconnect above would
+  // put it straight back on the next page load.
+  forgetWallet();
   // Not every wallet implements disconnect, and a wallet that refuses to
   // disconnect must not break the UI -- the local choice is cleared either way,
   // which is what actually lets the payer pick a different one.
@@ -226,6 +230,67 @@ export async function disconnectSolanaWallet(): Promise<void> {
     await p?.disconnect?.();
   } catch {
     // Ignored deliberately; see above.
+  }
+}
+
+// Which wallet the payer last used, remembered across reloads.
+//
+// A refresh emptied the connection entirely: an extension leaves publicKey null
+// until the site reconnects, so the app decided the payer was disconnected and
+// asked them to pick a wallet again on every page load. Remembering the label
+// is what lets the silent reconnect below choose the SAME wallet rather than
+// whichever one happens to be detected first.
+const LAST_WALLET_KEY = "conduit.solanaWallet";
+
+function rememberWallet(label: string) {
+  try {
+    localStorage.setItem(LAST_WALLET_KEY, label);
+  } catch {
+    // Private browsing. The session still works, it just won't survive a reload.
+  }
+}
+
+function forgetWallet() {
+  try {
+    localStorage.removeItem(LAST_WALLET_KEY);
+  } catch {
+    /* nothing to do */
+  }
+}
+
+/**
+ * Restore a connection the payer already granted, without prompting.
+ *
+ * `onlyIfTrusted` is the extension's own contract for this: reconnect silently
+ * if this origin is already authorised, otherwise do nothing. That is exactly
+ * the behaviour a refresh needs -- a plain connect() would throw a wallet
+ * dialog on every page load, which is worse than the problem.
+ *
+ * Returns the address, or null when there is nothing to restore.
+ */
+export async function eagerConnectSolanaWallet(): Promise<string | null> {
+  let remembered: string | null = null;
+  try {
+    remembered = localStorage.getItem(LAST_WALLET_KEY);
+  } catch {
+    remembered = null;
+  }
+  if (!remembered) return null;
+
+  const wallets = listSolanaWallets();
+  const match = wallets.find((w) => w.label === remembered) ?? wallets[0];
+  if (!match) return null;
+
+  try {
+    await match.provider.connect({ onlyIfTrusted: true });
+    const pk = match.provider.publicKey;
+    if (!pk) return null;
+    selected = match.provider;
+    return pk.toString();
+  } catch {
+    // Not trusted any more, or the wallet does not support the flag. Either
+    // way this must stay silent: the payer can still connect deliberately.
+    return null;
   }
 }
 
@@ -247,5 +312,9 @@ export async function connectSolanaWallet(choice?: SolanaProvider): Promise<stri
   if (!pk) {
     throw new Error("Wallet connected but returned no public key. Reopen the wallet and try again.");
   }
+  // Remembered by label, so a reload reconnects THIS wallet rather than
+  // whichever one discovery happens to list first.
+  const label = listSolanaWallets().find((w) => w.provider === provider)?.label;
+  if (label) rememberWallet(label);
   return pk.toString();
 }

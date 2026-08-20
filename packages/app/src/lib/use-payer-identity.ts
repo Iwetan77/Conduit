@@ -24,6 +24,7 @@ import { useAccount, useDisconnect } from "wagmi";
 import { CIRCLE_CONNECTOR_ID } from "@/lib/circle/connector";
 import {
   connectSolanaWallet,
+  eagerConnectSolanaWallet,
   disconnectSolanaWallet,
   getSolanaProvider,
   listSolanaWallets,
@@ -120,12 +121,28 @@ export function usePayerIdentity(): UsePayerIdentity {
     return () => clearTimeout(t);
   }, []);
 
-  // Reflect a Solana wallet that is already connected -- returning to the page
-  // with the extension still authorised should not look like being signed out.
+  // Restore the connection across a reload.
+  //
+  // publicKey alone is not enough: an extension leaves it null after a refresh
+  // until the site reconnects, which is why every reload looked like a
+  // disconnect. eagerConnectSolanaWallet asks the wallet to restore silently,
+  // and only for the wallet the payer actually chose. A deliberate disconnect
+  // forgets that choice, so it stays disconnected.
   useEffect(() => {
+    if (solanaAddr) return;
     const pk = getSolanaProvider()?.publicKey;
-    if (pk && !solanaAddr) setSolanaAddr(pk.toString(), false);
-  }, [solanaWallets]);
+    if (pk) {
+      setSolanaAddr(pk.toString(), false);
+      return;
+    }
+    let cancelled = false;
+    void eagerConnectSolanaWallet().then((addr) => {
+      if (!cancelled && addr && !solanaAddr) setSolanaAddr(addr, false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [solanaWallets, solanaAddress]);
 
   const connectSolana = useCallback(async (choice?: SolanaWalletOption) => {
     setConnecting(true);

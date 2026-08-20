@@ -113,6 +113,11 @@ function GoogleSignIn({ fullWidth = false, short = false }: { fullWidth?: boolea
         requestGoogleLogin();
       }}
       disabled={starting}
+      // Warm Circle's SDK on intent, not on click. By the time the button is
+      // pressed the chunk is usually already parsed, which takes the largest
+      // fixed cost out of the sign-in.
+      onPointerEnter={() => void import("@/lib/circle/browser").then((m) => m.warmCircleSdk())}
+      onFocus={() => void import("@/lib/circle/browser").then((m) => m.warmCircleSdk())}
       className={`${fullWidth ? "w-full " : ""}px-4 py-2 text-scale-2 font-mono
                  border border-border text-ink-dim hover:text-ink hover:border-ink-dim
                  transition-colors disabled:opacity-50 whitespace-nowrap`}

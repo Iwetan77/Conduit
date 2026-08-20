@@ -126,6 +126,27 @@ type Listener = () => void;
 const listeners = new Set<Listener>();
 const emit = () => listeners.forEach((l) => l());
 
+/**
+ * Download Circle's SDK chunk before it is needed.
+ *
+ * Clicking Google pays for this chunk up front: the redirect cannot start
+ * until the SDK is parsed and has minted a device token, and on mobile data
+ * that download alone is most of the wait people describe as "sign-in is
+ * slow". Fetching it on hover or focus moves it off the critical path, and
+ * costs nothing for a visitor who never goes near the button.
+ *
+ * Idempotent, and deliberately not awaited by anyone.
+ */
+let warming: Promise<unknown> | null = null;
+export function warmCircleSdk(): void {
+  if (warming) return;
+  warming = import("@circle-fin/w3s-pw-web-sdk").catch(() => {
+    // A failed prefetch must be invisible: the real import at click time will
+    // try again and report properly.
+    warming = null;
+  });
+}
+
 export function configureCircle(c: CircleConfig) {
   config = c;
 }

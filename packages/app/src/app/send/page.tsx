@@ -179,7 +179,15 @@ export default function SendPage() {
               key="input"
               initial={{ opacity: 0, y: 12 }}
               animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -12 }}
+              /* Exit fast, and without moving.
+               AnimatePresence mode="wait" keeps the OLD screen mounted until
+               its exit finishes before mounting the new one, so every exit
+               duration is dead time the payer watches -- the "page 1 shows
+               briefly, then page 2" flash. A translate makes it worse by
+               reading as a screen sliding away. Opacity only, and short
+               enough to feel like a cut rather than a transition. */
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.1 }}
               className="space-y-6"
             >
               <div className="bg-surface border border-border p-6 space-y-6">
@@ -356,7 +364,15 @@ export default function SendPage() {
               key="confirm"
               initial={{ opacity: 0, y: 12 }}
               animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -12 }}
+              /* Exit fast, and without moving.
+               AnimatePresence mode="wait" keeps the OLD screen mounted until
+               its exit finishes before mounting the new one, so every exit
+               duration is dead time the payer watches -- the "page 1 shows
+               briefly, then page 2" flash. A translate makes it worse by
+               reading as a screen sliding away. Opacity only, and short
+               enough to feel like a cut rather than a transition. */
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.1 }}
               className="bg-surface border border-border p-6"
             >
               <SendConfirm

@@ -214,12 +214,34 @@ function ConnectedChip({
               {usdc.error || "None found on any supported chain."}
             </p>
           ) : (
-            usdc.funded.map((c) => (
-              <div key={c.chain} className="flex items-baseline justify-between gap-4">
-                <span className="font-mono text-scale-1 text-ink-dim">{chainLabel(c.chain)}</span>
-                <span className="font-mono text-scale-2 text-ink">{usdcDisplay(c.minor)}</span>
+            <>
+              {/* The balance first, the chains under it.
+                  A column of per-chain rows presented one spendable amount as
+                  several separate ones. Circle Gateway pools them behind a
+                  single signature, so the total is the balance and the rows are
+                  a breakdown of where it currently sits. */}
+              <div className="flex items-baseline justify-between gap-4">
+                <span className="font-mono text-scale-3 text-ink">
+                  {usdcDisplay(usdc.spendableMinor)}
+                </span>
+                <span className="font-mono text-scale-1 text-ink-dim">
+                  {usdc.funded.length === 1
+                    ? chainLabel(usdc.funded[0].chain)
+                    : `${usdc.funded.length} chains`}
+                </span>
               </div>
-            ))
+              {usdc.funded.length > 1 &&
+                usdc.funded.map((c) => (
+                  <div key={c.chain} className="flex items-baseline justify-between gap-4">
+                    <span className="font-mono text-scale-1 text-ink-dim">
+                      {chainLabel(c.chain)}
+                    </span>
+                    <span className="font-mono text-scale-1 text-ink-dim">
+                      {usdcDisplay(c.minor)}
+                    </span>
+                  </div>
+                ))}
+            </>
           )}
           {/* Disconnect lives in here, not beside the chip.
               That is the pattern the Google session already used, and a payer

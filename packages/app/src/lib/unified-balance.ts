@@ -85,14 +85,52 @@ export interface PayerAdapter {
 
 export interface ChainUsdc {
   chain: string;
-  /** Confirmed, already-in-Gateway USDC as a human string, e.g. "11.130000". */
+  /**
+   * Everything spendable on this chain, human string, e.g. "11.130000".
+   *
+   * The sum of `gateway` and `wallet` below. Kept as the headline number
+   * because it is what a payer's balance actually is; the split matters only
+   * to the machinery that has to move it.
+   */
   confirmed: string;
+  /**
+   * Already deposited into Circle Gateway.
+   *
+   * Spendable with an off-chain signature and nothing else -- no transaction,
+   * no gas, and it pools with every other chain's Gateway balance into one
+   * amount (see spendUsdcToArc).
+   */
+  gateway?: string;
+  /**
+   * Sitting in the wallet on this chain.
+   *
+   * Equally spendable, but not for free: it has to be deposited into Gateway
+   * first, and a deposit is an on-chain transaction ON THIS CHAIN -- approve
+   * plus deposit, paying that chain's gas, and for an EVM wallet a network
+   * switch to get there. That is the one part of the unified balance that
+   * cannot be unified, so it is tracked separately rather than averaged into
+   * a single figure that hides the cost.
+   */
+  wallet?: string;
 }
 
 export interface UnifiedUsdc {
-  /** Total confirmed Gateway balance across all chains, human string. */
+  /** Total spendable across all chains, human string. */
   totalConfirmed: string;
   byChain: ChainUsdc[];
+}
+
+/** The gateway/wallet split of a chain entry, in minor units. */
+export function splitOf(c: ChainUsdc): { gateway: bigint; wallet: bigint; total: bigint } {
+  const gateway = usdcHumanToMinor(c.gateway ?? "0");
+  const wallet = usdcHumanToMinor(c.wallet ?? "0");
+  const total = usdcHumanToMinor(c.confirmed);
+  // Older entries carry only `confirmed`. Attributing an unlabelled balance to
+  // the wallet is the safe default: it plans a deposit that then turns out to be
+  // unnecessary, rather than skipping one that was required and failing at the
+  // spend with "insufficient balance".
+  if (gateway === 0n && wallet === 0n) return { gateway: 0n, wallet: total, total };
+  return { gateway, wallet, total };
 }
 
 // Conduit runs entirely on Circle testnets (Arc_Testnet, Base_Sepolia, …).
@@ -289,7 +327,14 @@ export async function getUnifiedUsdc(payer: PayerAdapter): Promise<UnifiedUsdc> 
   const byChain: ChainUsdc[] = [];
   for (const account of res.breakdown ?? []) {
     for (const b of account.breakdown ?? []) {
-      byChain.push({ chain: b.chain, confirmed: b.confirmedBalance });
+      // Labelled as Gateway balance, which is exactly what this endpoint
+      // reports. Downstream that means "spendable with a signature alone".
+      byChain.push({
+        chain: b.chain,
+        confirmed: b.confirmedBalance,
+        gateway: b.confirmedBalance,
+        wallet: "0",
+      });
     }
   }
   return { totalConfirmed: res.totalConfirmedBalance ?? "0", byChain };
@@ -347,7 +392,16 @@ export async function getWalletUsdc(payer: PayerAdapter): Promise<ChainUsdc[]> {
       ).parsed?.info?.tokenAmount?.amount;
       if (amt) minor += BigInt(amt);
     }
-    return minor > 0n ? [{ chain: SOURCE_CHAINS.solana, confirmed: usdcMinorToHuman(minor) }] : [];
+    return minor > 0n
+      ? [
+          {
+            chain: SOURCE_CHAINS.solana,
+            confirmed: usdcMinorToHuman(minor),
+            gateway: "0",
+            wallet: usdcMinorToHuman(minor),
+          },
+        ]
+      : [];
   } catch {
     // A wallet-balance read failure must not block: fall back to whatever
     // getUnifiedUsdc found. Worst case the payer sees the old behaviour.
@@ -399,7 +453,14 @@ async function getEvmWalletUsdc(address: string): Promise<ChainUsdc[]> {
         const endpoints = [...(def.rpcEndpoints ?? []), ...(BACKUP_RPCS[chainId] ?? [])];
         if (!endpoints.length) return null;
         const minor = await erc20BalanceOfAnyRpc(endpoints, def.usdcAddress, address);
-        return minor > 0n ? { chain: chainId, confirmed: usdcMinorToHuman(minor) } : null;
+        return minor > 0n
+          ? {
+              chain: chainId,
+              confirmed: usdcMinorToHuman(minor),
+              gateway: "0",
+              wallet: usdcMinorToHuman(minor),
+            }
+          : null;
       } catch {
         // One unreachable/rate-limited public RPC must not zero out the payer's
         // whole balance view -- skip that chain and keep the others.
@@ -477,12 +538,24 @@ export function mergeUsdc(deposited: UnifiedUsdc, wallet: ChainUsdc[]): UnifiedU
   // spread below did not survive that -- `[...undefined]` throws, so the
   // tolerant path took the screen down exactly when it was supposed to be
   // rescuing it, and only when Circle was already having a bad day.
+  // The split is carried through, not flattened. Both halves are spendable, but
+  // only the Gateway half is spendable for free -- and spendUsdcToArc has to
+  // know which is which to work out how many deposits a payment needs. Summing
+  // them into one number here is what made "one chain must cover it" look like
+  // the only possible rule.
+  const gatewayByChain = new Map<string, bigint>();
+  const walletByChain = new Map<string, bigint>();
   for (const c of [...(deposited?.byChain ?? []), ...wallet]) {
-    minorByChain.set(c.chain, (minorByChain.get(c.chain) ?? 0n) + usdcHumanToMinor(c.confirmed));
+    const { gateway, wallet: w, total } = splitOf(c);
+    minorByChain.set(c.chain, (minorByChain.get(c.chain) ?? 0n) + total);
+    gatewayByChain.set(c.chain, (gatewayByChain.get(c.chain) ?? 0n) + gateway);
+    walletByChain.set(c.chain, (walletByChain.get(c.chain) ?? 0n) + w);
   }
   const byChain = [...minorByChain].map(([chain, minor]) => ({
     chain,
     confirmed: usdcMinorToHuman(minor),
+    gateway: usdcMinorToHuman(gatewayByChain.get(chain) ?? 0n),
+    wallet: usdcMinorToHuman(walletByChain.get(chain) ?? 0n),
   }));
   const total = byChain.reduce((s, c) => s + usdcHumanToMinor(c.confirmed), 0n);
   return { totalConfirmed: usdcMinorToHuman(total), byChain };
@@ -531,6 +604,14 @@ export interface SpendToArcResult {
   /** Gateway transfer id — handed to the API so it can poll + settle. */
   transferId?: string;
   explorerUrl?: string;
+  /**
+   * The chains the spend actually drew from, in the order it drew from them.
+   *
+   * Plural because a payment can now be funded from several at once. The first
+   * is the largest contributor and is what gets reported to the API as the
+   * source chain; the full list is what the receipt shows the payer.
+   */
+  chains: string[];
 }
 
 // Deposit-if-needed then spend `amountMinor` USDC, minting it on Arc to
@@ -543,7 +624,32 @@ export async function spendUsdcToArc(params: {
   payer: PayerAdapter;
   amountMinor: bigint;
   recipientAddress: string;
-  allocations: Array<{ chain: string; amountMinor: bigint }>;
+  /**
+   * The chains available to fund this payment, in the order to draw from them,
+   * each with the payer's FULL spendable balance there.
+   *
+   * Available balance, not a per-chain share of the amount. That distinction
+   * matters: Circle charges its own fee on top of the spend, so this has to
+   * deposit `need` PLUS a buffer (see `target` below), and a list of shares
+   * summing to exactly `need` can never reach that target -- a payer holding 20
+   * on Polygon and 20 on Base, paying 30, would deposit exactly 30 against a
+   * target of 33.60 and then wait out the confirm loop for a shortfall no
+   * amount of waiting could fix. Handed the real balances, the loop takes 20
+   * from Polygon and 13.60 from Base and stops.
+   *
+   * Order is the caller's routing preference (richest first, or the payer's
+   * chosen chain first). Chains beyond what the amount needs are harmless: the
+   * loop stops as soon as Gateway holds enough, so trailing entries are only
+   * reached when the fee buffer needs them.
+   *
+   * More than one entry is normal for an EVM payer now. Gateway pools a payer's
+   * deposited balance ACROSS chains and settles the whole set with a single
+   * EIP-712 signature (the SDK batches every intent for one adapter into one
+   * `BurnIntentSet` -- see the note above the spend call), so a payment no
+   * longer has to fit inside one chain. Solana always passes exactly one: it
+   * signs with a different adapter and cannot join an EVM set.
+   */
+  sources: Array<{ chain: string; availableMinor: bigint }>;
   /**
    * Progress, because this function is not quick and it takes the payer's money
    * on the way through.
@@ -561,15 +667,16 @@ export async function spendUsdcToArc(params: {
   const ctx = await context();
 
   const need = params.amountMinor;
-  // The chain we deposit into and later spend from. Single-family (Solana)
-  // wallet → the one chain the caller allocated.
-  const primaryChain = params.allocations[0]?.chain ?? SOURCE_CHAINS.solana;
+  if (params.sources.length === 0) throw new Error("No chain was chosen to pay from.");
 
   // Read BOTH confirmed (spendable) and pending (in-flight deposit) Gateway
-  // balance. Counting pending is what stops the wallet-draining: without it,
-  // getUnifiedUsdc's confirmed total ignores a deposit that's still confirming,
+  // balance, per chain as well as in total. Counting pending is what stops the
+  // wallet-draining: without it, a deposit that's still confirming is invisible,
   // so every retry deposited AGAIN on top of the last one. `confirmed + pending`
   // is what's actually committed; only deposit if even that can't cover it.
+  //
+  // Per chain matters now that a payment can draw from several: the spend
+  // allocations below have to name real, confirmed balances on real chains.
   const gatewayBalance = async () => {
     const { getBalances } = await import("@circle-fin/unified-balance-kit");
     const res = (await getBalances(ctx as never, {
@@ -577,10 +684,27 @@ export async function spendUsdcToArc(params: {
       networkType: NETWORK,
       sources: { adapter: params.payer.adapter as never },
       includePending: true,
-    } as never)) as { totalConfirmedBalance?: string; totalPendingBalance?: string };
+    } as never)) as {
+      totalConfirmedBalance?: string;
+      totalPendingBalance?: string;
+      breakdown?: Array<{
+        breakdown?: Array<{ chain: string; confirmedBalance?: string; pendingBalance?: string }>;
+      }>;
+    };
+    const byChain = new Map<string, { confirmed: bigint; pending: bigint }>();
+    for (const account of res.breakdown ?? []) {
+      for (const b of account.breakdown ?? []) {
+        const prev = byChain.get(b.chain) ?? { confirmed: 0n, pending: 0n };
+        byChain.set(b.chain, {
+          confirmed: prev.confirmed + usdcHumanToMinor(b.confirmedBalance ?? "0"),
+          pending: prev.pending + usdcHumanToMinor(b.pendingBalance ?? "0"),
+        });
+      }
+    }
     return {
       confirmed: usdcHumanToMinor(res.totalConfirmedBalance ?? "0"),
       pending: usdcHumanToMinor(res.totalPendingBalance ?? "0"),
+      byChain,
     };
   };
 
@@ -596,22 +720,73 @@ export async function spendUsdcToArc(params: {
   const buffer = (need * 12n) / 100n;
   const target = need + (buffer > 300_000n ? buffer : 300_000n);
 
-  let { confirmed, pending } = await gatewayBalance();
+  let bal = await gatewayBalance();
 
-  // Deposit only if nothing already in Gateway (confirmed OR mid-confirmation)
-  // covers the target.
   // Whether the payer's money has moved. Everything after this point must tell
   // the truth about that, however the failure arrives.
-  let deposited = confirmed + pending > 0n;
-  if (confirmed + pending < target) {
-    const shortfall = target - (confirmed + pending);
-    say("Approve the deposit in your wallet…");
-    await deposit(ctx as never, {
-      from: { adapter: params.payer.adapter as never, chain: primaryChain as never },
-      amount: usdcMinorToHuman(shortfall),
-      token: TOKEN,
-    } as never);
-    deposited = true;
+  let deposited = bal.confirmed + bal.pending > 0n;
+
+  // Top up Gateway, chain by chain.
+  //
+  // This is the half of the "unified balance" that cannot be unified. Reading
+  // and spending pool across chains for free, but USDC sitting in the wallet
+  // has to physically enter Gateway, and a deposit is an on-chain transaction
+  // on the chain the money is on -- approve, deposit, that chain's gas, and for
+  // an EVM wallet a network switch to get there first. So a payment funded from
+  // two chains costs two deposits and then ONE signature, not two signatures.
+  //
+  // Chains are visited in the order the caller planned them (richest first), and
+  // the loop stops the moment Gateway holds enough: an allocation is a budget,
+  // not an instruction to move that exact amount.
+  if (bal.confirmed + bal.pending < target) {
+    for (const source of params.sources) {
+      const committed = bal.confirmed + bal.pending;
+      if (committed >= target) break;
+
+      const here = bal.byChain.get(source.chain) ?? { confirmed: 0n, pending: 0n };
+      // What this chain can still contribute: its whole balance less whatever
+      // of it is already inside Gateway, capped by what is still missing
+      // overall so the last chain is not over-deposited.
+      const stillNeeded = target - committed;
+      const roomHere = source.availableMinor - (here.confirmed + here.pending);
+      const amount = roomHere < stillNeeded ? roomHere : stillNeeded;
+      if (amount <= 0n) continue;
+
+      // Depositing from an EVM chain requires the wallet to BE on that chain --
+      // viem rejects it otherwise ("chainId should be same as current chainId").
+      // With one source chain the caller switched once before calling this; with
+      // several, the switch has to happen per deposit, which is why it lives
+      // here now rather than at the call site.
+      let payer = params.payer;
+      if (payer.family === "evm" && payer.provider) {
+        say(`Switch to ${chainLabel(source.chain)} in your wallet…`);
+        await ensureEvmChain(payer.provider, source.chain);
+        payer = await buildEvmAdapter(payer.provider, payer.address);
+      }
+
+      say(
+        params.sources.length > 1
+          ? `Approve the deposit from ${chainLabel(source.chain)} in your wallet…`
+          : "Approve the deposit in your wallet…",
+      );
+      await deposit(ctx as never, {
+        from: { adapter: payer.adapter as never, chain: source.chain as never },
+        amount: usdcMinorToHuman(amount),
+        token: TOKEN,
+      } as never);
+      deposited = true;
+
+      // Re-read rather than assume the deposit landed as `amount`: the next
+      // chain's budget depends on what Gateway actually credited.
+      try {
+        bal = await gatewayBalance();
+      } catch {
+        // A read failure between deposits must not strand the payer -- the
+        // confirm wait below re-reads anyway, and it knows how to report money
+        // that has already moved.
+        break;
+      }
+    }
   }
 
   // A Gateway deposit isn't spendable until it CONFIRMS. Wait for the confirmed
@@ -619,7 +794,7 @@ export async function spendUsdcToArc(params: {
   // balance only, and running it early left the fresh USDC stuck in Gateway.
   const deadline = Date.now() + 120_000;
   const started = Date.now();
-  while (confirmed < target && Date.now() < deadline) {
+  while (bal.confirmed < target && Date.now() < deadline) {
     const secs = Math.round((Date.now() - started) / 1000);
     // Named as a wait on Circle, with the elapsed time, so it reads as
     // progress rather than as a frozen screen. This is the step that used to
@@ -627,7 +802,7 @@ export async function spendUsdcToArc(params: {
     say(`Deposit sent. Waiting for Circle to confirm… ${secs}s`);
     await new Promise((r) => setTimeout(r, 5000));
     try {
-      ({ confirmed, pending } = await gatewayBalance());
+      bal = await gatewayBalance();
     } catch (e) {
       // A failed balance READ after a successful deposit is the case that was
       // being reported as "the bridge isn't responding, nothing has left your
@@ -642,9 +817,55 @@ export async function spendUsdcToArc(params: {
       throw e;
     }
   }
-  if (confirmed < target) {
+  if (bal.confirmed < target) {
+    // Two different failures wear the same shape here, and only one is about
+    // timing. If every source is drained and Gateway still holds less than the
+    // target, no amount of waiting will help: the payer is short of Circle's
+    // fee, not early. Telling them to wait 30s for that is a message that can
+    // never come true, and they would keep pressing Pay against it.
+    const available = params.sources.reduce((sum, s) => sum + s.availableMinor, 0n);
+    if (available < target) {
+      throw new FundsInGatewayError(
+        `Circle charges a fee on top of the amount, so this needs about ` +
+          `${usdcDisplay(target)} USDC and you have ${usdcDisplay(available)}. ` +
+          `Top up any of your chains by ${usdcDisplay(target - available)} and try again. ` +
+          `Anything already deposited is safe and will be used by this payment.`
+      );
+    }
     throw new FundsInGatewayError(
       "Your USDC is deposited in Circle Gateway and still confirming — it's safe and won't deposit again. Wait ~30s and press Pay to finish."
+    );
+  }
+
+  // The allocations the spend actually executes, derived from CONFIRMED Gateway
+  // balance rather than from the caller's plan.
+  //
+  // The plan was drawn against wallet balances before anything moved; by now the
+  // money is in Gateway, and what matters is where Circle says it is. Deriving
+  // from the confirmed balances also keeps the one invariant the SDK enforces --
+  // "Sum of allocations does not match amount" -- true by construction, since
+  // this fills to exactly `need` and stops.
+  const preferred = params.sources.map((a) => a.chain);
+  const order = [
+    ...preferred,
+    ...[...bal.byChain.keys()].filter((c) => !preferred.includes(c)),
+  ];
+  const spendAllocations: Array<{ chain: string; amount: string }> = [];
+  let remaining = need;
+  for (const chain of order) {
+    if (remaining <= 0n) break;
+    const available = bal.byChain.get(chain)?.confirmed ?? 0n;
+    if (available <= 0n) continue;
+    const take = available < remaining ? available : remaining;
+    spendAllocations.push({ chain, amount: usdcMinorToHuman(take) });
+    remaining -= take;
+  }
+  if (remaining > 0n) {
+    // Total covers the amount but the per-chain breakdown does not add up --
+    // which means the breakdown is stale, not that the payer is short.
+    throw new FundsInGatewayError(
+      "Your USDC is in Circle Gateway but Circle's per-chain balances are still catching up. " +
+        "Wait a moment and press Pay to finish — nothing will be deposited again."
     );
   }
 
@@ -669,6 +890,13 @@ export async function spendUsdcToArc(params: {
   // Circle's estimate coming back short of Circle's own forwarding fee. It is
   // not something to work around from here, and inventing a workaround broke a
   // working call.
+  //
+  // ONE signature, however many chains are listed. From the SDK's own
+  // adapter-evm source: "all intents for the same adapter are batched into a
+  // single group so that they can be signed in one EIP-712 BurnIntentSet
+  // operation", producing "a single EIP-712 ECDSA signature". A single-chain
+  // spend signs primaryType 'BurnIntent'; a multi-chain one signs
+  // 'BurnIntentSet'. Either way the payer is asked once.
   const spendParams = {
     token: TOKEN,
     // Top-level total is REQUIRED by SpendParams (see estimateSpend's own
@@ -678,10 +906,7 @@ export async function spendUsdcToArc(params: {
     amount: usdcMinorToHuman(need),
     from: {
       adapter: params.payer.adapter as never,
-      // Spend the full amount from the chain we just confirmed the deposit on,
-      // rather than the pre-deposit wallet allocation.
-      // Exactly `need`. The SDK validates that allocations sum to amount.
-      allocations: [{ chain: primaryChain as never, amount: usdcMinorToHuman(need) }],
+      allocations: spendAllocations as never,
     },
     to: {
       chain: ARC_CHAIN as never,
@@ -722,5 +947,10 @@ export async function spendUsdcToArc(params: {
     );
   }
 
-  return { txHash: result.txHash, transferId: result.transferId, explorerUrl: result.explorerUrl };
+  return {
+    txHash: result.txHash,
+    transferId: result.transferId,
+    explorerUrl: result.explorerUrl,
+    chains: spendAllocations.map((a) => a.chain),
+  };
 }

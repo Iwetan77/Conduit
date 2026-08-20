@@ -159,7 +159,11 @@ export function PaymentLinkPay({ linkId }: PaymentLinkPayProps) {
     amountRaw > 0n
       ? (() => {
           const r = routeForAmount(amountRaw, arcUsdc, sourceUsdc.funded);
-          return r.kind === "cross_chain" ? r.chain : null;
+          // Every chain the payment draws from, not just the first. A payment
+          // can pool across chains now, so naming one would misdescribe it.
+          return r.kind === "cross_chain"
+            ? r.allocations.map((a) => chainLabel(a.chain)).join(" + ")
+            : null;
         })()
       : null;
 
@@ -317,7 +321,7 @@ export function PaymentLinkPay({ linkId }: PaymentLinkPayProps) {
                      hover:bg-signal/10 transition-colors disabled:opacity-60
                      text-signal font-mono text-sm"
         >
-          {bridgeBusy ? "Preparing…" : `Pay from ${chainLabel(crossChain)}`}
+          {bridgeBusy ? "Preparing…" : `Pay from ${crossChain}`}
         </button>
       )}
       {bridgeError && <p className="text-danger text-sm">{bridgeError}</p>}

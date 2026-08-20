@@ -60,11 +60,15 @@ export function SettlementIntentPay({ intentId }: SettlementIntentPayProps) {
   // Null means Arc can cover it and the direct path applies. Arc counts only
   // for an EVM wallet: a Solana wallet cannot sign on Arc at all, so crediting
   // it an Arc balance would offer a route that fails at the signature.
+  // Names every chain the payment will draw from, or null when Arc covers it.
+  // Plural because a payment can pool across chains now -- "Paying from Base"
+  // for a payment that also takes 12 off Polygon would misdescribe it.
   function crossChainFor(amountRaw: bigint): string | null {
     const arcUsdc =
       identity?.kind === "evm" ? (arcBalances.balances.USDC ?? 0n) : 0n;
     const route = routeForAmount(amountRaw, arcUsdc, sourceUsdc.funded);
-    return route.kind === "cross_chain" ? route.chain : null;
+    if (route.kind !== "cross_chain") return null;
+    return route.allocations.map((a) => chainLabel(a.chain)).join(" + ");
   }
 
   // Shared query with the page's title effect — one request, not two.
@@ -170,7 +174,7 @@ export function SettlementIntentPay({ intentId }: SettlementIntentPayProps) {
             <>
               {bridgeStage === "setup" && (
                 <p className="text-center text-scale-1 font-mono text-signal">
-                  Paying from {chainLabel(crossChain)}
+                  Paying from {crossChain}
                 </p>
               )}
               <CrossChainBridge

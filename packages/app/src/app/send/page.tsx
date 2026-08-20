@@ -238,14 +238,39 @@ export default function SendPage() {
                     {sourceUsdc.loading && sourceUsdc.funded.length === 0 ? (
                       <p className="text-scale-1 font-mono text-ink-dim">Reading your balances…</p>
                     ) : (
-                      <div className="flex flex-wrap gap-x-3 gap-y-1">
-                        {sourceUsdc.funded.map((c) => (
-                          <span key={c.chain} className="text-scale-1 font-mono text-ink">
-                            {usdcDisplay(c.minor)}{" "}
-                            <span className="text-ink-dim">on {chainLabel(c.chain)}</span>
-                          </span>
-                        ))}
-                      </div>
+                      <>
+                        {/* One balance, not a list of them.
+                            This printed "20 on Polygon  20 on Base" side by
+                            side, which is three separate balances for what is
+                            one spendable amount: Circle Gateway pools deposited
+                            USDC across chains and settles the set with a single
+                            signature, so 20 and 20 is 40 to spend. The
+                            per-chain figures stay underneath as a breakdown --
+                            worth seeing, because each contributing chain costs
+                            a deposit -- but they are no longer the headline. */}
+                        <p className="font-mono text-ink text-scale-3">
+                          {usdcDisplay(sourceUsdc.spendableMinor)}{" "}
+                          <span className="text-ink-dim text-scale-1">USDC</span>
+                        </p>
+                        <p className="text-scale-1 font-mono text-ink-dim">
+                          {sourceUsdc.funded.length === 1
+                            ? `on ${chainLabel(sourceUsdc.funded[0].chain)}`
+                            : `across ${sourceUsdc.funded
+                                .map((c) => `${chainLabel(c.chain)} ${usdcDisplay(c.minor)}`)
+                                .join(" · ")}`}
+                        </p>
+                        {/* Arc is named apart because it cannot join the pool:
+                            it is the DESTINATION domain, so a balance already
+                            there settles directly in one transaction instead of
+                            bridging. Folding it into the number above would
+                            promise a payment that mixes the two, which no
+                            single route can do. */}
+                        {arcUsdc > 0n && (
+                          <p className="text-scale-1 font-mono text-ink-dim">
+                            plus {usdcDisplay(arcUsdc)} already on Arc — settles direct, no bridge
+                          </p>
+                        )}
+                      </>
                     )}
                   </div>
                 )}
@@ -334,7 +359,11 @@ export default function SendPage() {
                       the next screen. */}
                   {route?.kind === "cross_chain" && (
                     <p className="text-center text-scale-1 font-mono text-signal">
-                      Paying from {chainLabel(route.chain)}
+                      {route.allocations.length === 1
+                        ? `Paying from ${chainLabel(route.chain)}`
+                        : `Paying from ${route.allocations
+                            .map((a) => chainLabel(a.chain))
+                            .join(" + ")}`}
                     </p>
                   )}
                   {sourceUsdc.loading && !route && (

@@ -32,23 +32,25 @@ export interface PayerUsdc {
   /** Chains holding a non-zero balance, richest first. */
   funded: Array<{ chain: string; minor: bigint }>;
   /**
-   * The largest amount a single payment could actually draw.
+   * The payer's spendable cross-chain USDC: every source chain, summed.
    *
-   * This, not a sum, is what an amount should be checked against. A payer
-   * holding 20 on Arc and 20 on Ethereum cannot pay 30: spendUsdcToArc
-   * deposits the full amount on ONE chain and spends it there, so two
-   * half-funded chains never combine however inviting the total looks.
+   * This is a real balance now, and it is the number to show and to check an
+   * amount against. It used to be deliberately named so it could NOT be
+   * mistaken for one ("a portfolio figure, never a spendable one") because a
+   * payment could only ever draw from a single chain. Circle Gateway pools
+   * deposited balance across chains behind one signature, so the sum is what
+   * the payer can actually spend.
+   *
+   * Single-family by construction: the hook reads EVM chains for an EVM wallet
+   * and Solana for a Solana wallet, never both, because balances in two
+   * families cannot pool into one signature.
+   */
+  spendableMinor: bigint;
+  /**
+   * The largest single chain, kept only for the places that genuinely need one
+   * chain -- naming a route, or reporting a source to the API.
    */
   maxSingleChainMinor: bigint;
-  /**
-   * Everything held off Arc, summed.
-   *
-   * Deliberately named so it cannot be mistaken for a balance. It is a
-   * portfolio figure, never a spendable one -- showing it as "you have X"
-   * promises a payment the rails cannot make. Show funded[] per chain
-   * instead.
-   */
-  totalAcrossChainsMinor: bigint;
 }
 
 // One read per wallet, shared by every component that asks.
@@ -74,8 +76,8 @@ const EMPTY: PayerUsdc = {
   error: "",
   unified: null,
   funded: [],
+  spendableMinor: 0n,
   maxSingleChainMinor: 0n,
-  totalAcrossChainsMinor: 0n,
 };
 
 export interface UsePayerUsdcOptions {
@@ -140,15 +142,16 @@ export function usePayerUsdc({
           return { ...EMPTY, error: "Couldn't read your USDC balances. Try again in a moment." };
         }
         const unified = mergeUsdc(deposited ?? ({} as UnifiedUsdc), wallet ?? []);
-        // Richest first, so the head of the list IS the spendable ceiling.
+        // Richest first — which decides the order a payment draws from, since
+        // fewer, larger draws means fewer deposits and fewer wallet prompts.
         const funded = fundedChains(unified);
         return {
           loading: false,
           error: "",
           unified,
           funded,
+          spendableMinor: funded.reduce((sum, c) => sum + c.minor, 0n),
           maxSingleChainMinor: funded[0]?.minor ?? 0n,
-          totalAcrossChainsMinor: funded.reduce((sum, c) => sum + c.minor, 0n),
         };
       })();
 
@@ -176,18 +179,36 @@ export function usePayerUsdc({
 
 export type PayerRoute =
   | { kind: "arc" }
-  | { kind: "cross_chain"; chain: string; minor: bigint }
+  | {
+      kind: "cross_chain";
+      /** Every chain this payment draws from, richest first. */
+      allocations: Array<{ chain: string; minor: bigint }>;
+      /** The largest contributor — what the route is named after. */
+      chain: string;
+      /** Total being drawn across those chains. */
+      minor: bigint;
+    }
   | { kind: "insufficient"; bestMinor: bigint };
 
 /**
  * Which route can actually settle this amount.
  *
  * Arc wins when it can cover the amount on its own, because it is one
- * transaction with nothing in between. Otherwise the payment comes from the
- * richest single source chain that covers it -- ONE chain, never a sum of
- * several: spendUsdcToArc deposits the full amount on one chain and spends it
- * there, so two half-funded chains cannot combine into one payment however
- * appealing the total looks.
+ * transaction with nothing in between and no bridge.
+ *
+ * Otherwise the payment is funded from the payer's cross-chain balance, and
+ * that balance is a SUM, not a maximum. This is the rule that changed. It used
+ * to pick the richest single chain that could cover the whole amount, on the
+ * grounds that a spend deposits into one chain and spends it there -- so a
+ * payer holding 20 on Polygon and 20 on Base was refused a payment of 30 while
+ * plainly holding 40. Circle Gateway pools deposited balance across chains and
+ * settles the whole set from one EIP-712 `BurnIntentSet` signature, so the
+ * payment simply draws from as many chains as it needs to.
+ *
+ * `funded` must therefore be single-family: EVM chains for an EVM wallet, and
+ * Solana alone for a Solana wallet. Chains from two families cannot pool,
+ * because each family signs with its own adapter and the batching that makes
+ * this one signature is per adapter.
  */
 export function routeForAmount(
   needMinor: bigint,
@@ -195,8 +216,34 @@ export function routeForAmount(
   funded: Array<{ chain: string; minor: bigint }>,
 ): PayerRoute {
   if (arcMinor >= needMinor) return { kind: "arc" };
-  const payable = funded.find((c) => c.minor >= needMinor);
-  if (payable) return { kind: "cross_chain", chain: payable.chain, minor: payable.minor };
-  const best = funded.reduce((m, c) => (c.minor > m ? c.minor : m), 0n);
-  return { kind: "insufficient", bestMinor: arcMinor > best ? arcMinor : best };
+
+  // Drawn in the order given, and NOT re-sorted here. fundedChains already
+  // returns richest first, which is the order that costs the fewest deposits
+  // and so the fewest wallet prompts -- but a caller that deliberately puts a
+  // payer's chosen chain at the head needs that respected rather than sorted
+  // away.
+  const allocations: Array<{ chain: string; minor: bigint }> = [];
+  let remaining = needMinor;
+  for (const c of funded) {
+    if (remaining <= 0n) break;
+    if (c.minor <= 0n) continue;
+    const take = c.minor < remaining ? c.minor : remaining;
+    allocations.push({ chain: c.chain, minor: take });
+    remaining -= take;
+  }
+
+  if (remaining <= 0n && allocations.length > 0) {
+    return {
+      kind: "cross_chain",
+      allocations,
+      chain: allocations[0].chain,
+      minor: needMinor,
+    };
+  }
+
+  // Short everywhere. Report the whole cross-chain balance, not the best single
+  // chain: that total is now genuinely what a payment can draw on, so naming a
+  // smaller number would understate what the payer has.
+  const across = funded.reduce((s, c) => s + c.minor, 0n);
+  return { kind: "insufficient", bestMinor: arcMinor > across ? arcMinor : across };
 }

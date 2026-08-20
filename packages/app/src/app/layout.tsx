@@ -10,7 +10,6 @@ import "@fontsource/barlow-condensed/800.css";
 import "@fontsource/barlow-condensed/900.css";
 import "./globals.css";
 import { Providers } from "./providers";
-import { ChainGuard } from "@/components/Shared/ChainGuard";
 
 export const metadata: Metadata = {
   // Makes relative OG image URLs (e.g. the per-link /pay/[id]/opengraph-image)
@@ -63,11 +62,17 @@ export default function RootLayout({
         {/* Static grid, always rendered. The one-time draw-in signature moment
             is dashboard-specific (see dashboard/layout.tsx), not app-wide. */}
         <div className="conduit-grid" aria-hidden="true" />
-        <Providers>
-          <ChainGuard>
-            {children}
-          </ChainGuard>
-        </Providers>
+        {/* ChainGuard stood here, walling the app behind "You're on Ethereum —
+            switch to Arc Testnet". It had already been carved back to exempt
+            /pay, /send and /dashboard, which left it guarding only the routes
+            that never sign anything: the landing page, History, Links, Docs.
+            And the premise is now wrong rather than merely unnecessary — the
+            chain a wallet is pointed at is an INPUT to routing, not a
+            precondition, so being on Ethereum is a supported case. The two
+            surfaces that genuinely need Arc (SendConfirm, ArcSettlePanel)
+            switch the chain themselves at the moment of signing, which is the
+            only point where the requirement is actually known. */}
+        <Providers>{children}</Providers>
       </body>
     </html>
   );

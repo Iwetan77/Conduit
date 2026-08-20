@@ -15,6 +15,7 @@ import { pollWithBackoff } from "@/lib/poll";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useAccount, useConnect, useDisconnect, type Connector } from "wagmi";
 import { usePayerIdentity } from "@/lib/use-payer-identity";
+import { routeForAmount } from "@/lib/use-payer-usdc";
 import { shortenAddress } from "@/lib/format";
 import {
   getSolanaProvider,
@@ -35,7 +36,6 @@ import { formatAmount } from "@/lib/format";
 import type { Currency } from "@conduit/sdk/lite";
 import {
   buildEvmAdapter,
-  ensureEvmChain,
   buildSolanaAdapter,
   getUnifiedUsdc,
   getWalletUsdc,
@@ -44,7 +44,6 @@ import {
   FundsInGatewayError,
   getSolanaLamports,
   MIN_SOLANA_LAMPORTS,
-  usdcMinorToHuman,
   usdcDisplay,
   chainLabel,
   chainToSourceSlug,
@@ -256,7 +255,14 @@ export function CrossChainBridge({ intentId, intent, knownUsdc, onStage }: Cross
   // Which chain the payer pays from. The spend draws from ONE chain, so this is
   // a real choice, not a display detail — defaulted to the richest funded chain
   // and overridable whenever more than one can cover the amount.
-  const [sourceChain, setSourceChain] = useState<string | null>(null);
+  // Which chains fund this payment, and how much from each, richest first.
+  //
+  // This was a single `sourceChain`, because a spend could only draw from one.
+  // Circle Gateway pools deposited balance across chains behind one signature,
+  // so it is a list -- usually of length one, and the UI still names the head
+  // of it as "the" chain when it is.
+  const [allocations, setAllocations] = useState<Array<{ chain: string; minor: bigint }>>([]);
+  const sourceChain = allocations[0]?.chain ?? null;
   const [pickerOpen, setPickerOpen] = useState(false);
   // The chain the payer picked, held while they choose WHICH WALLET pays from
   // it. Two decisions, asked separately: "where is my USDC" and "which of my
@@ -556,29 +562,33 @@ export function CrossChainBridge({ intentId, intent, knownUsdc, onStage }: Cross
       setUnified(bal);
 
       const need = BigInt(plan.required_usdc);
-      // Default to the richest chain that can cover this on its own — that's
-      // the one the spend would actually succeed from.
       const funded = fundedChains(bal);
-      const payable = funded.find((c) => c.minor >= need);
-      // The payer picked a chain in the sheet; that choice outranks the greedy
-      // default. Without this the pick was read and then thrown away here, and
-      // a payer who chose Polygon but held more USDC on Base silently paid from
-      // Base. Fall back only when nothing was picked, or when the pick can't
-      // cover the amount on its own — the confirm screen then shows what can.
-      const pickedFunded = picked ? funded.find((c) => c.chain === picked && c.minor >= need) : undefined;
-      setSourceChain(pickedFunded?.chain ?? payable?.chain ?? null);
-      // One chain has to cover the whole amount.
+
+      // Across chains, not on one of them.
       //
-      // A payment draws from a single source chain -- spendUsdcToArc deposits
-      // the full amount on one and spends it there. This used to also accept a
-      // greedy plan spread ACROSS chains, so a payer holding 30 on Base and 30
-      // on Polygon owing 50 reached the confirm screen, and the spend then
-      // tried to pull all 50 from Base. It failed in the deposit-confirm wait
-      // as "still confirming, wait ~30s" -- a timing message for a problem
-      // that was never about timing.
-      if (payable) {
+      // This used to demand that a SINGLE chain cover the whole amount, because
+      // a spend deposited the full amount on one chain and spent it there. It
+      // no longer does: Circle Gateway pools deposited balance across chains and
+      // settles the set with one EIP-712 BurnIntentSet signature, so a payer
+      // holding 20 on Polygon and 20 on Base can pay 30. routeForAmount owns
+      // that arithmetic; this screen just follows it.
+      //
+      // A payer who picked a chain in the sheet gets it first. That is now a
+      // preference about where to draw from FIRST rather than a constraint the
+      // whole payment must fit inside, so a pick that cannot cover the amount
+      // alone is still honoured -- it simply tops up from the next chain.
+      const ordered = picked
+        ? [
+            ...funded.filter((c) => c.chain === picked),
+            ...funded.filter((c) => c.chain !== picked),
+          ]
+        : funded;
+      const route = routeForAmount(need, 0n, ordered);
+      if (route.kind === "cross_chain") {
+        setAllocations(route.allocations);
         setPhase("confirm");
       } else {
+        setAllocations([]);
         setPhase("insufficient");
       }
   }
@@ -640,15 +650,30 @@ export function CrossChainBridge({ intentId, intent, knownUsdc, onStage }: Cross
     setPhase("spending");
     try {
       const need = BigInt(requiredUSDC);
-      // The chain the payer chose, and only that. There is no fallback to a
-      // plan spread across chains: the spend cannot execute one, so accepting
-      // it here would only defer the failure to somewhere less legible.
-      if (!sourceChain) throw new Error("Choose the chain to pay from.");
-      const chosen = {
-        allocations: [{ chain: sourceChain, amountMinor: need }],
-        primary: chainToSourceSlug(sourceChain),
-      };
-      if (!chosen.primary) throw new Error("Balance changed — no single chain holds enough USDC.");
+      // Every chain this payment draws from. Usually one; more when no single
+      // chain covers the amount and the payer's Gateway balance has to pool
+      // across several. The whole set is signed once (BurnIntentSet), so the
+      // number of chains changes how many DEPOSITS are needed, never how many
+      // times the payer authorises the payment.
+      if (allocations.length === 0) throw new Error("Choose the chain to pay from.");
+      // Every funded chain, with its REAL balance, ordered so the chains this
+      // payment plans to draw from come first.
+      //
+      // Not the planned per-chain amounts: those sum to exactly the amount owed,
+      // and the deposit has to reach amount + Circle's fee buffer, so a plan
+      // summing to the amount can never fund it. The trailing chains are what
+      // that buffer comes out of; they are only touched if it is needed.
+      const funded = unified ? fundedChains(unified) : [];
+      const planned = allocations.map((a) => a.chain);
+      const sources = [
+        ...planned,
+        ...funded.map((c) => c.chain).filter((c) => !planned.includes(c)),
+      ].map((chain) => ({
+        chain,
+        availableMinor: funded.find((c) => c.chain === chain)?.minor ?? 0n,
+      }));
+      const primary = chainToSourceSlug(allocations[0].chain);
+      if (!primary) throw new Error("Balance changed — that chain can no longer fund this.");
 
       // Gas, checked before signing rather than discovered by retry exhaustion.
       //
@@ -667,45 +692,49 @@ export function CrossChainBridge({ intentId, intent, knownUsdc, onStage }: Cross
         }
       }
 
-      // Depositing from an EVM chain requires the wallet to BE on that chain —
-      // the payer is normally sitting on Arc, so without this the SDK rejects
-      // the deposit ("chainId should be same as current chainId"). Switch, then
-      // rebuild the adapter so it's bound to the network we just moved to.
-      let payer = adapter;
-      const sourceChainId = chosen.allocations[0]?.chain;
-
       // A Circle wallet exists per blockchain, and Circle cannot provision one
-      // on every chain Gateway supports. Say that here, where the chain is
-      // known and the payer can still pick another one — otherwise the switch
-      // below fails inside Circle's adapter as an unsupported-method error that
-      // says nothing about what went wrong or what to do about it.
-      if (connector?.id === CIRCLE_CONNECTOR_ID && payer.family === "evm" && sourceChainId) {
+      // on every chain Gateway supports. Checked here, where the chains are
+      // known and the payer can still pick another one — otherwise the network
+      // switch fails inside Circle's adapter as an unsupported-method error
+      // that says nothing about what went wrong or what to do about it.
+      //
+      // Planned chains throw; fallback chains are dropped. The distinction
+      // matters: a payer whose payment is funded from Base should not be
+      // refused because they happen to also hold USDC on a chain Circle cannot
+      // provision, and that is exactly what checking the whole list would do.
+      const payer = adapter;
+      let usable = sources;
+      if (connector?.id === CIRCLE_CONNECTOR_ID && payer.family === "evm") {
         const { resolveChainIdentifier } = await import("@circle-fin/unified-balance-kit");
-        const def = resolveChainIdentifier(sourceChainId as never) as unknown as {
-          type?: string;
-          chainId?: number;
+        const holdable = (chain: string) => {
+          const def = resolveChainIdentifier(chain as never) as unknown as {
+            type?: string;
+            chainId?: number;
+          };
+          if (def?.type !== "evm" || typeof def.chainId !== "number") return true;
+          return chainByEvmId(def.chainId) !== undefined;
         };
-        if (def?.type === "evm" && typeof def.chainId === "number" && !chainByEvmId(def.chainId)) {
-          throw new Error(
-            `Signing in with Google can't hold USDC on ${chainLabel(sourceChainId)}. ` +
-              `Choose a different chain, or connect a wallet that holds USDC there.`
-          );
+        for (const chain of planned) {
+          if (!holdable(chain)) {
+            throw new Error(
+              `Signing in with Google can't hold USDC on ${chainLabel(chain)}. ` +
+                `Choose a different chain, or connect a wallet that holds USDC there.`
+            );
+          }
         }
+        usable = sources.filter((s) => holdable(s.chain));
       }
 
-      if (payer.family === "evm" && sourceChainId) {
-        setFxNote(`Switch to ${chainLabel(sourceChainId)} in your wallet…`);
-        await ensureEvmChain(payer.provider, sourceChainId);
-        payer = await buildEvmAdapter(payer.provider, payer.address);
-        setAdapter(payer);
-        setFxNote("");
-      }
-
+      // The network switch that used to happen here has moved into
+      // spendUsdcToArc. It could be done once up front while a payment drew
+      // from a single chain; now that one payment can deposit from several, the
+      // switch has to happen per deposit, which only the deposit loop knows
+      // about.
       const result = await spendUsdcToArc({
         payer,
         amountMinor: need,
         recipientAddress: recipient,
-        allocations: chosen.allocations,
+        sources: usable,
         onProgress: setFxNote,
       });
       setFxNote("Handing off to settlement…");
@@ -715,7 +744,7 @@ export function CrossChainBridge({ intentId, intent, knownUsdc, onStage }: Cross
       if (result.transferId) {
         await reportBridgeSpend(intentId, {
           gateway_transfer_id: result.transferId,
-          source_chain: chosen.primary,
+          source_chain: primary,
           usdc_amount: requiredUSDC,
         });
       }
@@ -808,7 +837,12 @@ export function CrossChainBridge({ intentId, intent, knownUsdc, onStage }: Cross
                         disabled={disabled}
                         onClick={() => {
                           setPickerOpen(false);
-                          setSourceChain(SOURCE_CHAINS[kind]);
+                          // The chain the payer names is passed to chooseSource
+                          // as a preference, and settleOn puts it at the head of
+                          // the draw. It is no longer pinned into state here as
+                          // "the" source chain, because the balance read may
+                          // legitimately fund the payment from this chain plus
+                          // others.
                           // Ask which wallet next, rather than connecting one.
                           // Picking a chain used to grab whatever was already
                           // connected, so a payer with two wallets could not
@@ -885,22 +919,25 @@ export function CrossChainBridge({ intentId, intent, knownUsdc, onStage }: Cross
             {adapter?.address ? `${adapter.address.slice(0, 5)}…${adapter.address.slice(-4)}` : "—"}
           </span>
         </div>
-        {/* Per chain, not the total.
-            A payment is funded from ONE chain, so a total across chains is the
-            wrong number to show here: it can exceed the amount owed while no
-            single chain covers it, which reads as Conduit refusing money the
-            payer plainly has. Name the largest chain instead, so the gap shown
-            is the gap that actually has to be closed. */}
+        {/* The total, across chains.
+            This deliberately showed the LARGEST SINGLE CHAIN and told the payer
+            "a payment draws from a single chain, so top one up" -- correct while
+            that was true, and now simply wrong: Gateway pools the balance, so
+            the number that matters is the sum and the gap is against the sum.
+            Showing the per-chain figure here would understate what they have
+            and ask them to fix a problem they do not have. */}
         <p className="text-danger text-sm">
-          You need {usdcDisplay(BigInt(requiredUSDC ?? "0"))} USDC on one chain.{" "}
           {(() => {
             const funded = unified ? fundedChains(unified) : [];
-            const best = funded[0];
-            return best
-              ? `Your largest balance is ${usdcDisplay(best.minor)} USDC on ${chainLabel(best.chain)}.`
-              : "Conduit found no USDC on any supported chain.";
-          })()}{" "}
-          A payment draws from a single chain, so topping one up is what unblocks this.
+            const across = funded.reduce((sum, c) => sum + c.minor, 0n);
+            const short = BigInt(requiredUSDC ?? "0") - across;
+            return funded.length === 0
+              ? `You need ${usdcDisplay(BigInt(requiredUSDC ?? "0"))} USDC. Conduit found none on any supported chain.`
+              : `You need ${usdcDisplay(BigInt(requiredUSDC ?? "0"))} USDC and hold ` +
+                `${usdcDisplay(across)} across ${funded.length === 1 ? chainLabel(funded[0].chain) : `${funded.length} chains`}` +
+                `${short > 0n ? ` — ${usdcDisplay(short)} short` : ""}. ` +
+                `Top up any of them; a payment can draw from all of them at once.`;
+          })()}
         </p>
         {unified && fundedChains(unified).length > 0 && (
           <p className="text-ink-dim text-xs font-mono">
@@ -926,7 +963,7 @@ export function CrossChainBridge({ intentId, intent, knownUsdc, onStage }: Cross
           onClick={() => setPhase("choose_source")}
           className="block text-xs font-mono text-ink-dim hover:text-ink"
         >
-          ← Pay from a different chain
+          ← Start from a different chain
         </button>
       </div>
     );
@@ -935,9 +972,17 @@ export function CrossChainBridge({ intentId, intent, knownUsdc, onStage }: Cross
   if (phase === "confirm") {
     const funded = unified ? fundedChains(unified) : [];
     const need = BigInt(requiredUSDC ?? "0");
-    // The chain the spend will actually draw from: the payer's pick when they
-    // made one, otherwise the default chosen after the balance read.
-    const activeChain = funded.find((c) => c.chain === sourceChain) ?? funded[0];
+    // The whole cross-chain balance this payment can draw on, and the chains it
+    // will actually draw from. Both are real now: the balance pools across
+    // chains, and the draw may span several of them.
+    const spendable = funded.reduce((sum, c) => sum + c.minor, 0n);
+    const drawing = allocations.length > 0 ? allocations : funded.slice(0, 1);
+    const fromLabel =
+      drawing.length === 0
+        ? "your balance"
+        : drawing.length === 1
+          ? chainLabel(drawing[0].chain)
+          : `${drawing.length} chains`;
     return (
       <div className="space-y-4">
         {/* The payment, not the plumbing.
@@ -952,11 +997,12 @@ export function CrossChainBridge({ intentId, intent, knownUsdc, onStage }: Cross
             <p className="text-ink font-mono text-3xl mt-1">
               {usdcDisplay(BigInt(requiredUSDC ?? "0"))} USDC
             </p>
-            {activeChain && (
-              <p className="text-ink-dim text-xs font-mono mt-1">
-                from {chainLabel(activeChain.chain)} · {usdcDisplay(activeChain.minor)} available
-              </p>
-            )}
+            {/* The balance, unified. Naming one chain's balance here was
+                honest while a payment could only draw from one chain; it now
+                understates what the payer can spend. */}
+            <p className="text-ink-dim text-xs font-mono mt-1">
+              from {fromLabel} · {usdcDisplay(spendable)} USDC available
+            </p>
           </div>
 
           <div className="h-px bg-border" />
@@ -965,7 +1011,7 @@ export function CrossChainBridge({ intentId, intent, knownUsdc, onStage }: Cross
               understands why this takes longer than a same chain send, which is
               the single most common thing to be confused about here. */}
           <div className="flex items-center gap-2 font-mono text-xs text-ink-dim flex-wrap">
-            <span className="text-ink">{activeChain ? chainLabel(activeChain.chain) : "your chain"}</span>
+            <span className="text-ink">{fromLabel}</span>
             <span aria-hidden>→</span>
             <span className="text-ink">Arc</span>
             {isoToToken(intent.settle_currency) !== "USDC" && (
@@ -992,43 +1038,58 @@ export function CrossChainBridge({ intentId, intent, knownUsdc, onStage }: Cross
           </div>
         </div>
 
-        {/* More than one funded chain — let the payer choose, rather than
-            silently spending from whichever happened to sort first. Chains that
-            can't cover the amount on their own are shown but not selectable:
-            the spend draws from a single chain, so an under-funded one would
-            fail at signing time. */}
+        {/* Where the money is coming from, and what it costs.
+            Every funded chain is selectable now -- an under-funded one used to
+            be greyed out because a payment had to fit inside one chain, and it
+            no longer does: picking it just means "start here", and the rest is
+            topped up from the chains below. Chains the payment will actually
+            draw from are marked, with the amount drawn, because that is what
+            decides how many deposits the payer is about to approve. */}
         {funded.length > 1 && (
           <div className="space-y-2">
             <p className="text-ink-dim text-xs uppercase tracking-wider font-mono">Pay from</p>
             {funded.map((c) => {
-              const enough = c.minor >= need;
-              const active = c.chain === sourceChain;
+              const drawn = allocations.find((a) => a.chain === c.chain)?.minor ?? 0n;
+              const active = drawn > 0n;
+              const first = allocations[0]?.chain === c.chain;
               return (
                 <button
                   key={c.chain}
-                  onClick={() => enough && setSourceChain(c.chain)}
-                  disabled={!enough}
+                  // Reorders the draw to start here, then refills from the rest.
+                  onClick={() => {
+                    const reordered = [
+                      ...funded.filter((f) => f.chain === c.chain),
+                      ...funded.filter((f) => f.chain !== c.chain),
+                    ];
+                    const r = routeForAmount(need, 0n, reordered);
+                    if (r.kind === "cross_chain") setAllocations(r.allocations);
+                  }}
                   className={`w-full flex items-center justify-between px-4 py-3 border font-mono text-sm
                     transition-colors ${
                       active
                         ? "border-signal bg-signal/10 text-ink"
-                        : enough
-                          ? "border-border text-ink hover:border-signal/40"
-                          : "border-border text-ink-dim opacity-50 cursor-not-allowed"
+                        : "border-border text-ink hover:border-signal/40"
                     }`}
                 >
                   <span className="flex items-center gap-2">
                     <span
-                      className={`w-1.5 h-1.5 ${active ? "bg-signal" : "bg-transparent border border-ink-dim"}`}
+                      className={`w-1.5 h-1.5 ${first ? "bg-signal" : active ? "bg-signal/50" : "bg-transparent border border-ink-dim"}`}
                     />
                     {chainLabel(c.chain)}
                   </span>
                   <span className={active ? "text-ink" : "text-ink-dim"}>
+                    {active ? `${usdcDisplay(drawn)} of ` : ""}
                     {usdcDisplay(c.minor)} USDC
                   </span>
                 </button>
               );
             })}
+            {allocations.length > 1 && (
+              <p className="text-ink-dim text-xs font-mono">
+                Drawing from {allocations.length} chains. One signature covers all of
+                them; each chain needs its own deposit first.
+              </p>
+            )}
           </div>
         )}
         <button
@@ -1067,7 +1128,13 @@ export function CrossChainBridge({ intentId, intent, knownUsdc, onStage }: Cross
   if (phase === "bridging" || phase === "settled" || phase === "error") {
     const step2Done = intentStatus === "settled";
     const settleToken = isoToToken(intent.settle_currency);
-    const from = sourceChain ? chainLabel(sourceChain) : null;
+    // Every chain the payment drew from, not just the first. A receipt that
+    // said "Paid from Base" for a payment that also took 12 USDC off Polygon
+    // would be a false record of where the money went.
+    const from =
+      allocations.length === 0
+        ? null
+        : allocations.map((a) => chainLabel(a.chain)).join(" + ");
 
     // Settled gets a receipt, not a sentence.
     //

@@ -1,8 +1,13 @@
-// Dynamic Open Graph image for /pay/[declarationId] — the "beautiful card"
-// that renders when a payment link is shared on X, WhatsApp, Telegram, etc.
-// Uses Next's file-convention OG route (next/og ImageResponse). Node runtime
-// (not edge) per platform guidance; no custom font load keeps it dependency-
-// free and build-safe.
+// Dynamic Open Graph image for /pay/[declarationId] — the card that renders
+// when a payment link is shared on X, WhatsApp, Telegram, etc.
+//
+// It is meant to look like the page it links to, and for a long time it did
+// not: ImageResponse renders with a fallback sans unless it is handed font
+// bytes, so the card came out in system Helvetica while the site is Barlow
+// Condensed and JetBrains Mono. Same colours, same words, completely different
+// object -- which is what "the card looks off" was. The fonts below are the
+// site's own files, loaded from beside this route so Next traces them into the
+// bundle.
 import { ImageResponse } from "next/og";
 import { toHumanAmount, currencyDecimals } from "@conduit/sdk/lite";
 import { isoToToken } from "@/lib/currencies";
@@ -13,35 +18,17 @@ export const contentType = "image/png";
 
 const API_BASE = process.env.NEXT_PUBLIC_CONDUIT_API_URL ?? "http://localhost:8080";
 
-// The currency's own symbol, shown inside the coin mark beside the amount.
-// Keyed by the ISO code the API sends, which is why EURAU appears here as
-// itself: it is a token symbol standing in for an ISO code, because EUR is
-// already EURC's (see lib/currencies.ts).
+// The currency's own symbol. Keyed by the ISO code the API sends, which is why
+// EURAU appears as itself: it is a token symbol standing in for an ISO code,
+// because EUR is already EURC's (see lib/currencies.ts).
 const SYMBOLS: Record<string, string> = {
   USD: "$", EUR: "€", EURAU: "€", BRL: "R$", AUD: "A$", MXN: "MX$",
   CAD: "C$", GBP: "£", ZAR: "R", KRW: "₩", CHF: "Fr",
 };
 
-// The wordmark lockup, not a drawing of it.
-//
-// Two earlier attempts were wrong in instructive ways. The first drew a green
-// circle with a letter in it, which is not the logo. The second used the ⊙D
-// mark, whose bar and counter are BLACK -- fine on a light page, half invisible
-// on this one. The wordmark is the variant built for dark backgrounds: CON in
-// signal green, DUIT in white, the bar cutting through both.
-//
-// Cropped to its content (1628x480) and otherwise untouched. Nothing is
-// recoloured: the white here is the DUIT letterforms, not a background.
-//
-// Loaded through import.meta.url rather than out of public/ so Next traces it
-// into the serverless bundle. public/ is not guaranteed to be readable at
-// render time, and a missing file would mean no logo at all on the one surface
-// whose whole job is being seen by strangers.
-async function wordmarkDataUri(): Promise<string | null> {
+async function asset(file: string): Promise<ArrayBuffer | null> {
   try {
-    const res = await fetch(new URL("./conduit-wordmark.png", import.meta.url));
-    const buf = await res.arrayBuffer();
-    return `data:image/png;base64,${Buffer.from(buf).toString("base64")}`;
+    return await fetch(new URL(file, import.meta.url)).then((r) => r.arrayBuffer());
   } catch {
     return null;
   }
@@ -64,12 +51,18 @@ async function fetchInfo(id: string) {
 }
 
 export default async function Image({ params }: { params: { declarationId: string } }) {
-  const [info, wordmark] = await Promise.all([fetchInfo(params.declarationId), wordmarkDataUri()]);
-  const merchant = info?.display_name?.trim() || "A Conduit merchant";
+  const [info, wordmark, display, mono] = await Promise.all([
+    fetchInfo(params.declarationId),
+    asset("./conduit-wordmark.png"),
+    asset("./display-900.woff"),
+    asset("./mono-500.woff"),
+  ]);
 
-  // Amount and token are kept apart so the token can carry its own coin mark,
-  // the way TokenBadge does everywhere else in the app. Rendering them as one
-  // string is what left the asset as bare text on the card.
+  const merchant = info?.display_name?.trim() || "A Conduit merchant";
+  const wordmarkSrc = wordmark
+    ? `data:image/png;base64,${Buffer.from(wordmark).toString("base64")}`
+    : null;
+
   let amount = "";
   let token = "";
   let glyph = "";
@@ -88,6 +81,27 @@ export default async function Image({ params }: { params: { declarationId: strin
     }
   }
 
+  // The grid, drawn rather than imported. The site's background grid is a CSS
+  // layer this renderer has no access to, and without it the card reads as a
+  // plain black rectangle instead of as a Conduit surface.
+  const gridLines: React.ReactElement[] = [];
+  for (let x = 0; x <= 1200; x += 60) {
+    gridLines.push(
+      <div
+        key={`v${x}`}
+        style={{ position: "absolute", left: x, top: 0, width: 1, height: 630, background: "#111" }}
+      />,
+    );
+  }
+  for (let y = 0; y <= 630; y += 60) {
+    gridLines.push(
+      <div
+        key={`h${y}`}
+        style={{ position: "absolute", left: 0, top: y, width: 1200, height: 1, background: "#111" }}
+      />,
+    );
+  }
+
   return new ImageResponse(
     (
       <div
@@ -95,78 +109,79 @@ export default async function Image({ params }: { params: { declarationId: strin
           width: "100%",
           height: "100%",
           display: "flex",
-          flexDirection: "column",
-          justifyContent: "space-between",
+          position: "relative",
           background: "#050505",
-          padding: 80,
-          fontFamily: "sans-serif",
+          fontFamily: "Display",
         }}
       >
-        {/* Brand. The wordmark carries the name and the ™ itself, so there is
-            no text beside it to drift out of sync with the artwork. */}
-        <div style={{ display: "flex", alignItems: "center" }}>
-          {wordmark ? (
-            <img src={wordmark} width={244} height={72} alt="Conduit" />
-          ) : (
-            <div style={{ color: "#B2F55A", fontSize: 30, fontWeight: 700, letterSpacing: 2 }}>CONDUIT™</div>
-          )}
-        </div>
+        {gridLines}
 
-        {/* Ask */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          <div style={{ color: "#8a8a8a", fontSize: 34 }}>Payment request from</div>
-          <div style={{ color: "#f5f5f5", fontSize: 68, fontWeight: 800, lineHeight: 1.05 }}>{merchant}</div>
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            justifyContent: "space-between",
+            width: "100%",
+            height: "100%",
+            padding: 72,
+          }}
+        >
+          {/* Top rail: the mark, and the network, exactly as the page heads it */}
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            {wordmarkSrc ? (
+              <img src={wordmarkSrc} width={224} height={66} alt="Conduit" />
+            ) : (
+              <div style={{ color: "#B2F55A", fontSize: 34, letterSpacing: 2 }}>CONDUIT</div>
+            )}
+            <div
+              style={{
+                fontFamily: "Mono",
+                color: "#6a6a6a",
+                fontSize: 22,
+                letterSpacing: 3,
+              }}
+            >
+              ARC TESTNET
+            </div>
+          </div>
 
-          {amount && token ? (
-            <div style={{ display: "flex", alignItems: "center", gap: 24, marginTop: 16 }}>
-              {/* One interpolated child, not two. Satori throws on any div
-                  with multiple children that is not explicitly flex, and
-                  `{glyph}{amount}` counts as two -- which would have failed
-                  the render for every link that carries an amount. */}
-              <div style={{ color: "#B2F55A", fontSize: 88, fontWeight: 800 }}>{`${glyph}${amount}`}</div>
-              {/* The asset, as a badge rather than trailing text -- same coin
-                  mark and border the app uses next to every amount. */}
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 12,
-                  border: "2px solid #2a2a2a",
-                  padding: "10px 20px 10px 12px",
-                }}
-              >
-                <div
-                  style={{
-                    width: 52,
-                    height: 52,
-                    borderRadius: 999,
-                    border: "3px solid #B2F55A",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    color: "#B2F55A",
-                    fontSize: 26,
-                    fontWeight: 700,
-                  }}
-                >
-                  {glyph}
+          {/* The ask. The amount is the hero here as it is on the page. */}
+          <div style={{ display: "flex", flexDirection: "column" }}>
+            <div style={{ fontFamily: "Mono", color: "#8a8a8a", fontSize: 24, letterSpacing: 2 }}>
+              PAYMENT REQUEST FROM
+            </div>
+            <div style={{ color: "#f5f5f5", fontSize: 62, lineHeight: 1.1, marginTop: 6 }}>
+              {merchant}
+            </div>
+
+            {amount && token ? (
+              <div style={{ display: "flex", alignItems: "baseline", gap: 18, marginTop: 10 }}>
+                <div style={{ color: "#B2F55A", fontSize: 148, lineHeight: 1 }}>
+                  {`${glyph}${amount}`}
                 </div>
-                <div style={{ color: "#f5f5f5", fontSize: 38, fontWeight: 600, letterSpacing: 1 }}>{token}</div>
+                <div style={{ color: "#f5f5f5", fontSize: 60, lineHeight: 1 }}>{token}</div>
               </div>
-            </div>
-          ) : (
-            <div style={{ color: "#B2F55A", fontSize: 72, fontWeight: 800, marginTop: 12 }}>
-              Pay with any stablecoin
-            </div>
-          )}
-        </div>
+            ) : (
+              <div style={{ color: "#B2F55A", fontSize: 96, lineHeight: 1, marginTop: 10 }}>
+                Pay in any stablecoin
+              </div>
+            )}
+          </div>
 
-        {/* Footer */}
-        <div style={{ color: "#6a6a6a", fontSize: 28 }}>
-          Pay with any stablecoin · settles instantly on Arc
+          <div style={{ fontFamily: "Mono", color: "#6a6a6a", fontSize: 22 }}>
+            Pay in any currency · settles instantly on Arc
+          </div>
         </div>
       </div>
     ),
-    { ...size },
+    {
+      ...size,
+      // A missing font must not take the card down: filtered, so the render
+      // falls back to the built-in sans rather than throwing.
+      fonts: [
+        ...(display ? [{ name: "Display", data: display, weight: 900 as const, style: "normal" as const }] : []),
+        ...(mono ? [{ name: "Mono", data: mono, weight: 500 as const, style: "normal" as const }] : []),
+      ],
+    },
   );
 }

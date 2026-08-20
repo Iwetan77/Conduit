@@ -22,6 +22,10 @@ import { formatAmountRaw, shortenAddress } from "@/lib/format";
 import { isoToToken } from "@/lib/currencies";
 import { currencyDecimals } from "@conduit/sdk/lite";
 import { ArcSettlePanel } from "./ArcSettlePanel";
+import { usePayerIdentity } from "@/lib/use-payer-identity";
+import { usePayerUsdc, routeForAmount } from "@/lib/use-payer-usdc";
+import { useBalances } from "@/lib/use-balances";
+import { chainLabel } from "@/lib/unified-balance";
 // Loaded when reached. The cross chain flow is a screen the payer only sees
 // after choosing to fund from another chain, and it is one of the largest in
 // the app -- shipping it on first paint made every payer pay for a path most
@@ -56,6 +60,16 @@ export function PaymentLinkPay({ linkId }: PaymentLinkPayProps) {
   // time, so this mints one (POST /:id/pay) and then hands it to
   // CrossChainBridge — which needs a real intent to bridge against.
   const [bridgeIntent, setBridgeIntent] = useState<PublicSettlementIntent | null>(null);
+  // Cross-chain follows from where the payer's USDC is, not from a button.
+  // Same rule as /send and the settlement-intent surface: a payer knows which
+  // wallet they hold, not which rail should carry it.
+  const { identity } = usePayerIdentity();
+  const sourceUsdc = usePayerUsdc({
+    address: identity?.address,
+    family: identity?.kind,
+    enabled: !!identity,
+  });
+  const arcBalances = useBalances(identity?.kind === "evm" ? identity.address : undefined);
   const [bridgeBusy, setBridgeBusy] = useState(false);
   const [bridgeError, setBridgeError] = useState("");
   const bridgeIntentIdRef = useRef<string | null>(null);
@@ -136,6 +150,18 @@ export function PaymentLinkPay({ linkId }: PaymentLinkPayProps) {
   // touches a float.
   const enteredMinor = amount ? toMinorUnits(amount, decimals) : "0";
   const amountRaw = isFixed && link.amount ? BigInt(link.amount) : BigInt(enteredMinor);
+
+  // Which chain has to pay, if not Arc. Arc counts only for an EVM wallet: a
+  // Solana wallet cannot sign on Arc, so an Arc balance is not spendable by it.
+  const arcUsdc =
+    identity?.kind === "evm" ? (arcBalances.balances.USDC ?? 0n) : 0n;
+  const crossChain =
+    amountRaw > 0n
+      ? (() => {
+          const r = routeForAmount(amountRaw, arcUsdc, sourceUsdc.funded);
+          return r.kind === "cross_chain" ? r.chain : null;
+        })()
+      : null;
 
   // Open/suggested links must have a sane amount before the Pay button means
   // anything. Enforce the merchant's min/max here too, in minor units.
@@ -279,21 +305,21 @@ export function PaymentLinkPay({ linkId }: PaymentLinkPayProps) {
       {/* The one path that works for a payer holding USDC on Solana, Base or
           any other supported chain — previously reachable from a settlement
           intent but not from a merchant's payment link. */}
-      <button
-        type="button"
-        onClick={startCrossChain}
-        disabled={bridgeBusy}
-        className="group w-full flex flex-col items-center gap-1 py-3.5 px-4 border border-signal/40 bg-signal/5
-                   hover:bg-signal/10 hover:border-signal/60 transition-colors disabled:opacity-60"
-      >
-        <span className="flex items-center gap-2 text-signal font-mono text-sm">
-          <span aria-hidden className="text-base leading-none">⇄</span>
-          {bridgeBusy ? "Preparing…" : "Pay with USDC from another chain"}
-        </span>
-        <span className="text-ink-dim text-[11px] font-mono tracking-wide">
-          Solana · Base · Arbitrum · Avalanche · +8 more
-        </span>
-      </button>
+      {/* Entered automatically when the payer's Arc balance cannot cover this
+          and another chain can. The button that used to sit here asked a
+          question about rails; this states the answer instead. */}
+      {crossChain && !bridgeIntent && (
+        <button
+          type="button"
+          onClick={startCrossChain}
+          disabled={bridgeBusy}
+          className="w-full py-3.5 px-4 border border-signal/40 bg-signal/5
+                     hover:bg-signal/10 transition-colors disabled:opacity-60
+                     text-signal font-mono text-sm"
+        >
+          {bridgeBusy ? "Preparing…" : `Pay from ${chainLabel(crossChain)}`}
+        </button>
+      )}
       {bridgeError && <p className="text-danger text-sm">{bridgeError}</p>}
         </>
       )}

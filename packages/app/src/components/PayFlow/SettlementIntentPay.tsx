@@ -17,6 +17,10 @@ const CrossChainBridge = dynamic(
   { ssr: false },
 );
 import { ArcSettlePanel } from "./ArcSettlePanel";
+import { usePayerIdentity } from "@/lib/use-payer-identity";
+import { usePayerUsdc, routeForAmount } from "@/lib/use-payer-usdc";
+import { useBalances } from "@/lib/use-balances";
+import { chainLabel } from "@/lib/unified-balance";
 
 interface SettlementIntentPayProps {
   intentId: string;
@@ -28,10 +32,33 @@ interface SettlementIntentPayProps {
 // CCTP and CrossChainBridge drives the rest of this page.
 export function SettlementIntentPay({ intentId }: SettlementIntentPayProps) {
   const [showAddress, setShowAddress] = useState(false);
-  // Payer-chosen cross-chain: even an intent created for on-Arc payment can be
-  // paid with USDC from another chain (Solana / Base / Polygon). The merchant no
-  // longer has to pre-declare source_chain — the payer decides at pay time.
+  // Cross-chain is not a button any more.
+  //
+  // This surface used to ask "pay with USDC from another chain?" underneath the
+  // Pay button, which put a question about plumbing in front of a payer who
+  // knows only one thing: which wallet they have. The route now follows from
+  // where their USDC actually is -- the same rule /send uses -- and this state
+  // exists only so the bridge can be entered once that answer is known.
   const [payFromOtherChain, setPayFromOtherChain] = useState(false);
+  const { identity } = usePayerIdentity();
+  const sourceUsdc = usePayerUsdc({
+    address: identity?.address,
+    family: identity?.kind,
+    enabled: !!identity,
+  });
+  const arcBalances = useBalances(identity?.kind === "evm" ? identity.address : undefined);
+
+  // Which chain, if any, this payment has to come from.
+  //
+  // Null means Arc can cover it and the direct path applies. Arc counts only
+  // for an EVM wallet: a Solana wallet cannot sign on Arc at all, so crediting
+  // it an Arc balance would offer a route that fails at the signature.
+  function crossChainFor(amountRaw: bigint): string | null {
+    const arcUsdc =
+      identity?.kind === "evm" ? (arcBalances.balances.USDC ?? 0n) : 0n;
+    const route = routeForAmount(amountRaw, arcUsdc, sourceUsdc.funded);
+    return route.kind === "cross_chain" ? route.chain : null;
+  }
 
   // Shared query with the page's title effect — one request, not two.
   // Keyed by intentId with NO previous-data retention, which is what keeps
@@ -68,6 +95,10 @@ export function SettlementIntentPay({ intentId }: SettlementIntentPayProps) {
       </div>
     );
   }
+
+  // Resolved once the intent is known, so the branch below reads as a fact
+  // rather than a computation.
+  const crossChain = crossChainFor(BigInt(intent.amount));
 
   return (
     <div className="space-y-6">
@@ -115,28 +146,27 @@ export function SettlementIntentPay({ intentId }: SettlementIntentPayProps) {
         </>
       ) : (
         <>
-          <ArcSettlePanel
-            settleToken={isoToToken(intent.settle_currency) as Currency}
-            settleAddress={intent.settle_address}
-            amountRaw={BigInt(intent.amount)}
-            displayName={intent.display_name}
-            // The intent already exists on this surface — just hand back its id.
-            ensureIntentId={async () => intent.id}
-          />
-          <button
-            type="button"
-            onClick={() => setPayFromOtherChain(true)}
-            className="group w-full flex flex-col items-center gap-1 py-3.5 px-4 border border-signal/40 bg-signal/5
-                       hover:bg-signal/10 hover:border-signal/60 transition-colors"
-          >
-            <span className="flex items-center gap-2 text-signal font-mono text-sm">
-              <span aria-hidden className="text-base leading-none">⇄</span>
-              Pay with USDC from another chain
-            </span>
-            <span className="text-ink-dim text-[11px] font-mono tracking-wide">
-              Solana · Base · Arbitrum · Avalanche · +8 more
-            </span>
-          </button>
+          {/* The route, decided from where the money is.
+              Arc when the balance there covers it; otherwise the richest
+              single source chain, entered automatically. A payer is told
+              which chain will be spent, and never asked to choose one. */}
+          {crossChain ? (
+            <>
+              <p className="text-center text-scale-1 font-mono text-signal">
+                Paying from {chainLabel(crossChain)}
+              </p>
+              <CrossChainBridge intentId={intent.id} intent={intent} knownUsdc={sourceUsdc.unified} />
+            </>
+          ) : (
+            <ArcSettlePanel
+              settleToken={isoToToken(intent.settle_currency) as Currency}
+              settleAddress={intent.settle_address}
+              amountRaw={BigInt(intent.amount)}
+              displayName={intent.display_name}
+              // The intent already exists on this surface — just hand back its id.
+              ensureIntentId={async () => intent.id}
+            />
+          )}
         </>
       )}
     </div>

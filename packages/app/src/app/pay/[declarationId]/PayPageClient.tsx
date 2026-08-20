@@ -1,5 +1,6 @@
 "use client";
 
+import { pollWithBackoff } from "@/lib/poll";
 import Link from "next/link";
 
 // Client body of /pay/[declarationId]. Split out of page.tsx so the route
@@ -77,11 +78,14 @@ function EmbedBridge({ intentId }: { intentId: string }) {
 
     post("loaded");
     let done = false;
+    // Held in a box because settle() is defined before the poll exists -- the
+    // in-page event can settle this page without the poll ever ticking.
+    const poll: { stop: (() => void) | null } = { stop: null };
     const settle = () => {
       if (done) return;
       done = true;
       post("settled");
-      clearInterval(timer);
+      poll.stop?.();
       window.removeEventListener(CHECKOUT_SETTLED_EVENT, onInPage);
       // Redirect mode only: in tab mode conduit.js closes this tab, and
       // navigating here would race that. The merchant confirms the payment
@@ -102,22 +106,28 @@ function EmbedBridge({ intentId }: { intentId: string }) {
     window.addEventListener(CHECKOUT_SETTLED_EVENT, onInPage);
 
     // Fallback + the ONLY signal for cross-chain (settled server-side): poll.
-    const timer = setInterval(async () => {
+    //
+    // Ramped rather than flat. A same-currency pay settles on Arc in about a
+    // second, and a flat 2.5s interval spent most of its first tick waiting on
+    // money that had already landed -- while a slow cross-chain transfer kept
+    // asking at that rate for as long as it took. First ticks are now sub
+    // second and the tail is cheaper than before.
+    poll.stop = pollWithBackoff(async () => {
       // Someone who just opened a payment link directly has nobody to notify
       // and nowhere to return to — the page renders its own receipt, so don't
-      // spend an API call every 2.5s on them.
-      if (!canPost && !returnUrl) return;
-      try {
-        const { getPublicSettlementIntent } = await import("@/lib/conduit-api");
-        const fresh = await getPublicSettlementIntent(intentId);
-        if (fresh.status === "settled") settle();
-      } catch {
-        // transient — keep polling
+      // spend API calls on them.
+      if (!canPost && !returnUrl) return false;
+      const { getPublicSettlementIntent } = await import("@/lib/conduit-api");
+      const fresh = await getPublicSettlementIntent(intentId);
+      if (fresh.status === "settled") {
+        settle();
+        return true; // stop: there is nothing after settled
       }
-    }, 2500);
+      return false;
+    });
 
     return () => {
-      clearInterval(timer);
+      poll.stop?.();
       window.removeEventListener(CHECKOUT_SETTLED_EVENT, onInPage);
     };
   }, [intentId]);

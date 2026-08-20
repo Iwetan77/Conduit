@@ -11,6 +11,7 @@
 // runs its existing StableFX settlement (converting to the merchant's currency)
 // exactly as before. This component never touches the merchant's settle
 // currency — only USDC.
+import { pollWithBackoff } from "@/lib/poll";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useAccount, useConnect, useDisconnect, type Connector } from "wagmi";
 import { usePayerIdentity } from "@/lib/use-payer-identity";
@@ -85,7 +86,6 @@ type Phase =
   | "settled"
   | "error";
 
-const POLL_INTERVAL_MS = 3000;
 
 // Circle's Gateway API exhausting its own retries, told plainly.
 //
@@ -242,7 +242,9 @@ export function CrossChainBridge({ intentId, intent, knownUsdc }: CrossChainBrid
   const [fxNote, setFxNote] = useState("");
   const [error, setError] = useState("");
   const [mintTx, setMintTx] = useState("");
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // A canceller, not a timer id: the poll below backs off, so there is no
+  // single interval to clear.
+  const pollRef = useRef<(() => void) | null>(null);
 
   const { connector, address: evmAddress, isConnected: evmConnected } = useAccount();
   // Who is already paying. This component used to be the thing that connected
@@ -266,14 +268,14 @@ export function CrossChainBridge({ intentId, intent, knownUsdc }: CrossChainBrid
 
   useEffect(() => {
     return () => {
-      if (pollRef.current) clearInterval(pollRef.current);
+      pollRef.current?.();
     };
   }, []);
 
   // Reset when the intent changes — never let one payment's bridge state render
   // on another's page.
   useEffect(() => {
-    if (pollRef.current) clearInterval(pollRef.current);
+    pollRef.current?.();
     setPhase("choose_source");
     setAdapter(null);
     setUnified(null);
@@ -349,26 +351,26 @@ export function CrossChainBridge({ intentId, intent, knownUsdc }: CrossChainBrid
   // of the page and asked to connect at the bottom of it.
 
   function startPolling() {
-    if (pollRef.current) clearInterval(pollRef.current);
-    pollRef.current = setInterval(async () => {
-      try {
-        const fresh = await getPublicSettlementIntent(intentId);
-        setIntentStatus(fresh.status);
-        if (fresh.status === "settled") {
-          setPhase("settled");
-          if (pollRef.current) clearInterval(pollRef.current);
-          // Surface the on-chain Arc mint so the payer can verify the money
-          // actually moved -- the same "View on ArcScan" proof the direct
-          // (non-bridged) receipt gives. Best-effort: a missing hash just
-          // hides the link.
-          getBridgeStatus(intentId)
-            .then((s) => setMintTx(s.mint_tx_hash ?? ""))
-            .catch(() => {});
-        }
-      } catch {
-        // transient — keep polling
-      }
-    }, POLL_INTERVAL_MS);
+    pollRef.current?.();
+    // Ramped, not flat. A flat 3s interval was slower than necessary while the
+    // mint was most likely to land, and more expensive than necessary for the
+    // ten minutes a bad day can take. pollWithBackoff also runs one tick at a
+    // time, so a slow response cannot stack requests behind it.
+    pollRef.current = pollWithBackoff(async () => {
+      const fresh = await getPublicSettlementIntent(intentId);
+      setIntentStatus(fresh.status);
+      if (fresh.status !== "settled") return false;
+
+      setPhase("settled");
+      // Surface the on-chain Arc mint so the payer can verify the money
+      // actually moved -- the same "View on ArcScan" proof the direct
+      // (non-bridged) receipt gives. Best-effort: a missing hash just
+      // hides the link.
+      getBridgeStatus(intentId)
+        .then((st) => setMintTx(st.mint_tx_hash ?? ""))
+        .catch(() => {});
+      return true; // settled is terminal
+    });
   }
 
   // Build the chosen wallet's adapter, read the plan (how much USDC to spend +

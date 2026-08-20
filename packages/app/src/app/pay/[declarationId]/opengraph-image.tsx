@@ -6,9 +6,10 @@
 // bytes, so the card came out in system Helvetica while the site is Barlow
 // Condensed and JetBrains Mono. Same colours, same words, completely different
 // object -- which is what "the card looks off" was. The fonts below are the
-// site's own files, loaded from beside this route so Next traces them into the
-// bundle.
+// site's own files, sitting beside this route.
 import { ImageResponse } from "next/og";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import { toHumanAmount, currencyDecimals } from "@conduit/sdk/lite";
 import { isoToToken } from "@/lib/currencies";
 
@@ -26,15 +27,47 @@ const SYMBOLS: Record<string, string> = {
   CAD: "C$", GBP: "£", ZAR: "R", KRW: "₩", CHF: "Fr",
 };
 
-async function asset(file: string): Promise<ArrayBuffer | null> {
-  try {
-    return await fetch(new URL(file, import.meta.url)).then((r) => r.arrayBuffer());
-  } catch {
-    return null;
-  }
+// Read off disk, once per warm instance.
+//
+// Not via fetch(new URL("./x", import.meta.url)): that yields a file:// URL and
+// fetch cannot read file:// in the Node runtime, so it threw, the catch around
+// it returned null for all three, and the fonts array went out EMPTY -- which
+// satori rejects outright ("No fonts are loaded. At least one font is required
+// to calculate the layout"). An empty fonts array is not a fallback, it is a
+// 500, so the card that was supposed to degrade to a system sans instead did
+// not render at all.
+//
+// The path is relative to the function's working directory, and the files reach
+// the deployed function only because next.config.mjs traces them in
+// explicitly. Memoised as a promise so concurrent crawler hits share one read;
+// deliberately NOT wrapped in a try/catch, because a card that fails loudly in
+// preview is worth more than one that silently ships in Helvetica.
+const ASSET_DIR = join(process.cwd(), "src", "app", "pay", "[declarationId]");
+
+let assets: Promise<{ display: Buffer; mono: Buffer; wordmarkSrc: string }> | null = null;
+function loadAssets() {
+  assets ??= (async () => {
+    const [display, mono, wordmark] = await Promise.all([
+      readFile(join(ASSET_DIR, "display-900.woff")),
+      readFile(join(ASSET_DIR, "mono-500.woff")),
+      readFile(join(ASSET_DIR, "conduit-wordmark.png")),
+    ]);
+    return {
+      display,
+      mono,
+      wordmarkSrc: `data:image/png;base64,${wordmark.toString("base64")}`,
+    };
+  })();
+  return assets;
 }
 
-async function fetchInfo(id: string) {
+async function fetchInfo(id: string | undefined) {
+  // Guarded, because everything below it is best-effort and this was not.
+  // A throw anywhere in this module takes the whole card down -- and a card
+  // that 500s is invisible: the crawler keeps the title and description from
+  // generateMetadata and silently drops the image, which is indistinguishable
+  // from never having built one.
+  if (!id) return null;
   const path = id.startsWith("pl_")
     ? `/v1/payment_links/${id}/public`
     : id.startsWith("si_")
@@ -50,18 +83,26 @@ async function fetchInfo(id: string) {
   }
 }
 
-export default async function Image({ params }: { params: { declarationId: string } }) {
-  const [info, wordmark, display, mono] = await Promise.all([
-    fetchInfo(params.declarationId),
-    asset("./conduit-wordmark.png"),
-    asset("./display-900.woff"),
-    asset("./mono-500.woff"),
+// params is a PROMISE in Next 15, exactly as it is in page.tsx beside this.
+//
+// Typed as a plain object, `params.declarationId` reads undefined off a
+// pending promise -- no type error, no build error, and a TypeError at request
+// time that returned 500 for every share card in production. The page's
+// generateMetadata awaited it properly, so og:title and og:description were
+// correct while the image behind them did not exist, which is the worst
+// possible shape for this bug: the link previewed, just without the card.
+export default async function Image({
+  params,
+}: {
+  params: Promise<{ declarationId: string }>;
+}) {
+  const { declarationId } = await params;
+  const [info, { display, mono, wordmarkSrc }] = await Promise.all([
+    fetchInfo(declarationId),
+    loadAssets(),
   ]);
 
   const merchant = info?.display_name?.trim() || "A Conduit merchant";
-  const wordmarkSrc = wordmark
-    ? `data:image/png;base64,${Buffer.from(wordmark).toString("base64")}`
-    : null;
 
   let amount = "";
   let token = "";
@@ -128,11 +169,8 @@ export default async function Image({ params }: { params: { declarationId: strin
         >
           {/* Top rail: the mark, and the network, exactly as the page heads it */}
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            {wordmarkSrc ? (
-              <img src={wordmarkSrc} width={224} height={66} alt="Conduit" />
-            ) : (
-              <div style={{ color: "#B2F55A", fontSize: 34, letterSpacing: 2 }}>CONDUIT</div>
-            )}
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={wordmarkSrc} width={224} height={66} alt="Conduit" />
             <div
               style={{
                 fontFamily: "Mono",
@@ -176,11 +214,9 @@ export default async function Image({ params }: { params: { declarationId: strin
     ),
     {
       ...size,
-      // A missing font must not take the card down: filtered, so the render
-      // falls back to the built-in sans rather than throwing.
       fonts: [
-        ...(display ? [{ name: "Display", data: display, weight: 900 as const, style: "normal" as const }] : []),
-        ...(mono ? [{ name: "Mono", data: mono, weight: 500 as const, style: "normal" as const }] : []),
+        { name: "Display", data: display, weight: 900, style: "normal" },
+        { name: "Mono", data: mono, weight: 500, style: "normal" },
       ],
     },
   );

@@ -16,6 +16,7 @@ const CrossChainBridge = dynamic(
   () => import("./CrossChainBridge").then((m) => m.CrossChainBridge),
   { ssr: false },
 );
+import type { BridgeStage } from "./CrossChainBridge";
 import { ArcSettlePanel } from "./ArcSettlePanel";
 import { usePayerIdentity } from "@/lib/use-payer-identity";
 import { usePayerUsdc, routeForAmount } from "@/lib/use-payer-usdc";
@@ -40,6 +41,12 @@ export function SettlementIntentPay({ intentId }: SettlementIntentPayProps) {
   // where their USDC actually is -- the same rule /send uses -- and this state
   // exists only so the bridge can be entered once that answer is known.
   const [payFromOtherChain, setPayFromOtherChain] = useState(false);
+  // How far the bridge has got. "Paying from Solana" is a statement about what
+  // is about to happen, so it belongs only while that is still true -- rendered
+  // unconditionally it stayed up through the transfer and ended up sitting
+  // directly above the word "Paid", in the present tense, contradicting the
+  // receipt's own "Paid from" row two lines below it.
+  const [bridgeStage, setBridgeStage] = useState<BridgeStage>("setup");
   const { identity } = usePayerIdentity();
   const sourceUsdc = usePayerUsdc({
     address: identity?.address,
@@ -123,13 +130,22 @@ export function SettlementIntentPay({ intentId }: SettlementIntentPayProps) {
         </div>
       </div>
 
-      <div className="border border-border bg-surface p-4 space-y-1">
-        <p className="text-ink-dim text-xs uppercase tracking-wider font-mono">Requesting</p>
-        <p className="text-ink font-mono text-2xl">
-          {formatAmountRaw(BigInt(intent.amount), currencyDecimals(isoToToken(intent.settle_currency)))}{" "}
-          {isoToToken(intent.settle_currency)}
-        </p>
-      </div>
+      {/* The ask, while it is still an ask.
+          Same tense problem as the route label: once the bridge lands on its
+          receipt this panel was still announcing "REQUESTING 2.5 USDC" above
+          the word "Paid", and the receipt's own Amount row printed the same
+          number a third time. The merchant header above stays -- who you paid
+          is worth having on the receipt; what they wanted is not, once they
+          have it. */}
+      {bridgeStage !== "done" && (
+        <div className="border border-border bg-surface p-4 space-y-1">
+          <p className="text-ink-dim text-xs uppercase tracking-wider font-mono">Requesting</p>
+          <p className="text-ink font-mono text-2xl">
+            {formatAmountRaw(BigInt(intent.amount), currencyDecimals(isoToToken(intent.settle_currency)))}{" "}
+            {isoToToken(intent.settle_currency)}
+          </p>
+        </div>
+      )}
 
       {intent.source_chain !== "arc" || payFromOtherChain ? (
         <>
@@ -152,10 +168,17 @@ export function SettlementIntentPay({ intentId }: SettlementIntentPayProps) {
               which chain will be spent, and never asked to choose one. */}
           {crossChain ? (
             <>
-              <p className="text-center text-scale-1 font-mono text-signal">
-                Paying from {chainLabel(crossChain)}
-              </p>
-              <CrossChainBridge intentId={intent.id} intent={intent} knownUsdc={sourceUsdc.unified} />
+              {bridgeStage === "setup" && (
+                <p className="text-center text-scale-1 font-mono text-signal">
+                  Paying from {chainLabel(crossChain)}
+                </p>
+              )}
+              <CrossChainBridge
+                intentId={intent.id}
+                intent={intent}
+                knownUsdc={sourceUsdc.unified}
+                onStage={setBridgeStage}
+              />
             </>
           ) : (
             <ArcSettlePanel

@@ -73,7 +73,25 @@ interface CrossChainBridgeProps {
    * which is still what happens when a payer arrives with nothing connected.
    */
   knownUsdc?: UnifiedUsdc | null;
+  /**
+   * Called as the bridge moves between coarse stages, so the surface around it
+   * can stop describing a decision the payer has already made.
+   *
+   * "Paying from Solana" is the right thing to say while it is still a
+   * statement about what is *about* to happen. It was rendered above this
+   * component unconditionally, so it stayed on screen through the transfer and
+   * sat above the word "Paid" on the receipt -- present tense over a finished
+   * payment, and contradicting the receipt's own "Paid from" row.
+   */
+  onStage?: (stage: BridgeStage) => void;
 }
+
+/**
+ * Where the payer is, coarsely: still being set up, committed and in flight, or
+ * finished. Deliberately coarser than Phase — a caller that switched on the
+ * full phase list would have to be revisited every time one is added.
+ */
+export type BridgeStage = "setup" | "paying" | "done";
 
 type Phase =
   | "choose_source"
@@ -220,7 +238,15 @@ function WalletSheet({
   );
 }
 
-export function CrossChainBridge({ intentId, intent, knownUsdc }: CrossChainBridgeProps) {
+function stageOf(phase: Phase): BridgeStage {
+  if (phase === "settled") return "done";
+  // error included: the payer has signed and money may well have moved, so this
+  // is not "setup" any more even though it is not finished either.
+  if (phase === "spending" || phase === "bridging" || phase === "error") return "paying";
+  return "setup";
+}
+
+export function CrossChainBridge({ intentId, intent, knownUsdc, onStage }: CrossChainBridgeProps) {
   const [phase, setPhase] = useState<Phase>("choose_source");
   const [adapter, setAdapter] = useState<PayerAdapter | null>(null);
   const [unified, setUnified] = useState<UnifiedUsdc | null>(null);
@@ -271,6 +297,17 @@ export function CrossChainBridge({ intentId, intent, knownUsdc }: CrossChainBrid
       pollRef.current?.();
     };
   }, []);
+
+  // Report the stage up. In an effect rather than from the setPhase calls so
+  // there is exactly one place it can be forgotten, and it cannot fire during
+  // a render of the parent.
+  const stage = stageOf(phase);
+  useEffect(() => {
+    onStage?.(stage);
+    // onStage is a callback prop; depending on it would re-fire on every parent
+    // render for callers that pass an inline arrow.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stage]);
 
   // Reset when the intent changes — never let one payment's bridge state render
   // on another's page.
@@ -1028,7 +1065,6 @@ export function CrossChainBridge({ intentId, intent, knownUsdc }: CrossChainBrid
   }
 
   if (phase === "bridging" || phase === "settled" || phase === "error") {
-    const step1Done = phase === "bridging" || phase === "settled";
     const step2Done = intentStatus === "settled";
     const settleToken = isoToToken(intent.settle_currency);
     const from = sourceChain ? chainLabel(sourceChain) : null;
@@ -1070,30 +1106,34 @@ export function CrossChainBridge({ intentId, intent, knownUsdc }: CrossChainBrid
       );
     }
 
+    // One line, not a checklist.
+    //
+    // This was a two step progress list, and it never ticked: step one was
+    // rendered done only when step two was, and by the time step two is done
+    // this branch has been replaced by the receipt above. So the list showed
+    // "1" and "2" un-ticked for the entire transfer and then vanished -- a
+    // progress indicator that could not indicate progress, ahead of a receipt
+    // that says everything it was gesturing at. The wait itself still needs
+    // something on screen, so this says what is happening and that leaving is
+    // safe, and nothing else.
     return (
-      <div className="space-y-5">
-        <div>
-          <p className="text-ink font-mono text-sm">
-            {from ? `Moving your USDC from ${from} to Arc` : "Moving your USDC to Arc"}
-          </p>
-          <p className="text-ink-dim text-xs font-mono mt-1">
-            Converting to {settleToken} on arrival. You won&apos;t need to sign again.
-          </p>
-        </div>
-
-        <ol className="space-y-3 font-mono text-sm border border-border bg-surface p-4">
-          <BridgeStep n={1} label="Bridging your USDC to Arc" done={step1Done && step2Done} active={step1Done && !step2Done} />
-          <BridgeStep n={2} label={`Converting to ${settleToken} & settling`} done={step2Done} active={step1Done && !step2Done} />
-        </ol>
-
-        {/* Worth saying, because it is true and because watching a spinner you
-            believe you must not interrupt is its own kind of cost. The transfer
-            is tracked server side through deposit, mint and handoff, with
-            orphan recovery, so it resumes rather than being lost. */}
-        {phase === "bridging" && (
-          <p className="text-ink-dim text-xs font-mono">
-            You can close this page. The transfer carries on and settles without you.
-          </p>
+      <div className="space-y-4">
+        {phase !== "error" && (
+          <div className="text-center py-8 space-y-3">
+            <Rocket size={56} />
+            <p className="text-ink font-mono text-sm">
+              {from ? `Bridging your USDC from ${from} to Arc…` : "Bridging your USDC to Arc…"}
+            </p>
+            {/* Worth saying, because it is true and because watching a spinner
+                you believe you must not interrupt is its own kind of cost. The
+                transfer is tracked server side through deposit, mint and
+                handoff, with orphan recovery, so it resumes rather than being
+                lost. */}
+            <p className="text-ink-dim text-xs font-mono max-w-xs mx-auto">
+              Converting to {settleToken} on arrival — no second signature. You can
+              close this page; it settles without you.
+            </p>
+          </div>
         )}
 
         {error && (
@@ -1121,19 +1161,5 @@ function Fact({ label, value }: { label: string; value: string }) {
       <dt className="text-ink-dim text-xs uppercase tracking-wider">{label}</dt>
       <dd className="text-ink">{value}</dd>
     </div>
-  );
-}
-
-function BridgeStep({ n, label, done, active }: { n: number; label: string; done: boolean; active: boolean }) {
-  return (
-    <li className="flex items-center gap-3">
-      <span
-        className={`w-6 h-6 flex items-center justify-center border text-xs shrink-0
-          ${done ? "bg-signal text-signal-ink border-signal" : active ? "border-signal text-signal" : "border-border text-ink-dim"}`}
-      >
-        {done ? "✓" : n}
-      </span>
-      <span className={done || active ? "text-ink" : "text-ink-dim"}>{label}</span>
-    </li>
   );
 }

@@ -63,6 +63,40 @@ const REPORT_ONLY_CSP = [
 const nextConfig = {
   transpilePackages: ["@conduit/sdk"],
 
+  // The share card's fonts and wordmark, kept in the serverless bundle.
+  //
+  // opengraph-image.tsx reads these three files at request time. Webpack does
+  // not know that -- an fs.readFile path is just a string to it -- so without
+  // this they are simply absent from the deployed function, satori gets no
+  // fonts, and it treats that as fatal rather than falling back: every payment
+  // link's card 500s in production while building and running fine locally,
+  // because locally the repo is right there on disk.
+  //
+  // Two things here are easy to get wrong, and both fail SILENTLY -- a
+  // non-matching glob is not an error, it just includes nothing, and the damage
+  // only shows up as a 500 from the deployed card:
+  //
+  //   - the key is a glob, so "/pay/[declarationId]/opengraph-image" does not
+  //     match. Those brackets are a character class standing for ONE character,
+  //     not a literal path segment.
+  //   - the values are resolved from the traced ROOT, which in this workspace is
+  //     the monorepo, not this directory -- hence the packages/app prefix. Both
+  //     prefixes are listed on purpose: pinning outputFileTracingRoot to make
+  //     that base deterministic made the globs match NEITHER, so it is not
+  //     something to reason about from the docs. A glob that matches nothing
+  //     costs nothing, and one of these two is always right.
+  //
+  // Verify after changing -- this must print 3, not 0:
+  //   node -e 'console.log(require("./.next/server/app/pay/[declarationId]/opengraph-image/route.js.nft.json").files.filter(x=>/woff|wordmark/.test(x)).length)'
+  outputFileTracingIncludes: {
+    "/pay/**": [
+      "./packages/app/src/app/pay/**/*.woff",
+      "./packages/app/src/app/pay/**/conduit-wordmark.png",
+      "./src/app/pay/**/*.woff",
+      "./src/app/pay/**/conduit-wordmark.png",
+    ],
+  },
+
   // Barrel-file imports (`import { X } from "pkg"`) pull a package's whole
   // index into the module graph before tree-shaking can trim it, costing
   // both bundle size and compile time. This rewrites them to direct

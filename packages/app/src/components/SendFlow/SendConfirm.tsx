@@ -67,7 +67,7 @@ export function SendConfirm({
         } catch {
           setError(
             `Your wallet is on another network. Switch it to Arc Testnet to send, ` +
-              `or use "Pay with USDC from another chain" to spend the balance you already hold.`,
+              `or go back and let Conduit pay from the chain your USDC is already on.`,
           );
           setStep("error");
           return;

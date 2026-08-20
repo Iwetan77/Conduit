@@ -8,6 +8,7 @@
 // settlement_intent is minted at pay time (POST /:id/pay) inside the shared
 // ArcSettlePanel, so there's no dead "Continue to pay" hop and no orphan
 // intent created just from opening the link.
+import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
 import type { Currency } from "@conduit/sdk/lite";
 import {
@@ -21,7 +22,15 @@ import { formatAmountRaw, shortenAddress } from "@/lib/format";
 import { isoToToken } from "@/lib/currencies";
 import { currencyDecimals } from "@conduit/sdk/lite";
 import { ArcSettlePanel } from "./ArcSettlePanel";
-import { CrossChainBridge } from "./CrossChainBridge";
+// Loaded when reached. The cross chain flow is a screen the payer only sees
+// after choosing to fund from another chain, and it is one of the largest in
+// the app -- shipping it on first paint made every payer pay for a path most
+// of them never take. ssr:false: it is wallet driven and renders nothing
+// useful on the server.
+const CrossChainBridge = dynamic(
+  () => import("./CrossChainBridge").then((m) => m.CrossChainBridge),
+  { ssr: false },
+);
 
 interface PaymentLinkPayProps {
   linkId: string;

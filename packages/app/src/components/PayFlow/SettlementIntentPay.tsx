@@ -1,12 +1,21 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useState } from "react";
 import { usePublicIntent } from "@/lib/use-public-intent";
 import type { Currency } from "@conduit/sdk/lite";
 import { currencyDecimals } from "@conduit/sdk/lite";
 import { formatAmountRaw, shortenAddress } from "@/lib/format";
 import { isoToToken } from "@/lib/currencies";
-import { CrossChainBridge } from "./CrossChainBridge";
+// Loaded when reached. The cross chain flow is a screen the payer only sees
+// after choosing to fund from another chain, and it is one of the largest in
+// the app -- shipping it on first paint made every payer pay for a path most
+// of them never take. ssr:false: it is wallet driven and renders nothing
+// useful on the server.
+const CrossChainBridge = dynamic(
+  () => import("./CrossChainBridge").then((m) => m.CrossChainBridge),
+  { ssr: false },
+);
 import { ArcSettlePanel } from "./ArcSettlePanel";
 
 interface SettlementIntentPayProps {

@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import dynamic from "next/dynamic";
 
 import { useState, useEffect } from "react";
 import { useAccount } from "wagmi";
@@ -12,11 +13,29 @@ import { Nav, MobileNav } from "@/components/Shared/Nav";
 import { AddressInput } from "@/components/SendFlow/AddressInput";
 import { AmountInput } from "@/components/SendFlow/AmountInput";
 import { RoutePreview } from "@/components/SendFlow/RoutePreview";
-import { SendConfirm } from "@/components/SendFlow/SendConfirm";
-import { CrossChainBridge } from "@/components/PayFlow/CrossChainBridge";
+// Loaded when reached, not on first paint.
+//
+// /send was the heaviest route in the app -- 50.7 kB of route code, 287 kB
+// first load -- and the two biggest pieces of it are screens nobody sees
+// until they act: the confirm step and the cross chain flow. A payer who
+// only wants to read the form was downloading and parsing both. ssr:false
+// because each is wallet-driven and renders nothing useful on the server.
+const SendConfirm = dynamic(
+  () => import("@/components/SendFlow/SendConfirm").then((m) => m.SendConfirm),
+  { ssr: false },
+);
+const CrossChainBridge = dynamic(
+  () => import("@/components/PayFlow/CrossChainBridge").then((m) => m.CrossChainBridge),
+  { ssr: false },
+);
 import type { PublicSettlementIntent } from "@/lib/conduit-api";
 import { PayerCurrencyPicker } from "@/components/SendFlow/PayerCurrencyPicker";
-import { ScanToPay } from "@/components/PayFlow/ScanToPay";
+// The QR scanner ships a decode loop and a camera surface for a button most
+// payers never press.
+const ScanToPay = dynamic(
+  () => import("@/components/PayFlow/ScanToPay").then((m) => m.ScanToPay),
+  { ssr: false },
+);
 import type { Currency } from "@conduit/sdk/lite";
 import { motion, AnimatePresence } from "framer-motion";
 import { useRequiredPayerAmount } from "@/lib/use-required-payer-amount";

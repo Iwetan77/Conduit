@@ -666,7 +666,9 @@ export function CrossChainBridge({ intentId, intent, knownUsdc }: CrossChainBrid
         amountMinor: need,
         recipientAddress: recipient,
         allocations: chosen.allocations,
+        onProgress: setFxNote,
       });
+      setFxNote("Handing off to settlement…");
 
       // Hand the Gateway transfer id to the server; it polls the mint and runs
       // the existing StableFX settlement into the merchant's currency.
@@ -813,6 +815,10 @@ export function CrossChainBridge({ intentId, intent, knownUsdc }: CrossChainBrid
   }
 
   if (phase === "connecting" || phase === "checking_balance") {
+    // Nothing at all when a wallet is already connected. The read is either
+    // cached or skipped entirely in that case, so the screen existed only long
+    // enough to flash past -- which reads as a glitch, not as progress.
+    if (identity) return null;
     return (
       <div className="text-center py-8 space-y-3">
         <Rocket size={56} />

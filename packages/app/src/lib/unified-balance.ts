@@ -528,7 +528,19 @@ export async function spendUsdcToArc(params: {
   amountMinor: bigint;
   recipientAddress: string;
   allocations: Array<{ chain: string; amountMinor: bigint }>;
+  /**
+   * Progress, because this function is not quick and it takes the payer's money
+   * on the way through.
+   *
+   * It signs, debits, then waits up to two minutes for Circle to confirm the
+   * deposit, then asks for a SECOND signature. With no reporting the caller was
+   * left showing "Confirm in your wallet" throughout -- so a payer whose wallet
+   * had already been debited sat looking at a prompt they had answered, with no
+   * way to tell a slow confirmation from a hang.
+   */
+  onProgress?: (note: string) => void;
 }): Promise<SpendToArcResult> {
+  const say = params.onProgress ?? (() => {});
   const { spend, deposit } = await import("@circle-fin/unified-balance-kit");
   const ctx = await context();
 
@@ -574,6 +586,7 @@ export async function spendUsdcToArc(params: {
   // covers the target.
   if (confirmed + pending < target) {
     const shortfall = target - (confirmed + pending);
+    say("Approve the deposit in your wallet…");
     await deposit(ctx as never, {
       from: { adapter: params.payer.adapter as never, chain: primaryChain as never },
       amount: usdcMinorToHuman(shortfall),
@@ -585,7 +598,13 @@ export async function spendUsdcToArc(params: {
   // balance to cover the target before spending — spend() draws confirmed
   // balance only, and running it early left the fresh USDC stuck in Gateway.
   const deadline = Date.now() + 120_000;
+  const started = Date.now();
   while (confirmed < target && Date.now() < deadline) {
+    const secs = Math.round((Date.now() - started) / 1000);
+    // Named as a wait on Circle, with the elapsed time, so it reads as
+    // progress rather than as a frozen screen. This is the step that used to
+    // look like a hang.
+    say(`Deposit sent. Waiting for Circle to confirm… ${secs}s`);
     await new Promise((r) => setTimeout(r, 5000));
     ({ confirmed, pending } = await gatewayBalance());
   }
@@ -627,6 +646,7 @@ export async function spendUsdcToArc(params: {
   // "sign → load → sign again" loop in the payer's wallet. The failure it was
   // retrying (insufficient balance) was never transient anyway: it was the
   // unfunded fee, fixed above by depositing to `target`.
+  say("Approve the payment in your wallet…");
   const result = (await spend(ctx as never, spendParams as never)) as {
     txHash: string;
     transferId?: string;

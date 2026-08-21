@@ -111,6 +111,27 @@ const nextConfig = {
     ],
   },
 
+  // /dashboard is not a page, it is a redirect. Do it before the layout runs.
+  //
+  // It used to be a client component whose whole body was
+  // useEffect(() => router.replace("/dashboard/settlements")) returning null.
+  // Because dashboard/layout.tsx sits above it, hitting /dashboard meant:
+  // mount the auth layout, resolve the Circle session, resolve the Conduit
+  // account, render the entire sidebar chrome around a null child, and THEN
+  // client-navigate to settlements -- which resolved the account a second time.
+  // The merchant watched an empty dashboard assemble itself and then replace
+  // itself.
+  //
+  // Here it costs nothing: the redirect is answered before a byte of the layout
+  // is evaluated. Temporary, not permanent -- which page /dashboard lands on is
+  // a product decision, and a 308 would be cached in browsers long after we
+  // changed our minds.
+  async redirects() {
+    return [
+      { source: "/dashboard", destination: "/dashboard/settlements", permanent: false },
+    ];
+  },
+
   async headers() {
     return [
       {

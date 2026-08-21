@@ -25,12 +25,26 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { SkeletonBlock } from "@/components/Shared/Skeleton";
 
 export default function CircleCallbackPage() {
   const router = useRouter();
   const [stalled, setStalled] = useState(false);
+  // Silence first, then a shape. See below.
+  const [slow, setSlow] = useState(false);
 
   useEffect(() => {
+    // The happy path returns well inside this, and showing nothing while it
+    // does is the whole point of the page -- see the note at the top of the
+    // file. But when it does NOT return, the old version left a blank screen
+    // for the FULL eight seconds before saying a word, which reads as a dead
+    // tab rather than as a login in progress.
+    //
+    // 1200ms is chosen to sit past a normal return, so a successful sign-in
+    // never sees this: it is a signal that something is taking longer than it
+    // should, not a step in the flow.
+    const slowTimer = setTimeout(() => setSlow(true), 1200);
+
     // If the return-to redirect has not happened by now, the login either
     // failed or there was nowhere to go back to. Send them somewhere real
     // rather than leaving them on a page that only ever meant "in transit".
@@ -38,11 +52,29 @@ export default function CircleCallbackPage() {
       setStalled(true);
       router.replace("/dashboard");
     }, 8000);
-    return () => clearTimeout(t);
+    return () => {
+      clearTimeout(slowTimer);
+      clearTimeout(t);
+    };
   }, [router]);
 
   return (
     <main className="min-h-screen flex items-center justify-center p-6">
+      {/* A skeleton, never a sentence.
+          Text here reads as an extra step in signing in -- "Completing
+          sign-in…" invites the user to wonder what else is required of them --
+          and it flashed up and vanished on perfectly normal logins. A shape
+          says "this is loading" without claiming anything is being asked of
+          them. The one sentence on this page stays where it was: the bail-out,
+          which is the only moment something genuinely changed. */}
+      {slow && !stalled && (
+        <div className="w-full max-w-sm space-y-3" aria-busy="true">
+          <span className="sr-only">Completing sign-in</span>
+          <SkeletonBlock className="h-10 w-full" />
+          <SkeletonBlock className="h-4 w-2/3" />
+          <SkeletonBlock className="h-4 w-1/2" />
+        </div>
+      )}
       {stalled && (
         <p className="text-ink-dim text-sm font-mono">Taking you to the dashboard…</p>
       )}

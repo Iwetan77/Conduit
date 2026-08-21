@@ -932,13 +932,51 @@ export async function spendUsdcToArc(params: {
   );
   resetGatewayTrace();
   const untrace = traceGatewayCalls();
+  // Circle's fee estimate goes stale while the payer is signing.
+  //
+  // The SDK fetches per-intent maxFee from POST /v1/estimate, BUILDS the intents,
+  // waits for the payer's wallet signature, and only then POSTs /v1/transfer --
+  // where Circle re-checks that fee against current Arc gas. The signature is
+  // human time, so the longer someone takes to approve, the likelier the
+  // forwarding fee has moved underneath them. Circle then refuses its own
+  // estimate: "Insufficient total maxFee across intents to cover forwarding fee.
+  // Required additional: 0.000547".
+  //
+  // That is why this fails intermittently and why pressing Pay again works: a
+  // fresh spend re-estimates at the current fee. So do exactly that, once,
+  // rather than making the payer discover it.
+  //
+  // Retried ONCE and only for this message. A previous version of this code
+  // looped on every failure, and because each attempt re-runs the burn-intent
+  // signature that became an endless sign-load-sign cycle in the payer's wallet.
+  // Nothing is replayed: the rejected spec was never accepted, and a new spend
+  // builds new intents with a new salt.
+  //
+  // Not fixable by padding the fee ourselves -- SpendParams has no maxFee field,
+  // the SDK overwrites it from the estimate anyway, and inflating the
+  // allocations to fake headroom is rejected outright ("Sum of allocations does
+  // not match amount").
+  const feeMovedUnderUs = (err: unknown) =>
+    /insufficient total maxfee/i.test(err instanceof Error ? err.message : String(err ?? ""));
+
   try {
     noteSpendCall();
-    result = (await spend(ctx as never, spendParams as never)) as {
-      txHash: string;
-      transferId?: string;
-      explorerUrl?: string;
-    };
+    try {
+      result = (await spend(ctx as never, spendParams as never)) as {
+        txHash: string;
+        transferId?: string;
+        explorerUrl?: string;
+      };
+    } catch (first) {
+      if (!feeMovedUnderUs(first)) throw first;
+      say("Circle's network fee moved while you were approving. One more signature…");
+      noteSpendCall();
+      result = (await spend(ctx as never, spendParams as never)) as {
+        txHash: string;
+        transferId?: string;
+        explorerUrl?: string;
+      };
+    }
   } catch (e) {
     // Verbatim, BEFORE any classification. Every decision below this line is a
     // statement about whether the payer's money has moved, and each one has been
@@ -971,6 +1009,19 @@ export async function spendUsdcToArc(params: {
         "This transfer was already submitted to Circle and cannot be sent twice. " +
           "Your USDC is safe in Circle Gateway. Start a new payment to spend it, " +
           "or check History -- the first attempt may still be settling."
+      );
+    }
+    // Circle's fee text, said in a way a payer can act on.
+    //
+    // The raw message is "Insufficient total maxFee across intents to cover
+    // forwarding fee. Required additional: 0.000547", which reads to a payer as
+    // though THEY are short of funds. They are not -- their USDC is deposited
+    // and untouched; Circle's own fee estimate expired while they were signing.
+    if (feeMovedUnderUs(e)) {
+      throw new FundsInGatewayError(
+        "Circle's network fee changed while you were approving, twice in a row. " +
+          "Your USDC is safe in Circle Gateway and was not deposited again. " +
+          "Press Pay to try at the current fee."
       );
     }
     throw new FundsInGatewayError(

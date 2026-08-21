@@ -461,14 +461,55 @@ func newBridgeHandler(cfg Config, stableFX *fx.StableFXProvider, dispatcher *web
 
 var errNoRelayerKey = errors.New("ARC_RELAYER_KEY not configured")
 
-// StartBackgroundWorkers runs the webhook retry sweeper (every 10s), the CCTP
-// orphan reconciler (every 10s, if bridging is configured), and, if
-// arcRPC/routerAddress are provided, the on-chain indexer — all block until
-// ctx is cancelled. Call in a goroutine from cmd/api and cmd/devserver.
+// How often the background sweepers wake up.
+//
+// These were both 10 seconds, and each one runs an unconditional query whether
+// or not there is anything to do -- so between them the database was queried
+// roughly 17,000 times a day at idle. That is not a query-cost problem, it is a
+// SLEEP problem: a serverless Postgres scales to zero only after several
+// minutes of no connections, and a query every ten seconds means it never gets
+// there. The compute bills for time awake, so an app with no users at all still
+// pays for 720 hours a month.
+//
+// Neither of these is on the payment path. The webhook sweeper redelivers
+// failed webhooks that are ALREADY on an exponential backoff, and the bridge
+// reconciler recovers transfers that were orphaned by a browser dying
+// mid-payment. Both are recovery, measured in minutes by nature, and nothing a
+// payer does gets slower because they run less often.
+//
+// Overridable so the interval can be tuned on a deployment without a rebuild --
+// tightened while debugging a stuck transfer, loosened when the database bill
+// matters more than a few minutes of recovery latency.
+func workerInterval(env string, fallback time.Duration) time.Duration {
+	if raw := strings.TrimSpace(os.Getenv(env)); raw != "" {
+		if d, err := time.ParseDuration(raw); err == nil && d > 0 {
+			return d
+		}
+		log.Printf("server: ignoring invalid %s=%q, using %s", env, raw, fallback)
+	}
+	return fallback
+}
+
+// StartBackgroundWorkers runs the webhook retry sweeper, the CCTP orphan
+// reconciler (if bridging is configured), and, if arcRPC/routerAddress are
+// provided, the on-chain indexer — all block until ctx is cancelled. Call in a
+// goroutine from cmd/api and cmd/devserver.
 func StartBackgroundWorkers(ctx context.Context, pool *pgxpool.Pool, arcRPC, routerAddress string, bridgeCfg Config) {
+	// 15 minutes, deliberately LONGER than the database's scale-to-zero window.
+	//
+	// This is the whole point and it is easy to get wrong by a factor that
+	// matters: a serverless Postgres suspends after ~5 minutes of inactivity, so
+	// a sweeper on a 5 minute tick wakes it at the exact moment it was about to
+	// sleep and it never suspends at all. The interval has to clear that window
+	// with room, or the compute bills for 720 hours a month regardless of how
+	// few queries those hours contained.
+	sweepEvery := workerInterval("CONDUIT_WEBHOOK_SWEEP_INTERVAL", 15*time.Minute)
+	reconcileEvery := workerInterval("CONDUIT_BRIDGE_RECONCILE_INTERVAL", 15*time.Minute)
+	log.Printf("server: background workers — webhook sweep %s, bridge reconcile %s", sweepEvery, reconcileEvery)
+
 	dispatcher := webhooks.NewDispatcher(pool)
 	go func() {
-		ticker := time.NewTicker(10 * time.Second)
+		ticker := time.NewTicker(sweepEvery)
 		defer ticker.Stop()
 		for {
 			select {
@@ -484,7 +525,7 @@ func StartBackgroundWorkers(ctx context.Context, pool *pgxpool.Pool, arcRPC, rou
 
 	if bridgeH, err := newBridgeHandler(bridgeCfg, fx.NewStableFXProvider(bridgeCfg.StableFXBase, bridgeCfg.StableFXKey), dispatcher); err == nil {
 		go func() {
-			ticker := time.NewTicker(10 * time.Second)
+			ticker := time.NewTicker(reconcileEvery)
 			defer ticker.Stop()
 			for {
 				select {

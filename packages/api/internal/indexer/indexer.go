@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"log"
 	"math/big"
+	"os"
 	"strings"
 	"time"
 
@@ -105,7 +106,21 @@ func (ix *Indexer) Run(ctx context.Context) error {
 		log.Printf("indexer: WS subscribe failed (%v), falling back to polling only", err)
 	}
 
-	ticker := time.NewTicker(15 * time.Second)
+	// A BACKSTOP, not the live path.
+	//
+	// Settlements arrive over the WebSocket subscription above; this reconcile
+	// exists to catch what the subscription missed while it was down. At 15
+	// seconds it queried Postgres 5,760 times a day to find nothing, which on a
+	// serverless database is enough on its own to stop the compute ever scaling
+	// to zero -- and the compute bills for time awake, not for queries.
+	//
+	// Fifteen minutes is still far tighter than the failure it covers, and it
+	// clears the database's ~5 minute scale-to-zero window -- an interval SHORTER
+	// than that window keeps the compute awake permanently, which is the entire
+	// cost being addressed. When the subscription is healthy this finds nothing
+	// either way; when it is not, some lag on History is not what anyone
+	// notices first.
+	ticker := time.NewTicker(indexerReconcileInterval())
 	defer ticker.Stop()
 
 	for {
@@ -124,6 +139,16 @@ func (ix *Indexer) Run(ctx context.Context) error {
 			}
 		}
 	}
+}
+
+// Overridable without a rebuild, for tightening while chasing a missed event.
+func indexerReconcileInterval() time.Duration {
+	if raw := strings.TrimSpace(os.Getenv("CONDUIT_INDEXER_RECONCILE_INTERVAL")); raw != "" {
+		if d, err := time.ParseDuration(raw); err == nil && d > 0 {
+			return d
+		}
+	}
+	return 15 * time.Minute
 }
 
 func subErrCh(sub ethereum.Subscription) <-chan error {

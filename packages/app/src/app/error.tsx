@@ -36,9 +36,15 @@ export default function GlobalError({
           </span>
         </div>
 
+        {/* Says what is known, and nothing more.
+            This used to end "and no payment was affected by it", which is a
+            promise this boundary is in no position to make: it catches a failed
+            RENDER, and knows nothing about what was in flight when it fired. A
+            database outage mid-payment would show this exact screen while the
+            claim was false. Reassurance that can be wrong is worse than none. */}
         <p className="text-ink-dim text-scale-2 leading-relaxed">
-          This page failed to load. Nothing you did caused it, and no payment was
-          affected by it.
+          This page failed to load. Nothing you did caused it. If you were paying,
+          check History before trying again — the payment may have gone through.
         </p>
 
         <button

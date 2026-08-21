@@ -31,9 +31,15 @@ import { chainLabel } from "@/lib/unified-balance";
 // the app -- shipping it on first paint made every payer pay for a path most
 // of them never take. ssr:false: it is wallet driven and renders nothing
 // useful on the server.
+import { BridgeSkeleton } from "./BridgeSkeleton";
 const CrossChainBridge = dynamic(
   () => import("./CrossChainBridge").then((m) => m.CrossChainBridge),
-  { ssr: false },
+  {
+    ssr: false,
+    // Draw the shape it is about to be, rather than a gap. Without this the
+    // click landed on an empty page for as long as the chunk took to arrive.
+    loading: () => <BridgeSkeleton />,
+  },
 );
 
 interface PaymentLinkPayProps {

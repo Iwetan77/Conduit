@@ -24,9 +24,15 @@ const SendConfirm = dynamic(
   () => import("@/components/SendFlow/SendConfirm").then((m) => m.SendConfirm),
   { ssr: false },
 );
+import { BridgeSkeleton } from "@/components/PayFlow/BridgeSkeleton";
 const CrossChainBridge = dynamic(
   () => import("@/components/PayFlow/CrossChainBridge").then((m) => m.CrossChainBridge),
-  { ssr: false },
+  {
+    ssr: false,
+    // Draw the shape it is about to be, rather than a gap. Without this the
+    // click landed on an empty page for as long as the chunk took to arrive.
+    loading: () => <BridgeSkeleton />,
+  },
 );
 import type { PublicSettlementIntent } from "@/lib/conduit-api";
 import { PayerCurrencyPicker } from "@/components/SendFlow/PayerCurrencyPicker";

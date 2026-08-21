@@ -599,6 +599,22 @@ export class FundsInGatewayError extends Error {
   }
 }
 
+/**
+ * The payer cannot cover the amount plus Circle's fee.
+ *
+ * Deliberately NOT a FundsInGatewayError. That type means "your money has moved
+ * and is safe", and this is thrown before any deposit runs -- so nothing has
+ * moved, and telling someone their funds are sitting in Gateway would be a
+ * false statement about where their money is.
+ */
+export class InsufficientForFeeError extends Error {
+  readonly insufficientForFee = true;
+  constructor(message: string) {
+    super(message);
+    this.name = "InsufficientForFeeError";
+  }
+}
+
 export interface SpendToArcResult {
   txHash: string;
   /** Gateway transfer id — handed to the API so it can poll + settle. */
@@ -722,6 +738,28 @@ export async function spendUsdcToArc(params: {
 
   let bal = await gatewayBalance();
 
+  // Short of Circle's fee? Say so now, before anything moves.
+  //
+  // This check used to live AFTER the deposit loop and after the 120s confirm
+  // wait, which made it both slow and wrong in the same stroke: a payer who
+  // could never cover `target` had their USDC deposited into Gateway anyway,
+  // then watched a two minute countdown poll for a balance that could not
+  // arrive, and only then learned they were short. Their money moved for a
+  // payment that was arithmetically impossible from the first millisecond.
+  //
+  // Everything needed to know that is already in hand here -- what they hold
+  // across every source, and what Circle needs including its fee. So decide it
+  // here, in one subtraction, with nothing debited.
+  const availableTotal =
+    bal.confirmed + bal.pending + params.sources.reduce((sum, s) => sum + s.availableMinor, 0n);
+  if (availableTotal < target) {
+    throw new InsufficientForFeeError(
+      `Circle charges a fee on top of the amount, so this needs about ` +
+        `${usdcDisplay(target)} USDC and you have ${usdcDisplay(availableTotal)}. ` +
+        `Top up any of your chains by ${usdcDisplay(target - availableTotal)} and try again.`
+    );
+  }
+
   // Whether the payer's money has moved. Everything after this point must tell
   // the truth about that, however the failure arrives.
   let deposited = bal.confirmed + bal.pending > 0n;
@@ -818,20 +856,9 @@ export async function spendUsdcToArc(params: {
     }
   }
   if (bal.confirmed < target) {
-    // Two different failures wear the same shape here, and only one is about
-    // timing. If every source is drained and Gateway still holds less than the
-    // target, no amount of waiting will help: the payer is short of Circle's
-    // fee, not early. Telling them to wait 30s for that is a message that can
-    // never come true, and they would keep pressing Pay against it.
-    const available = params.sources.reduce((sum, s) => sum + s.availableMinor, 0n);
-    if (available < target) {
-      throw new FundsInGatewayError(
-        `Circle charges a fee on top of the amount, so this needs about ` +
-          `${usdcDisplay(target)} USDC and you have ${usdcDisplay(available)}. ` +
-          `Top up any of your chains by ${usdcDisplay(target - available)} and try again. ` +
-          `Anything already deposited is safe and will be used by this payment.`
-      );
-    }
+    // Only one failure can reach here now: a deposit that is genuinely still
+    // confirming. The "you are short of the fee" case is decided before the
+    // deposit loop runs, where it costs the payer nothing.
     throw new FundsInGatewayError(
       "Your USDC is deposited in Circle Gateway and still confirming — it's safe and won't deposit again. Wait ~30s and press Pay to finish."
     );

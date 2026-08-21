@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { useAccount, useConnect, useDisconnect } from "wagmi";
 import {
   useWalletGate,
@@ -14,6 +14,7 @@ import { shortenAddress } from "@/lib/format";
 import { usePayerIdentity } from "@/lib/use-payer-identity";
 import { usePayerUsdc } from "@/lib/use-payer-usdc";
 import { chainLabel, usdcDisplay } from "@/lib/unified-balance";
+import { CIRCLE_CONNECTOR_ID } from "@/lib/circle/connector";
 
 // Google sign-in exists when Circle is configured. There is no provider flag
 // any more: Privy was removed in Phase 7, so this is the only Google path and
@@ -310,7 +311,34 @@ export function WalletConnect() {
     );
   }
 
-  const injected = connectors.find((c) => c.id === "injected" || c.type === "injected");
+  // Every wallet this browser actually offers, by name.
+  //
+  // This used to be a single `connectors.find(id === "injected")`, rendered as
+  // one row reading "Browser wallet". wagmi v2 discovers installed extensions
+  // via EIP-6963 and exposes each as its own connector with its own name and
+  // icon -- so MetaMask, Rabby, Coinbase and the rest were all present in
+  // `connectors` and all being discarded in favour of one anonymous entry.
+  // Someone with two EVM wallets could not choose, and someone with one could
+  // not tell it was theirs.
+  //
+  // Deduped by id: discovery can surface the same extension twice, once as
+  // itself and once as the generic `injected`, and a list with MetaMask in it
+  // twice is worse than useless when the point of the list is telling wallets
+  // apart. The generic entry is dropped whenever a named one exists, since
+  // "Browser wallet" is only a useful label when it is the only thing we know.
+  const evmConnectors = useMemo(() => {
+    const seen = new Set<string>();
+    const all = connectors.filter((c) => {
+      // Google sign-in has its own button beside this one.
+      if (c.id === CIRCLE_CONNECTOR_ID) return false;
+      if (seen.has(c.id)) return false;
+      seen.add(c.id);
+      return true;
+    });
+    const named = all.filter((c) => c.id !== "injected");
+    return named.length > 0 ? named : all;
+  }, [connectors]);
+  const injected = evmConnectors[0];
 
   return (
     <div className="flex flex-col items-center gap-2">
@@ -324,11 +352,16 @@ export function WalletConnect() {
           they can answer the one they came with. With no Solana extension
           present this behaves exactly as it always did -- one click, straight
           into the browser wallet. */}
-      {(injected || solanaWallets.length > 0) && (
+      {(evmConnectors.length > 0 || solanaWallets.length > 0) && (
         <div className="relative">
           <button
             onClick={() => {
-              if (solanaWallets.length === 0 && injected) connect({ connector: injected });
+              // Straight through only when there is genuinely no choice to make:
+              // exactly one wallet, of either family. Anything else opens the
+              // list, because picking for the payer is how someone ends up
+              // connected to the wrong account.
+              const only = solanaWallets.length === 0 && evmConnectors.length === 1;
+              if (only && injected) connect({ connector: injected });
               else setPicking((p) => !p);
             }}
             disabled={isPending || connecting}
@@ -340,15 +373,24 @@ export function WalletConnect() {
 
           {picking && (
             <div className="absolute left-0 top-full mt-1 z-40 min-w-[13rem] border border-border bg-surface">
-              {injected && (
+              {evmConnectors.map((c) => (
                 <button
-                  onClick={() => { setPicking(false); connect({ connector: injected }); }}
+                  key={c.id}
+                  onClick={() => { setPicking(false); connect({ connector: c }); }}
                   className="flex w-full items-center gap-2 px-3 py-2 text-scale-2 font-mono
                              text-left text-ink-dim hover:text-ink hover:bg-bg/40 transition-colors"
                 >
-                  Browser wallet
+                  {/* The wallet's own icon when discovery gave us one. Plain
+                      img: a data URI from the extension, not one of our assets. */}
+                  {c.icon ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={c.icon} alt="" width={16} height={16} />
+                  ) : (
+                    <span className="w-4 h-4 shrink-0" aria-hidden />
+                  )}
+                  {c.id === "injected" ? "Browser wallet" : c.name}
                 </button>
-              )}
+              ))}
               {solanaWallets.map((w) => (
                 <button
                   key={w.id}

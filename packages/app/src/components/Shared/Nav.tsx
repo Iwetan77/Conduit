@@ -153,11 +153,29 @@ function WalletMenu({ address }: { address: `0x${string}` }) {
                     </div>
                     <span className="text-scale-2 font-mono text-ink">{value}</span>
                   </div>
-                  {isUsdc && spendable.via === "chains" && spendable.chains.length > 0 && (
+                  {/* The breakdown, on the surface the payer opened to look.
+                      The headline number is what they can spend; this is where
+                      it currently sits, per chain, because each chain that
+                      contributes to a payment costs its own deposit. Only shown
+                      when the balance actually spans more than one chain --
+                      repeating a single chain's amount under itself is noise. */}
+                  {isUsdc && spendable.via === "chains" && spendable.chains.length > 1 && (
+                    <div className="mt-1.5 pl-[26px] space-y-1">
+                      {spendable.chains.map((c) => (
+                        <div key={c.chain} className="flex items-center justify-between">
+                          <span className="text-scale-1 font-mono text-ink-dim">
+                            {chainLabel(c.chain)}
+                          </span>
+                          <span className="text-scale-1 font-mono text-ink-dim">
+                            {usdcDisplay(c.minor)}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {isUsdc && spendable.via === "chains" && spendable.chains.length === 1 && (
                     <p className="text-scale-1 font-mono text-ink-dim mt-0.5 pl-[26px]">
-                      {spendable.chains.length === 1
-                        ? `on ${chainLabel(spendable.chains[0].chain)}`
-                        : `across ${spendable.chains.map((c) => chainLabel(c.chain)).join(" · ")}`}
+                      on {chainLabel(spendable.chains[0].chain)}
                     </p>
                   )}
                 </div>

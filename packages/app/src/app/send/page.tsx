@@ -256,14 +256,20 @@ export default function SendPage() {
                           {usdcDisplay(spendable.minor)}{" "}
                           <span className="text-ink-dim text-scale-1">USDC</span>
                         </p>
+                        {/* Where it is, not how it splits.
+                            The per-chain amounts moved into the wallet menu:
+                            this line answers "can I pay?" and the breakdown is
+                            one tap away for the payer who wants it. Printing
+                            "Polygon 20 · Base 20" here put the arithmetic back
+                            on the screen the number exists to replace. */}
                         <p className="text-scale-1 font-mono text-ink-dim">
                           {spendable.via === "arc"
                             ? "on Arc — settles direct, no bridge"
                             : spendable.chains.length === 1
                               ? `on ${chainLabel(spendable.chains[0].chain)}`
                               : `across ${spendable.chains
-                                  .map((c) => `${chainLabel(c.chain)} ${usdcDisplay(c.minor)}`)
-                                  .join(" · ")}`}
+                                  .map((c) => chainLabel(c.chain))
+                                  .join(", ")}`}
                         </p>
                       </>
                     )}

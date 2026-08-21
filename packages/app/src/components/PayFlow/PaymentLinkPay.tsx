@@ -23,7 +23,7 @@ import { isoToToken } from "@/lib/currencies";
 import { currencyDecimals } from "@conduit/sdk/lite";
 import { ArcSettlePanel } from "./ArcSettlePanel";
 import { usePayerIdentity } from "@/lib/use-payer-identity";
-import { usePayerUsdc, routeForAmount } from "@/lib/use-payer-usdc";
+import { usePayerUsdc, useRouteDecision } from "@/lib/use-payer-usdc";
 import { useBalances } from "@/lib/use-balances";
 import { chainLabel } from "@/lib/unified-balance";
 // Loaded when reached. The cross chain flow is a screen the payer only sees
@@ -159,18 +159,26 @@ export function PaymentLinkPay({ linkId }: PaymentLinkPayProps) {
 
   // Which chain has to pay, if not Arc. Arc counts only for an EVM wallet: a
   // Solana wallet cannot sign on Arc, so an Arc balance is not spendable by it.
+  //
+  // Same omission as the settlement-intent surface had: this computed its route
+  // straight from routeForAmount, which during the balance read is handed an
+  // empty balance set and answers "insufficient" -- a real-looking answer that
+  // hid the button. The "Pay from Base" control then popped into existence
+  // under a Pay panel the payer was already reading. `resolving` is now its own
+  // state and renders a placeholder of the button's size instead.
   const arcUsdc =
     identity?.kind === "evm" ? (arcBalances.balances.USDC ?? 0n) : 0n;
+  const decision = useRouteDecision(
+    amountRaw > 0n ? amountRaw : undefined,
+    arcUsdc,
+    sourceUsdc,
+    arcBalances.settled,
+  );
+  // Every chain the payment draws from, not just the first. A payment can pool
+  // across chains, so naming one would misdescribe it.
   const crossChain =
-    amountRaw > 0n
-      ? (() => {
-          const r = routeForAmount(amountRaw, arcUsdc, sourceUsdc.funded);
-          // Every chain the payment draws from, not just the first. A payment
-          // can pool across chains now, so naming one would misdescribe it.
-          return r.kind === "cross_chain"
-            ? r.allocations.map((a) => chainLabel(a.chain)).join(" + ")
-            : null;
-        })()
+    decision.status === "resolved" && decision.route.kind === "cross_chain"
+      ? decision.route.allocations.map((a) => chainLabel(a.chain)).join(" + ")
       : null;
 
   // Open/suggested links must have a sane amount before the Pay button means
@@ -318,6 +326,12 @@ export function PaymentLinkPay({ linkId }: PaymentLinkPayProps) {
       {/* Entered automatically when the payer's Arc balance cannot cover this
           and another chain can. The button that used to sit here asked a
           question about rails; this states the answer instead. */}
+      {/* Reserved while the balances resolve, so the real control does not
+          appear from nowhere under someone's cursor. Same height as the button
+          below it. */}
+      {decision.status === "resolving" && amountRaw > 0n && !bridgeIntent && (
+        <div className="w-full h-[50px] border border-border bg-surface animate-pulse" aria-hidden />
+      )}
       {crossChain && !bridgeIntent && (
         <button
           type="button"

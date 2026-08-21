@@ -6,7 +6,7 @@ import dynamic from "next/dynamic";
 import { useState, useEffect } from "react";
 import { useAccount } from "wagmi";
 import { usePayerIdentity } from "@/lib/use-payer-identity";
-import { usePayerUsdc, routeForAmount, spendableUsdc } from "@/lib/use-payer-usdc";
+import { usePayerUsdc, useRouteDecision, spendableUsdc } from "@/lib/use-payer-usdc";
 import { chainLabel, usdcDisplay } from "@/lib/unified-balance";
 import { isAddress } from "viem";
 import { Nav, MobileNav } from "@/components/Shared/Nav";
@@ -139,10 +139,22 @@ export default function SendPage() {
   // address, and a Solana wallet cannot sign on Arc at all, so crediting it an
   // Arc balance would offer a route that fails at the last step.
   const arcUsdc = identity?.kind === "evm" ? (payerBalances.USDC ?? 0n) : 0n;
-  const route =
-    required.data !== undefined
-      ? routeForAmount(required.data, arcUsdc, sourceUsdc.funded)
-      : null;
+  // This one was a CORRECTNESS bug, not a cosmetic one.
+  //
+  // `route` was null until the balances landed, and canProceed did not require
+  // it -- so a payer whose USDC is on Base could tap Review Payment while the
+  // read was still in flight and take the ELSE branch, which is the Arc path,
+  // which cannot settle their payment. It failed later, inside their wallet,
+  // for reasons they could not connect to anything they had done.
+  //
+  // payerBalances comes from PayerCurrencyPicker rather than from useBalances
+  // directly, so "have the Arc balances arrived" is "is the map non-empty" --
+  // which is also what a genuinely empty wallet looks like. Treating an
+  // unconnected/unfetched state as settled would put the old bug straight back,
+  // so it is settled only once a wallet is connected AND the map has arrived.
+  const arcSettled = !isConnected || Object.keys(payerBalances).length > 0;
+  const decision = useRouteDecision(required.data, arcUsdc, sourceUsdc, arcSettled);
+  const route = decision.status === "resolved" ? decision.route : null;
   // The most this wallet can pay, and by which route. Arc and the Gateway pool
   // cannot combine, so this is a max, never a sum -- see spendableUsdc.
   const spendable = spendableUsdc(arcUsdc, sourceUsdc);
@@ -159,6 +171,9 @@ export default function SendPage() {
     isAddress(recipient) &&
     parseFloat(amount) > 0 &&
     identity !== null &&
+    // The button stays disabled until the route is KNOWN. Without this it was
+    // enabled during the read and silently took the Arc branch.
+    decision.status === "resolved" &&
     route?.kind !== "insufficient" &&
     (route?.kind === "cross_chain" || !insufficient);
 
@@ -373,9 +388,17 @@ export default function SendPage() {
                             .join(" + ")}`}
                     </p>
                   )}
-                  {sourceUsdc.loading && !route && (
+                  {/* Shown BESIDE a disabled button now. It used to sit beside
+                      an enabled one, which is how someone pressed it early. */}
+                  {decision.status === "resolving" && (
                     <p className="text-center text-scale-1 font-mono text-ink-dim">
                       Checking your balances…
+                    </p>
+                  )}
+                  {decision.status === "resolved" && decision.partial && (
+                    <p className="text-center text-scale-1 font-mono text-ink-dim">
+                      Some chains were slow to answer — this is based on an
+                      incomplete balance read.
                     </p>
                   )}
 

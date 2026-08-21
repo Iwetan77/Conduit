@@ -201,6 +201,35 @@ export function spendableUsdc(
     : { minor: usdc.spendableMinor, via: "chains", chains: usdc.funded };
 }
 
+/**
+ * Fill `needMinor` from `funded`, in the order given, or null if it cannot be met.
+ *
+ * Drawn in the order given and NOT re-sorted: fundedChains already returns
+ * richest first, which costs the fewest deposits and so the fewest wallet
+ * prompts, but a caller that deliberately puts a payer's chosen chain at the
+ * head needs that respected rather than sorted away.
+ *
+ * Split out from routeForAmount because CrossChainBridge needs the allocations
+ * without the route wrapper -- it already knows the payment is cross-chain and
+ * is only re-planning which chains fund it after a balance read or a payer's
+ * pick. Two copies of this arithmetic is exactly the kind that drifts.
+ */
+export function planAllocations(
+  needMinor: bigint,
+  funded: Array<{ chain: string; minor: bigint }>,
+): Array<{ chain: string; minor: bigint }> | null {
+  const allocations: Array<{ chain: string; minor: bigint }> = [];
+  let remaining = needMinor;
+  for (const c of funded) {
+    if (remaining <= 0n) break;
+    if (c.minor <= 0n) continue;
+    const take = c.minor < remaining ? c.minor : remaining;
+    allocations.push({ chain: c.chain, minor: take });
+    remaining -= take;
+  }
+  return remaining <= 0n && allocations.length > 0 ? allocations : null;
+}
+
 export type PayerRoute =
   | { kind: "arc" }
   | {
@@ -241,22 +270,8 @@ export function routeForAmount(
 ): PayerRoute {
   if (arcMinor >= needMinor) return { kind: "arc" };
 
-  // Drawn in the order given, and NOT re-sorted here. fundedChains already
-  // returns richest first, which is the order that costs the fewest deposits
-  // and so the fewest wallet prompts -- but a caller that deliberately puts a
-  // payer's chosen chain at the head needs that respected rather than sorted
-  // away.
-  const allocations: Array<{ chain: string; minor: bigint }> = [];
-  let remaining = needMinor;
-  for (const c of funded) {
-    if (remaining <= 0n) break;
-    if (c.minor <= 0n) continue;
-    const take = c.minor < remaining ? c.minor : remaining;
-    allocations.push({ chain: c.chain, minor: take });
-    remaining -= take;
-  }
-
-  if (remaining <= 0n && allocations.length > 0) {
+  const allocations = planAllocations(needMinor, funded);
+  if (allocations) {
     return {
       kind: "cross_chain",
       allocations,
@@ -270,4 +285,104 @@ export function routeForAmount(
   // smaller number would understate what the payer has.
   const across = funded.reduce((s, c) => s + c.minor, 0n);
   return { kind: "insufficient", bestMinor: arcMinor > across ? arcMinor : across };
+}
+
+// ── Deciding which screen to show ────────────────────────────────────────────
+
+/**
+ * A route, or the honest admission that we do not know one yet.
+ *
+ * This type exists because "loading" kept collapsing into a decision. Every
+ * surface in the app computed its route straight from `routeForAmount`, and
+ * during the balance read `funded` is `[]` and the Arc balance map is `{}` --
+ * so the call returned `insufficient`, which looked exactly like a real answer
+ * and selected a real screen. Seconds later the balances landed and the payer's
+ * screen was replaced underneath them.
+ *
+ * A third state is the whole fix. "Resolving" is not a route and cannot be
+ * mistaken for one.
+ */
+export type RouteDecision =
+  | { status: "resolving" }
+  | {
+      status: "resolved";
+      route: PayerRoute;
+      /** True when the ceiling below fired and the balances are incomplete. */
+      partial: boolean;
+    };
+
+/**
+ * How long a skeleton is allowed to stand before we answer with what we know.
+ *
+ * A skeleton that never resolves is worse than the flash it replaced: the payer
+ * cannot act, cannot see why, and has no reason to believe waiting will help.
+ * Four seconds is past the normal balance read and short of the point where a
+ * stalled screen reads as broken.
+ */
+export const RESOLVE_CEILING_MS = 4000;
+
+/**
+ * Pure form: resolving until BOTH balance reads have finished.
+ *
+ * `arcSettled` comes from useBalances' own `settled` flag rather than being
+ * inferred from an empty map, because an empty map is also what a wallet with
+ * no Arc balance legitimately looks like -- and treating those two as the same
+ * thing is the bug this function exists to prevent.
+ */
+export function decideRoute(
+  needMinor: bigint | undefined,
+  arcMinor: bigint,
+  usdc: PayerUsdc,
+  arcSettled: boolean,
+): RouteDecision {
+  if (needMinor === undefined) return { status: "resolving" };
+  if (usdc.loading || !arcSettled) return { status: "resolving" };
+  return {
+    status: "resolved",
+    route: routeForAmount(needMinor, arcMinor, usdc.funded),
+    partial: false,
+  };
+}
+
+/**
+ * decideRoute plus the ceiling. This is what components should use.
+ *
+ * Keeping the pure function separate matters for the same reason it always
+ * does -- the rule is testable without a renderer -- but every call site wants
+ * the timeout, and a call site that forgets it renders a skeleton forever.
+ */
+export function useRouteDecision(
+  needMinor: bigint | undefined,
+  arcMinor: bigint,
+  usdc: PayerUsdc,
+  arcSettled: boolean,
+): RouteDecision {
+  const decided = decideRoute(needMinor, arcMinor, usdc, arcSettled);
+  const [expired, setExpired] = useState(false);
+
+  const waiting = decided.status === "resolving";
+  const hasAmount = needMinor !== undefined;
+  useEffect(() => {
+    // Deliberately NOT keyed on the balances themselves. Restarting this timer
+    // every time a chain reports back would mean it never fires on exactly the
+    // slow fan-out it exists to cut short.
+    if (!waiting || !hasAmount) {
+      setExpired(false);
+      return;
+    }
+    const t = setTimeout(() => setExpired(true), RESOLVE_CEILING_MS);
+    return () => clearTimeout(t);
+  }, [waiting, hasAmount]);
+
+  if (decided.status === "resolved") return decided;
+  if (expired && needMinor !== undefined) {
+    // Answer with what is known, and say that it is incomplete. Callers surface
+    // `partial` as a one-line note; they must not present it as a full read.
+    return {
+      status: "resolved",
+      route: routeForAmount(needMinor, arcMinor, usdc.funded),
+      partial: true,
+    };
+  }
+  return { status: "resolving" };
 }

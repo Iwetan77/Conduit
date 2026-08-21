@@ -15,7 +15,7 @@ import { pollWithBackoff } from "@/lib/poll";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useAccount, useConnect, useDisconnect, type Connector } from "wagmi";
 import { usePayerIdentity } from "@/lib/use-payer-identity";
-import { routeForAmount } from "@/lib/use-payer-usdc";
+import { planAllocations } from "@/lib/use-payer-usdc";
 import { shortenAddress } from "@/lib/format";
 import {
   getSolanaProvider,
@@ -58,6 +58,7 @@ import { ChainIcon } from "@/components/PayFlow/ChainIcon";
 import { CIRCLE_CONNECTOR_ID } from "@/lib/circle/connector";
 import { chainByEvmId } from "@/lib/circle/chains";
 import { Rocket } from "@/components/Shared/Rocket";
+import { BridgeSkeleton } from "@/components/PayFlow/BridgeSkeleton";
 
 interface CrossChainBridgeProps {
   intentId: string;
@@ -93,6 +94,18 @@ interface CrossChainBridgeProps {
 export type BridgeStage = "setup" | "paying" | "done";
 
 type Phase =
+  // The entry state, and NOT a screen.
+  //
+  // "choose_source" used to be the initial state, with an effect that
+  // immediately navigated past it whenever a wallet was already connected -- so
+  // the chain picker painted for one frame on every single entry. The comment
+  // on that effect already said showing the picker "reads as though the connect
+  // did not register"; the auto-skip was added and the initial state was left
+  // pointing at the very screen being skipped.
+  //
+  // choose_source is now a DESTINATION: reached only when nothing could be
+  // adopted, which is the one case where the question is real.
+  | "resolving"
   | "choose_source"
   | "connecting"
   | "checking_balance"
@@ -246,7 +259,7 @@ function stageOf(phase: Phase): BridgeStage {
 }
 
 export function CrossChainBridge({ intentId, intent, knownUsdc, onStage }: CrossChainBridgeProps) {
-  const [phase, setPhase] = useState<Phase>("choose_source");
+  const [phase, setPhase] = useState<Phase>("resolving");
   const [adapter, setAdapter] = useState<PayerAdapter | null>(null);
   const [unified, setUnified] = useState<UnifiedUsdc | null>(null);
   const [requiredUSDC, setRequiredUSDC] = useState<string | null>(null);
@@ -319,7 +332,7 @@ export function CrossChainBridge({ intentId, intent, knownUsdc, onStage }: Cross
   // on another's page.
   useEffect(() => {
     pollRef.current?.();
-    setPhase("choose_source");
+    setPhase("resolving");
     setAdapter(null);
     setUnified(null);
     setRequiredUSDC(null);
@@ -343,7 +356,7 @@ export function CrossChainBridge({ intentId, intent, knownUsdc, onStage }: Cross
     autoStarted.current = false;
   }, [intentId]);
   useEffect(() => {
-    if (autoStarted.current || phase !== "choose_source") return;
+    if (autoStarted.current || (phase !== "resolving" && phase !== "choose_source")) return;
     const solProvider = getSolanaProvider();
     if (solProvider?.publicKey) {
       const opt = solanaWallets.find((w) => w.provider === solProvider) ?? solanaWallets[0];
@@ -354,10 +367,15 @@ export function CrossChainBridge({ intentId, intent, knownUsdc, onStage }: Cross
     if (evmConnected && connector) {
       autoStarted.current = true;
       void chooseSource("evm", undefined, { evm: { connector } as EvmChoice });
+      return;
     }
+    // Nothing to adopt. NOW the picker is a real question, so show it -- and
+    // only from the entry state, so a payer who deliberately walked back into
+    // the picker is not bounced out of it.
+    if (phase === "resolving" && !identity) setPhase("choose_source");
     // chooseSource is a stable function declaration in this component body.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [phase, evmConnected, connector, solanaWallets, intentId]);
+  }, [phase, evmConnected, connector, solanaWallets, intentId, identity]);
 
   // Drop the current wallet and ask again.
   //
@@ -583,9 +601,9 @@ export function CrossChainBridge({ intentId, intent, knownUsdc, onStage }: Cross
             ...funded.filter((c) => c.chain !== picked),
           ]
         : funded;
-      const route = routeForAmount(need, 0n, ordered);
-      if (route.kind === "cross_chain") {
-        setAllocations(route.allocations);
+      const chosenAllocations = planAllocations(need, ordered);
+      if (chosenAllocations) {
+        setAllocations(chosenAllocations);
         setPhase("confirm");
       } else {
         setAllocations([]);
@@ -775,6 +793,13 @@ export function CrossChainBridge({ intentId, intent, knownUsdc, onStage }: Cross
   }
 
   // ── Render ────────────────────────────────────────────────────────────────
+
+  if (phase === "resolving") {
+    // The shape of what is coming, never one of the real screens. Which screen
+    // that is depends on a wallet lookup that has not finished, and guessing is
+    // what put the picker on screen for a frame on every entry.
+    return <BridgeSkeleton />;
+  }
 
   if (phase === "choose_source") {
     return (
@@ -1061,8 +1086,8 @@ export function CrossChainBridge({ intentId, intent, knownUsdc, onStage }: Cross
                       ...funded.filter((f) => f.chain === c.chain),
                       ...funded.filter((f) => f.chain !== c.chain),
                     ];
-                    const r = routeForAmount(need, 0n, reordered);
-                    if (r.kind === "cross_chain") setAllocations(r.allocations);
+                    const plan = planAllocations(need, reordered);
+                    if (plan) setAllocations(plan);
                   }}
                   className={`w-full flex items-center justify-between px-4 py-3 border font-mono text-sm
                     transition-colors ${

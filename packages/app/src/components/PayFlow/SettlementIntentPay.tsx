@@ -25,7 +25,7 @@ const CrossChainBridge = dynamic(
 import type { BridgeStage } from "./CrossChainBridge";
 import { ArcSettlePanel } from "./ArcSettlePanel";
 import { usePayerIdentity } from "@/lib/use-payer-identity";
-import { usePayerUsdc, routeForAmount } from "@/lib/use-payer-usdc";
+import { usePayerUsdc, useRouteDecision } from "@/lib/use-payer-usdc";
 import { useBalances } from "@/lib/use-balances";
 import { chainLabel } from "@/lib/unified-balance";
 
@@ -61,21 +61,6 @@ export function SettlementIntentPay({ intentId }: SettlementIntentPayProps) {
   });
   const arcBalances = useBalances(identity?.kind === "evm" ? identity.address : undefined);
 
-  // Which chain, if any, this payment has to come from.
-  //
-  // Null means Arc can cover it and the direct path applies. Arc counts only
-  // for an EVM wallet: a Solana wallet cannot sign on Arc at all, so crediting
-  // it an Arc balance would offer a route that fails at the signature.
-  // Names every chain the payment will draw from, or null when Arc covers it.
-  // Plural because a payment can pool across chains now -- "Paying from Base"
-  // for a payment that also takes 12 off Polygon would misdescribe it.
-  function crossChainFor(amountRaw: bigint): string | null {
-    const arcUsdc =
-      identity?.kind === "evm" ? (arcBalances.balances.USDC ?? 0n) : 0n;
-    const route = routeForAmount(amountRaw, arcUsdc, sourceUsdc.funded);
-    if (route.kind !== "cross_chain") return null;
-    return route.allocations.map((a) => chainLabel(a.chain)).join(" + ");
-  }
 
   // Shared query with the page's title effect — one request, not two.
   // Keyed by intentId with NO previous-data retention, which is what keeps
@@ -84,6 +69,24 @@ export function SettlementIntentPay({ intentId }: SettlementIntentPayProps) {
   const { data: fetched, isError } = usePublicIntent(intentId);
   const intent = fetched ?? null;
   const loadError = isError ? "This payment link was not found or has expired." : "";
+
+  // Which route settles this — decided only once the balances are in.
+  //
+  // Arc counts only for an EVM wallet: a Solana wallet cannot sign on Arc at
+  // all, so crediting it an Arc balance would offer a route that fails at the
+  // signature.
+  //
+  // This is the flash the payer actually reported. It used to call
+  // routeForAmount directly, which during the balance read is handed `[]` and
+  // `{}` and dutifully answers "insufficient" -- so `crossChain` was null, so
+  // ArcSettlePanel rendered, and seconds later the balances landed and the
+  // whole screen was replaced by CrossChainBridge underneath someone already
+  // reading it. `sourceUsdc.loading` was sitting right there and was never
+  // read. useRouteDecision cannot make that mistake: "resolving" is its own
+  // state and selects neither screen.
+  const arcUsdc = identity?.kind === "evm" ? (arcBalances.balances.USDC ?? 0n) : 0n;
+  const amountMinor = fetched ? BigInt(fetched.amount) : undefined;
+  const decision = useRouteDecision(amountMinor, arcUsdc, sourceUsdc, arcBalances.settled);
 
   if (loadError) {
     return (
@@ -113,9 +116,13 @@ export function SettlementIntentPay({ intentId }: SettlementIntentPayProps) {
     );
   }
 
-  // Resolved once the intent is known, so the branch below reads as a fact
-  // rather than a computation.
-  const crossChain = crossChainFor(BigInt(intent.amount));
+  // Names every chain the payment will draw from, or null when Arc covers it.
+  // Plural because a payment can pool across chains -- "Paying from Base" for a
+  // payment that also takes 12 off Polygon would misdescribe it.
+  const crossChain =
+    decision.status === "resolved" && decision.route.kind === "cross_chain"
+      ? decision.route.allocations.map((a) => chainLabel(a.chain)).join(" + ")
+      : null;
 
   return (
     <div className="space-y-6">
@@ -176,7 +183,12 @@ export function SettlementIntentPay({ intentId }: SettlementIntentPayProps) {
               Arc when the balance there covers it; otherwise the richest
               single source chain, entered automatically. A payer is told
               which chain will be spent, and never asked to choose one. */}
-          {crossChain ? (
+          {decision.status === "resolving" ? (
+            // Neither screen, and nothing that looks like one. Sized to the
+            // larger of the two so the real panel does not move the page when
+            // it arrives.
+            <BridgeSkeleton />
+          ) : crossChain ? (
             <>
               {bridgeStage === "setup" && (
                 <p className="text-center text-scale-1 font-mono text-signal">
@@ -189,6 +201,12 @@ export function SettlementIntentPay({ intentId }: SettlementIntentPayProps) {
                 knownUsdc={sourceUsdc.unified}
                 onStage={setBridgeStage}
               />
+              {decision.partial && (
+                <p className="text-center text-scale-1 font-mono text-ink-dim">
+                  Some chains were slow to answer — this route is based on an
+                  incomplete balance read.
+                </p>
+              )}
             </>
           ) : (
             <ArcSettlePanel

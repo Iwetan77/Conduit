@@ -188,55 +188,10 @@ export default function CircleStack() {
 
   return null;
 }
-
-// Tells the rest of the app when useAccount()'s address is final.
+// CircleWalletGate used to live here and is now app/circle-wallet-gate.tsx.
 //
-// The Privy stack has PublishWalletSettled for this, and the race it prevents
-// exists here too: a browser extension auto-connects on load, and a moment
-// later the restored Circle session is adopted and the address changes. Any
-// surface that DISPLAYS an address — and offers to copy it — or reads a
-// balance must wait, or it shows an account that is not the user's and invites
-// them to send funds to it.
-//
-// Tested rather than timed, for the same reason: a timeout could only give up
-// and display the wrong account, which is the failure this exists to prevent.
-export function CircleWalletGate({ children }: { children: React.ReactNode }) {
-  const outer = useContext(WalletGateContext);
-  const { connector } = useAccount();
-  // Read once: both are one-shot module values, and re-reading after the
-  // session is adopted would flip this back to "not settled".
-  const [pendingAtLoad] = useState(() => hasPendingResume() || hasPersistedSession());
-
-  // Whether a session is still expected, re-read on every change.
-  //
-  // pendingAtLoad alone was a bug with a nasty shape. It answers "was a session
-  // coming when this page loaded", which is the right question at load and the
-  // WRONG one afterwards: signing out clears the session but cannot change a
-  // value captured at mount, so `settled` stayed false forever and every
-  // surface gated on it -- the whole nav, both Connect Wallet buttons --
-  // rendered null and never came back. The only way out was a reload.
-  //
-  // hasPendingResume() is a module-scope one-shot and stays true for the life
-  // of the page, so it belongs here: during a redirect return there IS a
-  // session coming even though neither of the other two is true yet.
-  const [sessionExpected, setSessionExpected] = useState(
-    () => hasPendingResume() || !!currentSession() || hasPersistedSession()
-  );
-  useEffect(() => {
-    const recompute = () =>
-      setSessionExpected(hasPendingResume() || !!currentSession() || hasPersistedSession());
-    const unsubscribe = onCircleChange(recompute);
-    // A resume that fails calls clearCircleSession(), which emits, so the
-    // failure path settles through the same subscription rather than hanging.
-    return unsubscribe;
-  }, []);
-
-  // Nothing to wait for when no Circle session is coming back. Otherwise the
-  // address is final only once the Circle connector is actually the connected
-  // one.
-  const settled =
-    !pendingAtLoad || connector?.id === CIRCLE_CONNECTOR_ID || !sessionExpected;
-
-  const value = useMemo(() => ({ ...outer, walletSettled: settled }), [outer, settled]);
-  return <WalletGateContext.Provider value={value}>{children}</WalletGateContext.Provider>;
-}
+// It had to move because this module imports the Circle SDK at module scope, so
+// anything exported from it can only be reached through dynamic(ssr:false) --
+// and the gate wraps every child of the root layout, which made the entire
+// application client-only. The gate needs none of the SDK; it only reads the
+// session predicates, which are server-safe.

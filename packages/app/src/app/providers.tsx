@@ -6,6 +6,12 @@ import dynamic from "next/dynamic";
 import { useCallback, useState } from "react";
 import { wagmiConfig } from "@/lib/wagmi";
 import { WalletGateContext } from "@/lib/wallet-gate";
+// STATIC, not dynamic(ssr:false). This wraps every child of the root layout,
+// so making it client-only made the entire application client-only: no page
+// server-rendered its body, and every route shipped an empty shell that filled
+// in after hydration. It lives in its own module now precisely so it can be
+// imported here without dragging the Circle SDK onto the server render path.
+import { CircleWalletGate } from "./circle-wallet-gate";
 
 // Identity is Circle Wallets. Privy was removed here in Phase 7 of the
 // migration; what it used to do and why none of it is needed now:
@@ -30,11 +36,6 @@ import { WalletGateContext } from "@/lib/wallet-gate";
 // CircleStack is still dynamic, but only to keep the SDK import off the server
 // render path; it is mounted unconditionally now.
 const CircleStack = dynamic(() => import("./circle-stack"), { ssr: false });
-// Named export, so it needs its own dynamic wrapper.
-const CircleWalletGate = dynamic(
-  () => import("./circle-stack").then((m) => m.CircleWalletGate),
-  { ssr: false }
-);
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(
@@ -63,9 +64,11 @@ export function Providers({ children }: { children: React.ReactNode }) {
               disconnect on the Circle connector, and issues the Conduit session
               token once a session exists. */}
           <CircleStack />
-          {/* Holds back anything that displays an address until the Circle
+          {/* Holds back anything that DISPLAYS an address until the Circle
               session has been adopted — otherwise an auto-connected extension's
-              address shows first and then swaps. */}
+              address shows first and then swaps. Children are not held back:
+              they render on the server, which is the point of this being a
+              static import. */}
           <CircleWalletGate>{children}</CircleWalletGate>
         </QueryClientProvider>
       </WagmiProvider>

@@ -232,6 +232,12 @@ function persist(s: CircleSessionState) {
 }
 
 function readPersisted(): CircleSessionState | null {
+  // Explicit, not merely caught. The try below would swallow the server's
+  // "localStorage is not defined" anyway, but this function is now reachable
+  // from a server render (see app/circle-wallet-gate.tsx) and relying on an
+  // exception for control flow there is how a real error gets mistaken for
+  // "no session".
+  if (typeof window === "undefined") return null;
   try {
     const raw = localStorage.getItem(SESSION_KEY);
     if (!raw) return null;

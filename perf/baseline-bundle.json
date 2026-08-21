@@ -1,0 +1,103 @@
+{
+  "recordedAt": "2026-08-21T03:04:52.284Z",
+  "sharedFirstLoadKb": 105,
+  "routeCount": 24,
+  "routes": {
+    "/": {
+      "routeKb": 4.72,
+      "firstLoadKb": 225
+    },
+    "/_not-found": {
+      "routeKb": 0.9755859375,
+      "firstLoadKb": 106
+    },
+    "/apple-icon.png": {
+      "routeKb": 0,
+      "firstLoadKb": 0
+    },
+    "/auth/circle/callback": {
+      "routeKb": 0.4970703125,
+      "firstLoadKb": 105
+    },
+    "/create": {
+      "routeKb": 3.66,
+      "firstLoadKb": 225
+    },
+    "/dashboard": {
+      "routeKb": 0.34375,
+      "firstLoadKb": 105
+    },
+    "/dashboard/developers": {
+      "routeKb": 5.12,
+      "firstLoadKb": 112
+    },
+    "/dashboard/links": {
+      "routeKb": 4.86,
+      "firstLoadKb": 112
+    },
+    "/dashboard/locations": {
+      "routeKb": 5.9,
+      "firstLoadKb": 118
+    },
+    "/dashboard/reconciliation": {
+      "routeKb": 4.5,
+      "firstLoadKb": 112
+    },
+    "/dashboard/request-payment": {
+      "routeKb": 6.02,
+      "firstLoadKb": 118
+    },
+    "/dashboard/send": {
+      "routeKb": 7.74,
+      "firstLoadKb": 213
+    },
+    "/dashboard/settings": {
+      "routeKb": 3.43,
+      "firstLoadKb": 139
+    },
+    "/dashboard/settlements": {
+      "routeKb": 9.77,
+      "firstLoadKb": 123
+    },
+    "/docs": {
+      "routeKb": 0.1650390625,
+      "firstLoadKb": 108
+    },
+    "/docs/guides": {
+      "routeKb": 0.1650390625,
+      "firstLoadKb": 108
+    },
+    "/docs/guides/[slug]": {
+      "routeKb": 0.146484375,
+      "firstLoadKb": 105
+    },
+    "/docs/reference": {
+      "routeKb": 0.146484375,
+      "firstLoadKb": 105
+    },
+    "/history": {
+      "routeKb": 4.67,
+      "firstLoadKb": 182
+    },
+    "/icon.svg": {
+      "routeKb": 0,
+      "firstLoadKb": 0
+    },
+    "/links": {
+      "routeKb": 5.55,
+      "firstLoadKb": 188
+    },
+    "/pay/[declarationId]": {
+      "routeKb": 10.8,
+      "firstLoadKb": 225
+    },
+    "/pay/[declarationId]/opengraph-image": {
+      "routeKb": 0.146484375,
+      "firstLoadKb": 105
+    },
+    "/send": {
+      "routeKb": 3.32,
+      "firstLoadKb": 224
+    }
+  }
+}

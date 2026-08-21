@@ -6,7 +6,7 @@ import dynamic from "next/dynamic";
 import { useState, useEffect } from "react";
 import { useAccount } from "wagmi";
 import { usePayerIdentity } from "@/lib/use-payer-identity";
-import { usePayerUsdc, routeForAmount } from "@/lib/use-payer-usdc";
+import { usePayerUsdc, routeForAmount, spendableUsdc } from "@/lib/use-payer-usdc";
 import { chainLabel, usdcDisplay } from "@/lib/unified-balance";
 import { isAddress } from "viem";
 import { Nav, MobileNav } from "@/components/Shared/Nav";
@@ -137,6 +137,9 @@ export default function SendPage() {
     required.data !== undefined
       ? routeForAmount(required.data, arcUsdc, sourceUsdc.funded)
       : null;
+  // The most this wallet can pay, and by which route. Arc and the Gateway pool
+  // cannot combine, so this is a max, never a sum -- see spendableUsdc.
+  const spendable = spendableUsdc(arcUsdc, sourceUsdc);
 
   // Cross-currency is a first-class send, not a merchant-only feature: it
   // settles through Circle StableFX against a settlement intent that /send
@@ -230,7 +233,7 @@ export default function SendPage() {
                     do I have the money, and where -- had no answer on screen.
                     Per chain, never summed: one payment draws from one chain,
                     so a total would promise something the rails cannot do. */}
-                {mounted && identity && (sourceUsdc.funded.length > 0 || sourceUsdc.loading) && (
+                {mounted && identity && (spendable.minor > 0n || sourceUsdc.loading) && (
                   <div className="border border-border bg-surface px-3 py-2 space-y-1">
                     <p className="text-scale-1 font-mono text-ink-dim uppercase tracking-wider">
                       Your USDC
@@ -239,37 +242,29 @@ export default function SendPage() {
                       <p className="text-scale-1 font-mono text-ink-dim">Reading your balances…</p>
                     ) : (
                       <>
-                        {/* One balance, not a list of them.
-                            This printed "20 on Polygon  20 on Base" side by
-                            side, which is three separate balances for what is
-                            one spendable amount: Circle Gateway pools deposited
-                            USDC across chains and settles the set with a single
-                            signature, so 20 and 20 is 40 to spend. The
-                            per-chain figures stay underneath as a breakdown --
-                            worth seeing, because each contributing chain costs
-                            a deposit -- but they are no longer the headline. */}
+                        {/* One number: the most this wallet can actually pay.
+                            This printed "20 on Polygon  20 on Base" as separate
+                            balances, then briefly printed the pooled total with
+                            Arc bolted on underneath as "plus 12.04 already on
+                            Arc". Both were wrong in the same direction -- they
+                            made the payer do arithmetic that does not hold.
+                            spendableUsdc picks the larger of the two ROUTES,
+                            which is exactly the ceiling routeForAmount
+                            enforces, so this figure can never promise a payment
+                            that then gets refused. */}
                         <p className="font-mono text-ink text-scale-3">
-                          {usdcDisplay(sourceUsdc.spendableMinor)}{" "}
+                          {usdcDisplay(spendable.minor)}{" "}
                           <span className="text-ink-dim text-scale-1">USDC</span>
                         </p>
                         <p className="text-scale-1 font-mono text-ink-dim">
-                          {sourceUsdc.funded.length === 1
-                            ? `on ${chainLabel(sourceUsdc.funded[0].chain)}`
-                            : `across ${sourceUsdc.funded
-                                .map((c) => `${chainLabel(c.chain)} ${usdcDisplay(c.minor)}`)
-                                .join(" · ")}`}
+                          {spendable.via === "arc"
+                            ? "on Arc — settles direct, no bridge"
+                            : spendable.chains.length === 1
+                              ? `on ${chainLabel(spendable.chains[0].chain)}`
+                              : `across ${spendable.chains
+                                  .map((c) => `${chainLabel(c.chain)} ${usdcDisplay(c.minor)}`)
+                                  .join(" · ")}`}
                         </p>
-                        {/* Arc is named apart because it cannot join the pool:
-                            it is the DESTINATION domain, so a balance already
-                            there settles directly in one transaction instead of
-                            bridging. Folding it into the number above would
-                            promise a payment that mixes the two, which no
-                            single route can do. */}
-                        {arcUsdc > 0n && (
-                          <p className="text-scale-1 font-mono text-ink-dim">
-                            plus {usdcDisplay(arcUsdc)} already on Arc — settles direct, no bridge
-                          </p>
-                        )}
                       </>
                     )}
                   </div>

@@ -12,6 +12,8 @@ import { TokenIcon } from "./TokenBadge";
 import { WalletConnect } from "./WalletConnect";
 import { arcTestnet } from "@/lib/wagmi";
 import { useBalances } from "@/lib/use-balances";
+import { usePayerUsdc, spendableUsdc } from "@/lib/use-payer-usdc";
+import { chainLabel, usdcDisplay } from "@/lib/unified-balance";
 import { shortenAddress } from "@/lib/format";
 
 // Public payer-side nav. The merchant side is entered from the landing
@@ -58,6 +60,15 @@ function WalletMenu({ address }: { address: `0x${string}` }) {
   // total would need a live FX rate and imply a fungibility that doesn't
   // exist at pay time.
   const { balances, settled } = useBalances(address, open);
+  // The cross-chain half of the same question, read only while the menu is
+  // open so opening it costs the fan-out and merely having a nav does not.
+  //
+  // Without this the nav answered "your USDC" with the ARC balance alone while
+  // the send form answered with the pooled source chains, so one screen showed
+  // a payer three different USDC numbers and none of them was what they could
+  // spend.
+  const crossChain = usePayerUsdc({ address, family: "evm", enabled: open });
+  const spendable = spendableUsdc(balances.USDC ?? 0n, crossChain);
 
   const held = TOKEN_LIST.map((currency) => ({ currency, raw: balances[currency] })).filter(
     // USDC (the hub currency) always shows so the menu never looks empty;
@@ -123,17 +134,35 @@ function WalletMenu({ address }: { address: `0x${string}` }) {
           </button>
 
           <div className="p-3 border-b border-border space-y-2.5">
-            {held.map(({ currency, raw }) => (
-              <div key={currency} className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <TokenIcon currency={currency} px={18} />
-                  <span className="text-scale-1 text-ink-dim font-mono">{currency}</span>
+            {held.map(({ currency, raw }) => {
+              // USDC is the one token that is spendable across chains, so it is
+              // the one token whose row is not simply the Arc balance. Every
+              // other settle currency exists on Arc only.
+              const isUsdc = currency === "USDC";
+              const value = isUsdc
+                ? usdcDisplay(spendable.minor)
+                : settled || raw !== undefined
+                  ? formatBalance(raw ?? 0n, CURRENCIES[currency].decimals)
+                  : "—";
+              return (
+                <div key={currency}>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <TokenIcon currency={currency} px={18} />
+                      <span className="text-scale-1 text-ink-dim font-mono">{currency}</span>
+                    </div>
+                    <span className="text-scale-2 font-mono text-ink">{value}</span>
+                  </div>
+                  {isUsdc && spendable.via === "chains" && spendable.chains.length > 0 && (
+                    <p className="text-scale-1 font-mono text-ink-dim mt-0.5 pl-[26px]">
+                      {spendable.chains.length === 1
+                        ? `on ${chainLabel(spendable.chains[0].chain)}`
+                        : `across ${spendable.chains.map((c) => chainLabel(c.chain)).join(" · ")}`}
+                    </p>
+                  )}
                 </div>
-                <span className="text-scale-2 font-mono text-ink">
-                  {settled || raw !== undefined ? formatBalance(raw ?? 0n, CURRENCIES[currency].decimals) : "—"}
-                </span>
-              </div>
-            ))}
+              );
+            })}
           </div>
           <button
             onClick={() => { signOut(); setOpen(false); }}

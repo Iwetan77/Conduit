@@ -177,6 +177,30 @@ export function usePayerUsdc({
   return state;
 }
 
+/**
+ * The largest USDC payment this wallet can actually make, and how.
+ *
+ * Not a sum. Arc and the Gateway source chains are two routes that cannot
+ * combine into one payment: a balance already on Arc settles directly in one
+ * transaction, while balances on the source chains pool inside Circle Gateway
+ * and bridge in. Arc is the DESTINATION domain, so it cannot be deposited into
+ * the pool alongside them.
+ *
+ * So the spendable figure is the larger of the two, and that is exactly the
+ * ceiling routeForAmount enforces -- it tries Arc first, then the pool. Adding
+ * them would print a number nothing can spend: 12 on Arc plus 20 on Polygon
+ * plus 20 on Base is not 52 of spending power, it is 40, because the 12 can
+ * never join the other two.
+ */
+export function spendableUsdc(
+  arcMinor: bigint,
+  usdc: PayerUsdc,
+): { minor: bigint; via: "arc" | "chains"; chains: Array<{ chain: string; minor: bigint }> } {
+  return arcMinor > usdc.spendableMinor
+    ? { minor: arcMinor, via: "arc", chains: [] }
+    : { minor: usdc.spendableMinor, via: "chains", chains: usdc.funded };
+}
+
 export type PayerRoute =
   | { kind: "arc" }
   | {

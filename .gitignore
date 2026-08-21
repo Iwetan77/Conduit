@@ -71,3 +71,6 @@ whereistopped.md
 
 # Patch files from local review and rebase work.
 *.patch
+
+# Working log for the in-flight audit. Local only.
+PROGRESS.md

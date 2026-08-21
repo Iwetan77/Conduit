@@ -922,13 +922,44 @@ export async function spendUsdcToArc(params: {
   // unfunded fee, fixed above by depositing to `target`.
   say("Approve the payment in your wallet…");
   let result: { txHash: string; transferId?: string; explorerUrl?: string };
+  // Watch the SDK's own HTTP attempts for the duration of this spend. The SDK
+  // retries the /v1/transfer POST with byte-identical signed bytes when Circle
+  // answers slower than its 2s default timeout, which is what produces the
+  // "Transfer spec has already been used" 400 on a transfer Circle already
+  // accepted. We cannot reach that retry policy to turn it off, so we record it.
+  const { traceGatewayCalls, gatewayTrace, noteSpendCall, resetGatewayTrace } = await import(
+    "@/lib/gateway-trace"
+  );
+  resetGatewayTrace();
+  const untrace = traceGatewayCalls();
   try {
+    noteSpendCall();
     result = (await spend(ctx as never, spendParams as never)) as {
       txHash: string;
       transferId?: string;
       explorerUrl?: string;
     };
   } catch (e) {
+    // Verbatim, BEFORE any classification. Every decision below this line is a
+    // statement about whether the payer's money has moved, and each one has been
+    // wrong at least once because it was made by matching prose. The raw error,
+    // its cause, its status and the HTTP attempts behind it are what settle that.
+    const trace = gatewayTrace();
+    console.error("gateway spend failed", {
+      raw: e instanceof Error ? e.message : String(e),
+      name: (e as Error)?.name,
+      stack: (e as Error)?.stack,
+      cause: (e as { cause?: unknown })?.cause,
+      status: (e as { status?: number })?.status,
+      response: (e as { response?: unknown })?.response,
+      spendCalls: trace.spendCalls,
+      transferPosts: trace.posts.length,
+      // Identical hashes across attempts is a literal replay of one signed spec.
+      bodyHashes: trace.posts.map((p) => p.bodySha256),
+      salts: trace.posts.map((p) => p.salts),
+      statuses: trace.posts.map((p) => p.status ?? p.error),
+      trace: trace.posts,
+    });
     // Same truth at the last step. The deposit is done by now, so a failed
     // burn intent leaves funded Gateway balance, not an untouched wallet.
     const raw = e instanceof Error ? e.message : "The payment could not be authorised.";
@@ -945,6 +976,9 @@ export async function spendUsdcToArc(params: {
     throw new FundsInGatewayError(
       raw + " Your USDC is in Circle Gateway and will not be deposited again — press Pay to retry."
     );
+  } finally {
+    // Never leave window.fetch patched, on any path.
+    untrace();
   }
 
   return {

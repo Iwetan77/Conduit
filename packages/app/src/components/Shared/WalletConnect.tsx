@@ -284,6 +284,46 @@ export function WalletConnect() {
   const [picking, setPicking] = useState(false);
 
   useEffect(() => { setMounted(true); }, []);
+
+  // Every wallet this browser actually offers, by name.
+  //
+  // ABOVE every early return, and it must stay there. This is a HOOK, and the
+  // four guards below return on the FIRST render -- before `mounted` flips and
+  // before the wallet gate settles -- so sitting underneath them meant it ran
+  // on some renders and not others. React counts hooks between renders and a
+  // change in that count is fatal: "Rendered more hooks than during the
+  // previous render" (#310). This component is in the nav, so that took down
+  // every page in the app.
+  //
+  // It replaced `connectors.find(...)`, a plain call that could live anywhere,
+  // and inherited that position without inheriting the constraint.
+  //
+  // What it does: wagmi discovers installed extensions via EIP-6963 and exposes
+  // each as its own connector with its own name and icon, so MetaMask, Rabby,
+  // Coinbase and the rest were all present in `connectors` and all discarded in
+  // favour of one anonymous "Browser wallet" row. Someone with two EVM wallets
+  // could not choose between them; someone with one could not tell it was
+  // theirs.
+  //
+  // Deduped by id: discovery can surface the same extension twice, once as
+  // itself and once as the generic `injected`, and a list with MetaMask in it
+  // twice is worse than useless when the point is telling wallets apart. The
+  // generic entry is dropped whenever a named one exists, since "Browser
+  // wallet" is only a useful label when it is all we know.
+  const evmConnectors = useMemo(() => {
+    const seen = new Set<string>();
+    const all = connectors.filter((c) => {
+      // Google sign-in has its own button beside this one.
+      if (c.id === CIRCLE_CONNECTOR_ID) return false;
+      if (seen.has(c.id)) return false;
+      seen.add(c.id);
+      return true;
+    });
+    const named = all.filter((c) => c.id !== "injected");
+    return named.length > 0 ? named : all;
+  }, [connectors]);
+  const injected = evmConnectors[0];
+
   if (!mounted) return null;
 
   // A connected Solana wallet is the answer to "who is paying", so it is shown
@@ -311,34 +351,6 @@ export function WalletConnect() {
     );
   }
 
-  // Every wallet this browser actually offers, by name.
-  //
-  // This used to be a single `connectors.find(id === "injected")`, rendered as
-  // one row reading "Browser wallet". wagmi v2 discovers installed extensions
-  // via EIP-6963 and exposes each as its own connector with its own name and
-  // icon -- so MetaMask, Rabby, Coinbase and the rest were all present in
-  // `connectors` and all being discarded in favour of one anonymous entry.
-  // Someone with two EVM wallets could not choose, and someone with one could
-  // not tell it was theirs.
-  //
-  // Deduped by id: discovery can surface the same extension twice, once as
-  // itself and once as the generic `injected`, and a list with MetaMask in it
-  // twice is worse than useless when the point of the list is telling wallets
-  // apart. The generic entry is dropped whenever a named one exists, since
-  // "Browser wallet" is only a useful label when it is the only thing we know.
-  const evmConnectors = useMemo(() => {
-    const seen = new Set<string>();
-    const all = connectors.filter((c) => {
-      // Google sign-in has its own button beside this one.
-      if (c.id === CIRCLE_CONNECTOR_ID) return false;
-      if (seen.has(c.id)) return false;
-      seen.add(c.id);
-      return true;
-    });
-    const named = all.filter((c) => c.id !== "injected");
-    return named.length > 0 ? named : all;
-  }, [connectors]);
-  const injected = evmConnectors[0];
 
   return (
     <div className="flex flex-col items-center gap-2">

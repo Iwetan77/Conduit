@@ -110,6 +110,37 @@ export function PaymentLinkPay({ linkId }: PaymentLinkPayProps) {
     return () => { cancelled = true; };
   }, [linkId]);
 
+  // Which chain has to pay, if not Arc. Arc counts only for an EVM wallet: a
+  // Solana wallet cannot sign on Arc, so an Arc balance is not spendable by it.
+  //
+  // ABOVE the early returns, and it has to stay there. This is a HOOK, and the
+  // four `return`s below it are reached on the first render while the link is
+  // still loading -- so calling it further down meant React saw the hook on
+  // some renders and not others and threw "rendered more hooks than during the
+  // previous render", taking every payment link page down. It replaced a plain
+  // calculation, which could sit anywhere, and I moved it without moving it far
+  // enough. The inputs are derived defensively here precisely so it can live
+  // above the guards.
+  //
+  // What it fixes: this used to compute the route straight from routeForAmount,
+  // which during the balance read is handed an empty balance set and answers
+  // "insufficient" -- a real-looking answer that hid the button. The "Pay from
+  // Base" control then popped into existence under a Pay panel the payer was
+  // already reading. `resolving` is now its own state.
+  const linkDecimals = link ? currencyDecimals(isoToToken(link.settle_currency)) : 6;
+  const pendingAmountRaw = link
+    ? link.amount_mode === "fixed" && link.amount
+      ? BigInt(link.amount)
+      : BigInt(amount ? toMinorUnits(amount, linkDecimals) : "0")
+    : 0n;
+  const arcUsdc = identity?.kind === "evm" ? (arcBalances.balances.USDC ?? 0n) : 0n;
+  const decision = useRouteDecision(
+    pendingAmountRaw > 0n ? pendingAmountRaw : undefined,
+    arcUsdc,
+    sourceUsdc,
+    arcBalances.settled,
+  );
+
   if (error) {
     return (
       <div className="text-center py-16 space-y-3">
@@ -157,23 +188,6 @@ export function PaymentLinkPay({ linkId }: PaymentLinkPayProps) {
   const enteredMinor = amount ? toMinorUnits(amount, decimals) : "0";
   const amountRaw = isFixed && link.amount ? BigInt(link.amount) : BigInt(enteredMinor);
 
-  // Which chain has to pay, if not Arc. Arc counts only for an EVM wallet: a
-  // Solana wallet cannot sign on Arc, so an Arc balance is not spendable by it.
-  //
-  // Same omission as the settlement-intent surface had: this computed its route
-  // straight from routeForAmount, which during the balance read is handed an
-  // empty balance set and answers "insufficient" -- a real-looking answer that
-  // hid the button. The "Pay from Base" control then popped into existence
-  // under a Pay panel the payer was already reading. `resolving` is now its own
-  // state and renders a placeholder of the button's size instead.
-  const arcUsdc =
-    identity?.kind === "evm" ? (arcBalances.balances.USDC ?? 0n) : 0n;
-  const decision = useRouteDecision(
-    amountRaw > 0n ? amountRaw : undefined,
-    arcUsdc,
-    sourceUsdc,
-    arcBalances.settled,
-  );
   // Every chain the payment draws from, not just the first. A payment can pool
   // across chains, so naming one would misdescribe it.
   const crossChain =

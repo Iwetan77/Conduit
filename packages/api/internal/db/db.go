@@ -19,13 +19,26 @@ func Connect(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
 	if err != nil {
 		return nil, fmt.Errorf("db: parse config: %w", err)
 	}
-	// Tuned for a serverless Postgres that bills for compute uptime (Neon
-	// scales to zero after ~5 minutes idle, and the free plan is capped at
-	// 100 CU-hours/month -- exceeding it suspends the database until the
-	// next billing month). pgx's 30-minute default idle time would hold a
-	// connection open long past that window and keep compute billing, so
-	// idle connections are dropped well inside it. MinConns stays 0 so an
-	// idle API holds nothing open at all.
+	// Tuned for a serverless Postgres that bills for compute UPTIME rather than
+	// for queries. Such a database suspends after a few minutes with no
+	// connections, and pgx's 30-minute default idle time would hold one open
+	// long past that window -- so an API doing nothing at all would keep the
+	// compute awake and billing around the clock. Idle connections are dropped
+	// well inside the suspend window, and MinConns stays 0 so an idle API holds
+	// nothing open.
+	//
+	// This is not free: every first request after an idle period pays for the
+	// database to wake, a few hundred milliseconds. That is the right trade
+	// while uptime is the thing being billed. On a host that does NOT bill for
+	// uptime (a fixed-size instance, or Supabase's free tier), raise MinConns to
+	// 2 instead -- there the idle connection costs nothing and removes the wake
+	// from the first request.
+	//
+	// CONNECTION STRING, if pointing this at Supabase: use the SESSION pooler
+	// (port 5432 on the pooler host). The transaction pooler on 6543 does not
+	// support prepared statements, which pgx uses by default, so the second
+	// query on a connection fails with "prepared statement already exists". The
+	// direct host is IPv6-only and may be unreachable from the API host.
 	cfg.MaxConnIdleTime = 3 * time.Minute
 	cfg.MaxConnLifetime = 30 * time.Minute
 	cfg.HealthCheckPeriod = 1 * time.Minute

@@ -1,8 +1,9 @@
 "use client";
 
+import { useMyAccount } from "@/lib/queries";
 import { useEffect, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
-import { createPaymentLink, getMyAccount, type PaymentLink, type AmountMode, type ReusePolicy, ConduitApiError } from "@/lib/conduit-api";
+import { createPaymentLink, type PaymentLink, type AmountMode, type ReusePolicy, ConduitApiError } from "@/lib/conduit-api";
 import { SETTLE_CURRENCIES as CURRENCIES, isoToToken, settleCurrencyLabel } from "@/lib/currencies";
 import { currencyDecimals } from "@conduit/sdk/lite";
 import { shortenAddress } from "@/lib/format";
@@ -45,21 +46,18 @@ export default function RequestPaymentPage() {
   // account's settle currency) rather than an empty field they must paste an
   // address into every time. They can still send a link's proceeds elsewhere
   // via "Use a different address".
+  // The fourth page fetching the same account, concurrently with the sidebar.
+  // Shared key now, so the whole dashboard makes one request for it.
+  //
+  // A failure stays non-fatal: the field remains editable and required, exactly
+  // as before.
+  const { data: myAccount } = useMyAccount();
   useEffect(() => {
-    let cancelled = false;
-    getMyAccount()
-      .then((acct) => {
-        if (cancelled) return;
-        if (acct.settle_address) {
-          setAccountAddress(acct.settle_address);
-          setSettleAddress((cur) => cur || acct.settle_address);
-        }
-      })
-      .catch(() => {
-        // Non-fatal: the field stays editable and required, same as before.
-      });
-    return () => { cancelled = true; };
-  }, []);
+    const addr = myAccount?.settle_address;
+    if (!addr) return;
+    setAccountAddress(addr);
+    setSettleAddress((cur) => cur || addr);
+  }, [myAccount?.settle_address]);
 
   const usingAccountAddress =
     !!accountAddress && settleAddress.toLowerCase() === accountAddress.toLowerCase();

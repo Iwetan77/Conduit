@@ -1,5 +1,7 @@
 "use client";
 
+import { useQueryClient } from "@tanstack/react-query";
+import { useApiKeys, useWebhookEndpoints, qk } from "@/lib/queries";
 import { useEffect, useState } from "react";
 import {
   listApiKeys, listWebhookEndpoints, createWebhookEndpoint, listWebhookDeliveries,
@@ -10,20 +12,16 @@ import { formatDate } from "@/lib/format";
 import { PageHeader } from "@/components/Dashboard/PageHeader";
 
 export default function DevelopersPage() {
-  const [keys, setKeys] = useState<ApiKeySummary[] | null>(null);
-  const [endpoints, setEndpoints] = useState<WebhookEndpoint[] | null>(null);
   const [newEndpointURL, setNewEndpointURL] = useState("");
   const [newSecret, setNewSecret] = useState("");
   const [selectedEndpoint, setSelectedEndpoint] = useState<string | null>(null);
   const [deliveries, setDeliveries] = useState<WebhookDelivery[] | null>(null);
   const [error, setError] = useState("");
 
-  const refresh = () => {
-    listApiKeys().then((r) => setKeys(r.data ?? [])).catch(() => {});
-    listWebhookEndpoints().then((r) => setEndpoints(r.data ?? [])).catch(() => {});
-  };
-
-  useEffect(refresh, []);
+  // Two cached reads instead of a refresh() threaded through every handler.
+  const qc = useQueryClient();
+  const { data: keys } = useApiKeys();
+  const { data: endpoints } = useWebhookEndpoints();
 
   const handleCreateEndpoint = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -35,7 +33,7 @@ export default function DevelopersPage() {
       });
       setNewSecret(ep.secret ?? "");
       setNewEndpointURL("");
-      refresh();
+      await qc.invalidateQueries({ queryKey: qk.webhookEndpoints });
     } catch (err) {
       setError(err instanceof ConduitApiError ? err.message : "Failed to create endpoint");
     }

@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useBalanceTransactions } from "@/lib/queries";
+import { useState } from "react";
 import { listBalanceTransactions, downloadBalanceTransactionsCsv, type BalanceTransaction, ConduitApiError } from "@/lib/conduit-api";
 import { formatDate, minorUnitsToNumber } from "@/lib/format";
 import { PageHeader } from "@/components/Dashboard/PageHeader";
@@ -14,15 +15,10 @@ function money(amount: string, currency: string): string {
 }
 
 export default function ReconciliationPage() {
-  const [transactions, setTransactions] = useState<BalanceTransaction[] | null>(null);
+  const { data: transactions, error: queryError } = useBalanceTransactions();
   const [downloading, setDownloading] = useState(false);
   const [error, setError] = useState("");
-
-  useEffect(() => {
-    listBalanceTransactions()
-      .then((r) => setTransactions(r.data ?? []))
-      .catch((err) => setError(err instanceof ConduitApiError ? err.message : "Failed to load"));
-  }, []);
+  const loadError = queryError ? "Failed to load balance transactions" : "";
 
   const handleDownload = async () => {
     setDownloading(true);
@@ -52,7 +48,7 @@ export default function ReconciliationPage() {
         }
       />
 
-      {error && <p className="text-danger text-sm mb-4">{error}</p>}
+      {(error || loadError) && <p className="text-danger text-sm mb-4">{error || loadError}</p>}
 
       <div className="border border-border overflow-x-auto">
         <table className="w-full text-sm">

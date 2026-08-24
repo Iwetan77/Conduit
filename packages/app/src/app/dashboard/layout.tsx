@@ -1,5 +1,6 @@
 "use client";
 
+import { useMyAccount } from "@/lib/queries";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -69,15 +70,17 @@ const NAV_GROUPS = [
 // more than one account had no way to tell which one they were about to create
 // a payment link under.
 function MerchantIdentity() {
-  const [name, setName] = useState<string>("");
-  useEffect(() => {
-    let cancelled = false;
-    import("@/lib/conduit-api")
-      .then(({ getMyAccount }) => getMyAccount())
-      .then((a) => { if (!cancelled) setName(a.name); })
-      .catch(() => {});
-    return () => { cancelled = true; };
-  }, []);
+  // Through the shared cache, not its own fetch.
+  //
+  // This mounted on EVERY dashboard page and refetched the account each time,
+  // so the merchant's own business name flickered to "Loading..." on every
+  // click. It also raced the identical call made by the page below it --
+  // /dashboard/settlements, /request-payment and /settings each fetched the
+  // same account concurrently with this one, and nothing deduped them. One key
+  // with a five minute staleTime collapses all of that into a single request
+  // for the session.
+  const { data: account } = useMyAccount();
+  const name = account?.name ?? "";
 
   return (
     <div className="flex items-center gap-2.5 border border-border bg-surface px-3 py-2.5 mb-6">
@@ -85,7 +88,11 @@ function MerchantIdentity() {
         {name ? name.charAt(0).toUpperCase() : " "}
       </div>
       <div className="min-w-0">
-        <p className="text-ink text-xs font-medium truncate">{name || "Loading..."}</p>
+        {/* A reserved line rather than the word "Loading...", which used to
+              appear on every navigation. */}
+          <p className="text-ink text-xs font-medium truncate">
+            {name || <span className="inline-block h-3 w-24 bg-border align-middle" aria-hidden />}
+          </p>
         <p className="text-ink-dim text-[10px] font-mono uppercase tracking-wider">Merchant</p>
       </div>
     </div>

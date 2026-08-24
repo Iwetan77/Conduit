@@ -1,5 +1,7 @@
 "use client";
 
+import { useQueryClient } from "@tanstack/react-query";
+import { useSubAccounts, qk } from "@/lib/queries";
 import { useEffect, useRef, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import {
@@ -173,7 +175,6 @@ function StorefrontKey({ accountId }: { accountId: string }) {
 }
 
 export default function LocationsPage() {
-  const [accounts, setAccounts] = useState<Account[] | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [name, setName] = useState("");
   const [settleCurrency, setSettleCurrency] = useState("EUR");
@@ -182,8 +183,8 @@ export default function LocationsPage() {
   const [error, setError] = useState("");
   const [newKey, setNewKey] = useState<{ name: string; key: string } | null>(null);
 
-  const refresh = () => { listAccounts().then((r) => setAccounts(r.data ?? [])).catch(() => {}); };
-  useEffect(refresh, []);
+  const qc = useQueryClient();
+  const { data: accounts } = useSubAccounts();
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -199,7 +200,7 @@ export default function LocationsPage() {
       setShowForm(false);
       setName("");
       setSettleAddress("");
-      refresh();
+      await qc.invalidateQueries({ queryKey: qk.subAccounts });
     } catch (err) {
       setError(err instanceof ConduitApiError ? err.message : "Failed to create storefront");
     } finally {
@@ -272,7 +273,7 @@ export default function LocationsPage() {
         </div>
       )}
 
-      {accounts === null && <p className="text-ink-dim text-sm">Loading...</p>}
+      {accounts === undefined && <p className="text-ink-dim text-sm">Loading...</p>}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         {accounts?.map((a) => (

@@ -1,10 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { useMyAccount, qk } from "@/lib/queries";
+import { useEffect, useRef, useState } from "react";
 import { useAccount } from "wagmi";
 import { WalletConnect } from "@/components/Shared/WalletConnect";
 import { CURRENCIES } from "@conduit/sdk/lite";
-import { getMyAccount, updateAccount, type Account, ConduitApiError } from "@/lib/conduit-api";
+import { updateAccount, type Account, ConduitApiError } from "@/lib/conduit-api";
 import { SETTLE_CURRENCIES, settleCurrencyLabel } from "@/lib/currencies";
 import { PageHeader } from "@/components/Dashboard/PageHeader";
 
@@ -20,17 +22,25 @@ function BusinessIdentity() {
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
 
+  // Read through the shared cache -- this was the third page fetching the same
+  // account, concurrently with the sidebar. The form still keeps its own draft
+  // state, seeded once when the account arrives: a controlled input bound
+  // directly to server data fights the person typing into it.
+  const qc = useQueryClient();
+  const { data: fetchedAccount, error: accountError } = useMyAccount();
+  const seeded = useRef(false);
   useEffect(() => {
-    getMyAccount()
-      .then((a) => {
-        setAccount(a);
-        setName(a.name);
-        setLogoUrl(a.logo_url ?? "");
-        setSettleCurrency(a.settle_currency);
-        setSettleAddress(a.settle_address);
-      })
-      .catch((err) => setError(err instanceof ConduitApiError ? err.message : "Failed to load account"));
-  }, []);
+    if (!fetchedAccount || seeded.current) return;
+    seeded.current = true;
+    setAccount(fetchedAccount);
+    setName(fetchedAccount.name);
+    setLogoUrl(fetchedAccount.logo_url ?? "");
+    setSettleCurrency(fetchedAccount.settle_currency);
+    setSettleAddress(fetchedAccount.settle_address);
+  }, [fetchedAccount]);
+  useEffect(() => {
+    if (accountError) setError("Failed to load account");
+  }, [accountError]);
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -46,6 +56,11 @@ function BusinessIdentity() {
         settle_address: settleAddress,
       });
       setAccount(updated);
+      // The sidebar shows this account's name and other pages read its settle
+      // currency, all from the same cached key -- so a save that did not
+      // invalidate it left the rest of the dashboard showing the old values for
+      // the next five minutes.
+      await qc.invalidateQueries({ queryKey: qk.myAccount });
       setStatus("Saved.");
     } catch (err) {
       setError(err instanceof ConduitApiError ? err.message : "Failed to save");

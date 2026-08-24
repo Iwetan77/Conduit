@@ -42,6 +42,14 @@ export function ScanToPay({ onAddress }: ScanToPayProps = {}) {
   const [open, setOpen] = useState(false);
   const [error, setError] = useState("");
   const [unrecognized, setUnrecognized] = useState("");
+  // A successful scan looked like a crash.
+  //
+  // stop() halts the render loop, which leaves the last decoded frame frozen on
+  // screen while the client navigation resolves -- so the payer's experience of
+  // a scan that WORKED was a camera that appeared to hang, followed by a new
+  // page. The freeze is unavoidable (the loop has to stop), so it is made
+  // deliberate instead: confirm the read, hold it briefly, then navigate.
+  const [scanned, setScanned] = useState(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const rafRef = useRef<number>(0);
@@ -95,12 +103,18 @@ export function ScanToPay({ onAddress }: ScanToPayProps = {}) {
           const result = resolveScan(code.data);
           if (result?.kind === "pay-link") {
             stop();
-            router.push(result.path);
+            setScanned(true);
+            // Long enough to read as confirmation, short enough not to feel
+            // like a wait. Prefetched first so the hold is spent on the
+            // navigation rather than in front of it.
+            router.prefetch?.(result.path);
+            setTimeout(() => router.push(result.path), 400);
             return;
           }
           if (result?.kind === "address" && onAddress) {
             stop();
-            onAddress(result.address);
+            setScanned(true);
+            setTimeout(() => onAddress(result.address), 400);
             return;
           }
           setUnrecognized(code.data);
@@ -198,6 +212,16 @@ export function ScanToPay({ onAddress }: ScanToPayProps = {}) {
                   <div className="absolute bottom-0 left-0 w-6 h-6 border-b-2 border-l-2 border-signal" />
                   <div className="absolute bottom-0 right-0 w-6 h-6 border-b-2 border-r-2 border-signal" />
                 </div>
+                {/* The frozen frame, claimed. Without this the halted camera
+                    reads as a failure at the exact moment the thing succeeded. */}
+                {scanned && (
+                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-bg/80">
+                    <div className="w-10 h-10 border-2 border-signal flex items-center justify-center">
+                      <span className="text-signal text-xl leading-none">✓</span>
+                    </div>
+                    <p className="font-mono text-scale-2 text-signal">Code read</p>
+                  </div>
+                )}
               </div>
             )}
 

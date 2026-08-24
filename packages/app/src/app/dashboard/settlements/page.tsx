@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { listSettlements, getMyAccount, type Settlement, ConduitApiError } from "@/lib/conduit-api";
+import { type Settlement } from "@/lib/conduit-api";
+import { useMyAccount, useSettlements } from "@/lib/queries";
 import { formatDate, shortenAddress, formatMinorUnits, tokenLabel } from "@/lib/format";
 import { PageHeader } from "@/components/Dashboard/PageHeader";
 import { useSettledTotal, type CurrencyTotal } from "@/lib/use-settled-total";
@@ -9,16 +10,14 @@ import { useSettledTotal, type CurrencyTotal } from "@/lib/use-settled-total";
 const EXPLORER = process.env.NEXT_PUBLIC_EXPLORER ?? "https://testnet.arcscan.app";
 
 export default function SettlementsPage() {
-  const [settlements, setSettlements] = useState<Settlement[] | null>(null);
-  const [error, setError] = useState("");
+  // Cached and shared. This was a raw fetch on mount, so leaving the page and
+  // coming back re-fetched rows that were seconds old and blanked the table to
+  // a spinner while it did. keepPreviousData means the rows you were just
+  // looking at stay on screen and update in place.
+  const { data: settlements, error: queryError } = useSettlements();
+  const error = queryError ? "Failed to load settlements" : "";
   const [currencyFilter, setCurrencyFilter] = useState<string>("all");
   const [search, setSearch] = useState("");
-
-  useEffect(() => {
-    listSettlements()
-      .then((res) => setSettlements(res.data ?? []))
-      .catch((err) => setError(err instanceof ConduitApiError ? err.message : "Failed to load settlements"));
-  }, []);
 
   const currencies = useMemo(() => {
     const set = new Set((settlements ?? []).map((s) => s.settle_currency));
@@ -52,10 +51,11 @@ export default function SettlementsPage() {
   // currency, chosen in Settings. Filtering to a single currency answers a
   // different question ("how much of THIS did I take"), so that view reports
   // that currency exactly, with no conversion.
-  const [settleCurrency, setSettleCurrency] = useState<string | undefined>();
-  useEffect(() => {
-    getMyAccount().then((a) => setSettleCurrency(a.settle_currency)).catch(() => {});
-  }, []);
+  // The SECOND concurrent getMyAccount on this page -- the sidebar in the layout
+  // above was fetching the same account at the same moment. Same cache key now,
+  // so the two share one request.
+  const { data: account } = useMyAccount();
+  const settleCurrency = account?.settle_currency;
 
   const displayCurrency = currencyFilter === "all" ? settleCurrency : currencyFilter;
   const total = useSettledTotal(perCurrency, displayCurrency);

@@ -1,6 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { usePaymentLinks, qk } from "@/lib/queries";
+import { useState } from "react";
 import { listPaymentLinks, voidPaymentLink, type PaymentLink, ConduitApiError } from "@/lib/conduit-api";
 import { formatDate, formatMinorUnits } from "@/lib/format";
 import { useCopy } from "@/lib/use-copy";
@@ -25,26 +27,25 @@ const STATUS_STYLE: Record<string, string> = {
 };
 
 export default function LinksPage() {
-  const [links, setLinks] = useState<PaymentLink[] | null>(null);
-  const [error, setError] = useState("");
+  const { data: links, error: queryError } = usePaymentLinks();
+  const [voidError, setVoidError] = useState("");
+  const error = voidError || (queryError ? "Failed to load payment links" : "");
   const [voidingID, setVoidingID] = useState<string | null>(null);
   const { copied, copy } = useCopy();
 
-  const load = () => {
-    listPaymentLinks()
-      .then((res) => setLinks(res.data ?? []))
-      .catch((err) => setError(err instanceof ConduitApiError ? err.message : "Failed to load payment links"));
-  };
-
-  useEffect(load, []);
-
+  // The ad-hoc load() this replaces went stale in the usual way: it was the only
+  // thing that refreshed the table, so anything that changed a link elsewhere
+  // left this screen quietly disagreeing with the server. Naming the cache the
+  // write affects cannot be forgotten in the same way.
+  const qc = useQueryClient();
   const handleVoid = async (id: string) => {
     setVoidingID(id);
+    setVoidError("");
     try {
       await voidPaymentLink(id);
-      load();
+      await qc.invalidateQueries({ queryKey: qk.paymentLinks });
     } catch (err) {
-      setError(err instanceof ConduitApiError ? err.message : "Failed to void link");
+      setVoidError(err instanceof ConduitApiError ? err.message : "Failed to void link");
     } finally {
       setVoidingID(null);
     }
@@ -55,15 +56,15 @@ export default function LinksPage() {
       <PageHeader title="Links & invoices" description="Payment links you've sent, and what's happened to each one." />
 
       {error && <p className="text-danger text-sm mb-4">{error}</p>}
-      {links === null && !error && <p className="text-ink-dim text-sm">Loading...</p>}
+      {links === undefined && !error && <p className="text-ink-dim text-sm">Loading...</p>}
 
-      {links !== null && links.length === 0 && (
+      {links && links.length === 0 && (
         <div className="border border-border p-8 text-center text-ink-dim text-sm">
           No payment links yet. Create one from "Request payment".
         </div>
       )}
 
-      {links !== null && links.length > 0 && (
+      {links && links.length > 0 && (
         <div className="border border-border overflow-x-auto">
           <table className="w-full text-sm">
             <thead>

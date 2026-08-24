@@ -21,9 +21,28 @@ interface PayerCurrencyPickerProps {
   value: Currency;
   onChange: (currency: Currency) => void;
   onBalancesChange?: (balances: BalanceMap) => void;
+  /**
+   * The payer's USDC spendable ACROSS chains, when it exceeds their Arc balance.
+   *
+   * This picker reads Arc balances, which is right for every settle currency
+   * except one. USDC also exists on the Gateway source chains, pooled behind a
+   * single signature, and a payment can draw on that pool -- so a payer holding
+   * 12 on Arc and 40 across Polygon and Base can spend 40, not 12. Showing the
+   * Arc figure alone understated what they had and, worse, dropped USDC out of
+   * the list entirely for anyone holding none on Arc.
+   *
+   * Only USDC. Gateway moves USDC and nothing else, so EURC and the rest are
+   * correctly Arc-only.
+   */
+  usdcSpendableMinor?: bigint;
 }
 
-export function PayerCurrencyPicker({ value, onChange, onBalancesChange }: PayerCurrencyPickerProps) {
+export function PayerCurrencyPicker({
+  value,
+  onChange,
+  onBalancesChange,
+  usdcSpendableMinor,
+}: PayerCurrencyPickerProps) {
   const { address, isConnected } = useAccount();
 
   // Hydration guard: wagmi's connection state differs between the server
@@ -34,9 +53,25 @@ export function PayerCurrencyPicker({ value, onChange, onBalancesChange }: Payer
 
   const { balances, settled } = useBalances(address, isConnected);
 
-  const held = (Object.entries(balances) as [Currency, bigint][])
-    .filter(([, b]) => b > 0n)
-    .map(([currency, balance]) => ({ currency, balance }))
+  // What each currency is actually worth to this payment.
+  //
+  // Arc balance for everything, except USDC where the cross-chain pool is
+  // larger -- see usdcSpendableMinor. Applied BEFORE the `> 0` filter on
+  // purpose: a payer with nothing on Arc but 40 on Base holds a spendable USDC
+  // balance, and filtering on the Arc figure removed USDC from the picker
+  // altogether, leaving them unable to select the one currency they could pay
+  // with.
+  const spendableOf = (currency: Currency, arcBalance: bigint) =>
+    currency === "USDC" && usdcSpendableMinor !== undefined && usdcSpendableMinor > arcBalance
+      ? usdcSpendableMinor
+      : arcBalance;
+
+  const allCurrencies = new Set<Currency>(Object.keys(balances) as Currency[]);
+  if (usdcSpendableMinor !== undefined && usdcSpendableMinor > 0n) allCurrencies.add("USDC");
+
+  const held = [...allCurrencies]
+    .map((currency) => ({ currency, balance: spendableOf(currency, balances[currency] ?? 0n) }))
+    .filter(({ balance }) => balance > 0n)
     .sort((a, b) => (b.balance > a.balance ? 1 : b.balance < a.balance ? -1 : 0));
 
   // A payer choosing what to pay with couldn't see how much they actually
@@ -56,6 +91,9 @@ export function PayerCurrencyPicker({ value, onChange, onBalancesChange }: Payer
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [heldKey]);
   useEffect(() => {
+    // Raw ARC balances, deliberately. The caller uses this to decide whether the
+    // payment can settle directly on Arc, and folding the cross-chain pool in
+    // here would tell it Arc holds money it does not.
     onBalancesChange?.(balances);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [heldKey, settled]);

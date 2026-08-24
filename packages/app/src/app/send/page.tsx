@@ -7,7 +7,7 @@ import { useState, useEffect } from "react";
 import { useAccount } from "wagmi";
 import { usePayerIdentity } from "@/lib/use-payer-identity";
 import { usePayerUsdc, useRouteDecision, spendableUsdc } from "@/lib/use-payer-usdc";
-import { chainLabel, usdcDisplay } from "@/lib/unified-balance";
+import { chainLabel } from "@/lib/unified-balance";
 import { isAddress } from "viem";
 import { Nav, MobileNav } from "@/components/Shared/Nav";
 import { AddressInput } from "@/components/SendFlow/AddressInput";
@@ -128,9 +128,6 @@ export default function SendPage() {
   // quote for cross-currency, 1:1 for same), checked against their real
   // balance BEFORE the confirm step so nobody walks into a revert.
   const required = useRequiredPayerAmount(payerCurrency, recipientCurrency, amount);
-  const payerBalance = payerBalances[payerCurrency];
-  const insufficient =
-    required.data !== undefined && payerBalance !== undefined && payerBalance < required.data;
 
   // Which route can actually settle this, decided from where the money is
   // rather than from which network the wallet happens to be pointed at.
@@ -158,6 +155,21 @@ export default function SendPage() {
   // The most this wallet can pay, and by which route. Arc and the Gateway pool
   // cannot combine, so this is a max, never a sum -- see spendableUsdc.
   const spendable = spendableUsdc(arcUsdc, sourceUsdc);
+
+  // Sufficiency, against what the payer can ACTUALLY spend.
+  //
+  // This compared the amount against the Arc balance alone, for every currency.
+  // For USDC that is wrong and was visibly wrong: a payer holding 12 on Arc and
+  // 40 across Polygon and Base was refused anything over 12, while the page sat
+  // there telling them they had 40. Gateway pools USDC across chains behind one
+  // signature, so the ceiling is the larger of the two routes.
+  //
+  // USDC only. Gateway moves USDC and nothing else, so EURC and every other
+  // settle currency remain correctly limited to what is on Arc.
+  const payerBalance =
+    payerCurrency === "USDC" ? spendable.minor : payerBalances[payerCurrency];
+  const insufficient =
+    required.data !== undefined && payerBalance !== undefined && payerBalance < required.data;
 
   // Cross-currency is a first-class send, not a merchant-only feature: it
   // settles through Circle StableFX against a settlement intent that /send
@@ -254,48 +266,13 @@ export default function SendPage() {
                     do I have the money, and where -- had no answer on screen.
                     Per chain, never summed: one payment draws from one chain,
                     so a total would promise something the rails cannot do. */}
-                {mounted && identity && (spendable.minor > 0n || sourceUsdc.loading) && (
-                  <div className="border border-border bg-surface px-3 py-2 space-y-1">
-                    <p className="text-scale-1 font-mono text-ink-dim uppercase tracking-wider">
-                      Your USDC
-                    </p>
-                    {sourceUsdc.loading && sourceUsdc.funded.length === 0 ? (
-                      <p className="text-scale-1 font-mono text-ink-dim">Reading your balances…</p>
-                    ) : (
-                      <>
-                        {/* One number: the most this wallet can actually pay.
-                            This printed "20 on Polygon  20 on Base" as separate
-                            balances, then briefly printed the pooled total with
-                            Arc bolted on underneath as "plus 12.04 already on
-                            Arc". Both were wrong in the same direction -- they
-                            made the payer do arithmetic that does not hold.
-                            spendableUsdc picks the larger of the two ROUTES,
-                            which is exactly the ceiling routeForAmount
-                            enforces, so this figure can never promise a payment
-                            that then gets refused. */}
-                        <p className="font-mono text-ink text-scale-3">
-                          {usdcDisplay(spendable.minor)}{" "}
-                          <span className="text-ink-dim text-scale-1">USDC</span>
-                        </p>
-                        {/* Where it is, not how it splits.
-                            The per-chain amounts moved into the wallet menu:
-                            this line answers "can I pay?" and the breakdown is
-                            one tap away for the payer who wants it. Printing
-                            "Polygon 20 · Base 20" here put the arithmetic back
-                            on the screen the number exists to replace. */}
-                        <p className="text-scale-1 font-mono text-ink-dim">
-                          {spendable.via === "arc"
-                            ? "on Arc — settles direct, no bridge"
-                            : spendable.chains.length === 1
-                              ? `on ${chainLabel(spendable.chains[0].chain)}`
-                              : `across ${spendable.chains
-                                  .map((c) => chainLabel(c.chain))
-                                  .join(", ")}`}
-                        </p>
-                      </>
-                    )}
-                  </div>
-                )}
+                {/* The "YOUR USDC — 40 across Polygon, Base" panel stood here.
+                    Removed as duplication: the wallet menu in the nav already
+                    shows the same figure with the same per-chain breakdown, and
+                    the Pay with control directly below states the spendable
+                    balance for the currency actually being sent. Three places
+                    telling a payer the same number is how they end up doubting
+                    all three. */}
 
                 {/* Balance-aware: only what this wallet actually holds on Arc.
                     Meaningless without a connected Arc wallet -- a payer whose
@@ -306,6 +283,9 @@ export default function SendPage() {
                     value={payerCurrency}
                     onChange={setPayerCurrency}
                     onBalancesChange={setPayerBalances}
+                    /* So the USDC row states what can actually be spent, and so
+                       USDC still appears for a payer holding none on Arc. */
+                    usdcSpendableMinor={identity?.kind === "evm" ? spendable.minor : undefined}
                   />
                 )}
 

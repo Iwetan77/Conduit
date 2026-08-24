@@ -5,6 +5,7 @@ import { useAccount } from "wagmi";
 import type { Currency } from "@conduit/sdk/lite";
 import { AmountInput } from "@/components/SendFlow/AmountInput";
 import { WalletConnect } from "@/components/Shared/WalletConnect";
+import { usePayerIdentity } from "@/lib/use-payer-identity";
 
 interface CreateFormProps {
   onSuccess: (declarationId: string, paymentUrl: string, amount: string, currency: Currency, label: string) => void;
@@ -12,6 +13,10 @@ interface CreateFormProps {
 
 export function CreateForm({ onSuccess }: CreateFormProps) {
   const { address, isConnected, connector } = useAccount();
+  // Who is connected, across BOTH wallet families. `isConnected` above is
+  // wagmi's answer, which knows only about EVM -- so a payer on a Solana wallet
+  // reads as "not connected" here even though the nav is showing their address.
+  const { identity, disconnect } = usePayerIdentity();
   const [createFlow, setCreateFlowState] = useState<{ amount: string; currency: Currency; label: string }>({
     amount: "",
     currency: "USDC",
@@ -64,11 +69,46 @@ export function CreateForm({ onSuccess }: CreateFormProps) {
     }
   };
 
-  if (!mounted || !isConnected) {
+  // Three states, not two.
+  //
+  // This gated on wagmi's `isConnected`, which is EVM-only, so a Solana wallet
+  // landed in the "not connected" branch -- showing "Connect your wallet to
+  // create a payment link" directly above a WalletConnect that rendered their
+  // connected Solana address. A dead end: the page asked for the one thing they
+  // had already done, and doing it again changed nothing.
+  //
+  // Solana genuinely cannot create a link, and the reason is real rather than a
+  // limitation of this form: a payment link is settled ON ARC, to the merchant's
+  // own address, and a Solana keypair cannot hold or sign for an Arc address.
+  // That is worth saying out loud instead of hiding behind a connect prompt.
+  if (!mounted || !identity) {
     return (
       <div className="text-center py-12 space-y-4">
         <p className="text-ink-dim">Connect your wallet to create a payment link.</p>
         <WalletConnect />
+      </div>
+    );
+  }
+
+  if (identity.kind === "solana" || !isConnected) {
+    return (
+      <div className="text-center py-12 space-y-4 max-w-sm mx-auto">
+        <p className="text-ink font-medium">Payment links settle on Arc</p>
+        <p className="text-ink-dim text-sm leading-relaxed">
+          A link pays out to your own address on Arc, so it has to be created from
+          a wallet that can hold one. Your Solana wallet can <em>pay</em> a link
+          from any chain — it just cannot be the one receiving.
+        </p>
+        <p className="text-ink-dim text-sm leading-relaxed">
+          Sign in with Google, or connect an EVM wallet, to create links.
+        </p>
+        <button
+          type="button"
+          onClick={() => void disconnect()}
+          className="text-scale-1 font-mono text-ink-dim hover:text-ink transition-colors"
+        >
+          Disconnect this wallet →
+        </button>
       </div>
     );
   }

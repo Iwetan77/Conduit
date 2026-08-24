@@ -1,5 +1,7 @@
 "use client";
 
+import { usePayerIdentity } from "@/lib/use-payer-identity";
+import { ArcOnlyNotice } from "@/components/Shared/ArcOnlyNotice";
 import { useHydrated } from "@/lib/use-hydrated";
 import { useEffect, useState } from "react";
 import { useAccount } from "wagmi";
@@ -23,6 +25,7 @@ export default function HistoryPage() {
   // if that half specifically failed.
   const [fxError, setFxError] = useState<string>("");
   const mounted = useHydrated();
+  const { identity } = usePayerIdentity();
 
   const load = async () => {
     if (!isConnected || !address) return;
@@ -91,11 +94,37 @@ export default function HistoryPage() {
           <p className="text-brand-muted text-sm mt-1">All settled payments from this wallet</p>
         </div>
 
-        {!mounted || !isConnected ? (
+        {!mounted || !identity ? (
           <div className="text-center py-16 space-y-4">
             <p className="text-brand-muted">Connect your wallet to see your history.</p>
             <WalletConnect />
           </div>
+        ) : identity.kind === "solana" || !isConnected ? (
+          /* This one is a genuine gap, not a limitation of the rails, and it is
+             described as such. Both halves of this page key on an Arc address:
+             the on-chain half reads Arc receipts for it, and the cross-currency
+             half proves ownership with an EVM signature. A bridged payment mints
+             at Conduit's relayer, and nothing recorded on our side ties it back
+             to the Solana address that funded it. Making this work needs the
+             payer's source address stored at spend time and a lookup that can
+             verify an ed25519 signature -- real work, not a display fix. */
+          <ArcOnlyNotice
+            title="History is tied to an Arc address"
+            body={
+              <>
+                <p>
+                  Your Solana payments do settle — they just aren&apos;t listed
+                  here yet. A bridged payment arrives on Arc from Conduit&apos;s
+                  relayer, so there is no Arc address of yours for this page to
+                  look up.
+                </p>
+                <p>
+                  The receipt shown when a payment completes, and its ArcScan
+                  link, remain the record until Solana history is built.
+                </p>
+              </>
+            }
+          />
         ) : (
           <>
             {error && (

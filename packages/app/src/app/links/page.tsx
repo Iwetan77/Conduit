@@ -1,5 +1,7 @@
 "use client";
 
+import { usePayerIdentity } from "@/lib/use-payer-identity";
+import { ArcOnlyNotice } from "@/components/Shared/ArcOnlyNotice";
 import { useHydrated } from "@/lib/use-hydrated";
 import { ARC_RPC_URL } from "@/lib/wagmi";
 
@@ -24,6 +26,7 @@ export default function LinksPage() {
   const [deactivating, setDeactivating] = useState<string | null>(null);
   const [selectedDecl, setSelectedDecl] = useState<PaymentDeclaration | null>(null);
   const { copied, copy } = useCopy();
+  const { identity } = usePayerIdentity();
   const mounted = useHydrated();
 
   const loadDeclarations = async () => {
@@ -105,11 +108,25 @@ export default function LinksPage() {
           </Link>
         </div>
 
-        {!mounted || !isConnected ? (
+        {!mounted || !identity ? (
           <div className="text-center py-16 space-y-4">
             <p className="text-ink-dim">Connect your wallet to see your links.</p>
             <WalletConnect />
           </div>
+        ) : identity.kind === "solana" || !isConnected ? (
+          <ArcOnlyNotice
+            title="Links are created and held on Arc"
+            body={
+              <>
+                <p>
+                  A payment link pays out to your own address on Arc, so it belongs
+                  to an Arc account. A Solana wallet has none, which is why there
+                  are no links here rather than none existing.
+                </p>
+                <p>Sign in with Google, or connect an EVM wallet, to see yours.</p>
+              </>
+            }
+          />
         ) : isLoading ? (
           <div className="space-y-3">
             {[...Array(3)].map((_, i) => (

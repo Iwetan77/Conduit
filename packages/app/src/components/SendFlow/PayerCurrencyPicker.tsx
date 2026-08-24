@@ -9,6 +9,7 @@
 // Balances come from the Conduit API's cached Multicall3 endpoint rather than
 // from this browser, so a hundred payers cost the RPC one read (see
 // lib/use-balances.ts).
+import { useHydrated } from "@/lib/use-hydrated";
 import { useEffect, useState } from "react";
 import { useAccount } from "wagmi";
 import type { Currency } from "@conduit/sdk/lite";
@@ -48,8 +49,7 @@ export function PayerCurrencyPicker({
   // Hydration guard: wagmi's connection state differs between the server
   // render (never connected) and the first client render (wallet
   // auto-reconnects), which threw a hydration mismatch here.
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => { setMounted(true); }, []);
+  const mounted = useHydrated();
 
   const { balances, settled } = useBalances(address, isConnected);
 

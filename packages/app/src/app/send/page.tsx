@@ -1,5 +1,6 @@
 "use client";
 
+import { useHydrated } from "@/lib/use-hydrated";
 import Link from "next/link";
 import dynamic from "next/dynamic";
 
@@ -54,7 +55,7 @@ type Step = "input" | "confirm";
 // scripted demo of this instead, so a first-time visitor sees how it works
 // without a wallet, and only lands here once they've chosen to pay.
 export default function SendPage() {
-  const [mounted, setMounted] = useState(false);
+  const mounted = useHydrated();
   const { isConnected } = useAccount();
   // Who is paying, across both wallet families. isConnected above is still
   // wagmi's answer for EVM specifically; identity is the answer for the page.
@@ -68,7 +69,6 @@ export default function SendPage() {
   });
   const [step, setStep] = useState<Step>("input");
 
-  useEffect(() => { setMounted(true); }, []);
 
   const [recipient, setRecipient] = useState("");
   const [amount, setAmount] = useState("");

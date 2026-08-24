@@ -1,5 +1,6 @@
 "use client";
 
+import { useHydrated } from "@/lib/use-hydrated";
 import { useState, useEffect } from "react";
 import { useAccount } from "wagmi";
 import type { Currency } from "@conduit/sdk/lite";
@@ -25,8 +26,7 @@ export function CreateForm({ onSuccess }: CreateFormProps) {
   const setCreateFlow = (patch: Partial<typeof createFlow>) => setCreateFlowState((s) => ({ ...s, ...patch }));
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string>("");
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => { setMounted(true); }, []);
+  const mounted = useHydrated();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

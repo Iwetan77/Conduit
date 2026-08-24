@@ -6,6 +6,7 @@
 // dashboard as 'Send', not on the public surface"). It was previously the
 // public app homepage — a pre-split consumer leftover.
 
+import { useHydrated } from "@/lib/use-hydrated";
 import { useState, useEffect } from "react";
 import { useAccount } from "wagmi";
 import { isAddress } from "viem";
@@ -22,11 +23,10 @@ import { PageHeader } from "@/components/Dashboard/PageHeader";
 type Step = "input" | "confirm";
 
 export default function SendPage() {
-  const [mounted, setMounted] = useState(false);
+  const mounted = useHydrated();
   const { isConnected } = useAccount();
   const [step, setStep] = useState<Step>("input");
 
-  useEffect(() => { setMounted(true); }, []);
 
   const [recipient, setRecipient] = useState("");
   const [amount, setAmount] = useState("");

@@ -89,6 +89,16 @@ export interface UsePayerIdentity {
   identity: PayerIdentity | null;
   /** Solana wallets detected in this browser. Empty until mounted. */
   solanaWallets: SolanaWalletOption[];
+  /**
+   * True once wallet discovery has finished.
+   *
+   * Extensions inject asynchronously, so the list below is scanned on mount and
+   * AGAIN shortly after. Anything that branches on `solanaWallets.length`
+   * therefore answers one way before that second scan and another way after --
+   * silently, with nothing on screen changing to warn the person about to
+   * click. Gate such a control on this instead.
+   */
+  walletsScanned: boolean;
   connectSolana: (choice?: SolanaWalletOption) => Promise<void>;
   /** Disconnects whichever family is connected. */
   disconnect: () => Promise<void>;
@@ -107,6 +117,7 @@ export function usePayerIdentity(): UsePayerIdentity {
   // detected (below) but must not silently displace an EVM connection.
   const pickedSolana = pickedSolanaGlobal;
   const [solanaWallets, setSolanaWallets] = useState<SolanaWalletOption[]>([]);
+  const [walletsScanned, setWalletsScanned] = useState(false);
   const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState("");
 
@@ -117,7 +128,17 @@ export function usePayerIdentity(): UsePayerIdentity {
   useEffect(() => {
     const scan = () => setSolanaWallets(listSolanaWallets());
     scan();
-    const t = setTimeout(scan, 800);
+    // The re-scan exists because extensions register themselves after the page
+    // has already rendered; the first pass genuinely cannot see them. What
+    // matters is that nothing ACTS on the result until this has run -- the
+    // Connect Wallet button chose between connecting directly and opening a
+    // picker based on this list, so the same button in the same place with the
+    // same label did two different things depending on whether it was clicked
+    // before or after this timer fired.
+    const t = setTimeout(() => {
+      scan();
+      setWalletsScanned(true);
+    }, 800);
     return () => clearTimeout(t);
   }, []);
 
@@ -210,5 +231,5 @@ export function usePayerIdentity(): UsePayerIdentity {
     };
   }
 
-  return { identity, solanaWallets, connectSolana, disconnect, connecting, error };
+  return { identity, solanaWallets, walletsScanned, connectSolana, disconnect, connecting, error };
 }

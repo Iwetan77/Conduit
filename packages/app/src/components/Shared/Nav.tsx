@@ -1,5 +1,6 @@
 "use client";
 
+import { useHydrated } from "@/lib/use-hydrated";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAccount, useDisconnect, useChainId, useSwitchChain } from "wagmi";
@@ -214,8 +215,7 @@ export function Nav({ minimal = false }: { minimal?: boolean } = {}) {
   const { address, isConnected } = useAccount();
   const chainId = useChainId();
   const { switchChain } = useSwitchChain();
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => { setMounted(true); }, []);
+  const mounted = useHydrated();
   const { walletSettled } = useWalletGate();
 
   const isWrongNetwork = mounted && walletSettled && isConnected && chainId !== arcTestnet.id;

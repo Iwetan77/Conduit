@@ -1,5 +1,6 @@
 "use client";
 
+import { useHydrated } from "@/lib/use-hydrated";
 import { ARC_RPC_URL, arcTestnet } from "@/lib/wagmi";
 
 import { useEffect, useRef, useState } from "react";
@@ -59,7 +60,7 @@ export function ArcSettlePanel({
 }: ArcSettlePanelProps) {
   const { address, isConnected, connector, chainId } = useAccount();
   const { switchChainAsync } = useSwitchChain();
-  const [mounted, setMounted] = useState(false);
+  const mounted = useHydrated();
   const [payerCurrency, setPayerCurrency] = useState<Currency>("USDC");
   const [step, setStep] = useState<"idle" | "pending" | "success" | "error">("idle");
   const [receipt, setReceipt] = useState<PaymentReceipt | null>(null);
@@ -74,7 +75,6 @@ export function ArcSettlePanel({
   // same one rather than minting a fresh intent / re-hitting the link's /pay.
   const intentIdRef = useRef<string | null>(null);
 
-  useEffect(() => { setMounted(true); }, []);
 
   const amountHuman = formatAmountRaw(amountRaw, currencyDecimals(settleToken));
 
@@ -169,7 +169,26 @@ export function ArcSettlePanel({
     }
   };
 
-  if (!mounted) return null;
+  // The amount a payer is being asked for must never be invisible.
+  //
+  // This was a bare null return on the hydration gate, which blanked the ENTIRE
+  // pay panel on
+  // the first paint of the checkout page -- the one screen in the product where
+  // someone is deciding whether to part with money. `children` is the amount box
+  // and the reference field: static, wallet-independent, and safe to render
+  // immediately. Only the parts that genuinely depend on a wallet wait, and they
+  // wait as boxes of the right size rather than as absence, so nothing moves
+  // when they arrive.
+  if (!mounted) {
+    return (
+      <div className="space-y-4" aria-busy="true">
+        {children}
+        <div className="h-[58px] border border-border bg-surface animate-pulse" aria-hidden />
+        <div className="h-[64px] border border-border bg-surface animate-pulse" aria-hidden />
+        <div className="h-[60px] bg-surface animate-pulse" aria-hidden />
+      </div>
+    );
+  }
 
   if (step === "success" && receipt) {
     return (

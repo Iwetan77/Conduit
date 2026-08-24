@@ -1,5 +1,6 @@
 "use client";
 
+import { useHydrated } from "@/lib/use-hydrated";
 import { useEffect, useState } from "react";
 import { useAccount } from "wagmi";
 import { Nav, MobileNav } from "@/components/Shared/Nav";
@@ -21,8 +22,7 @@ export default function HistoryPage() {
   // skipped or declined — the on-chain half still loads and this only shows
   // if that half specifically failed.
   const [fxError, setFxError] = useState<string>("");
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => { setMounted(true); }, []);
+  const mounted = useHydrated();
 
   const load = async () => {
     if (!isConnected || !address) return;

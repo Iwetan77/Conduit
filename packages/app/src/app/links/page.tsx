@@ -1,5 +1,6 @@
 "use client";
 
+import { useHydrated } from "@/lib/use-hydrated";
 import { ARC_RPC_URL } from "@/lib/wagmi";
 
 import Link from "next/link";
@@ -23,8 +24,7 @@ export default function LinksPage() {
   const [deactivating, setDeactivating] = useState<string | null>(null);
   const [selectedDecl, setSelectedDecl] = useState<PaymentDeclaration | null>(null);
   const { copied, copy } = useCopy();
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => { setMounted(true); }, []);
+  const mounted = useHydrated();
 
   const loadDeclarations = async () => {
     if (!address) return;

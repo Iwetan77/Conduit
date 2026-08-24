@@ -1,5 +1,6 @@
 "use client";
 
+import { useHydrated } from "@/lib/use-hydrated";
 import { useState, useEffect, useRef, useMemo } from "react";
 import { useAccount, useConnect, useDisconnect } from "wagmi";
 import {
@@ -275,15 +276,14 @@ function ConnectedChip({
 // where it belongs. Refusing the connection outright to prevent a later
 // failure means the payer cannot connect the only wallet they own.
 export function WalletConnect() {
-  const [mounted, setMounted] = useState(false);
+  const mounted = useHydrated();
   const { address, isConnected } = useAccount();
   const { connect, connectors, isPending } = useConnect();
   const { walletSettled } = useWalletGate();
-  const { identity, solanaWallets, connectSolana, disconnect, connecting, error } =
+  const { identity, solanaWallets, walletsScanned, connectSolana, disconnect, connecting, error } =
     usePayerIdentity();
   const [picking, setPicking] = useState(false);
 
-  useEffect(() => { setMounted(true); }, []);
 
   // Every wallet this browser actually offers, by name.
   //
@@ -324,7 +324,10 @@ export function WalletConnect() {
   }, [connectors]);
   const injected = evmConnectors[0];
 
-  if (!mounted) return null;
+  // A box, not a blank. Whatever this settles into -- a connected chip or the
+  // connect buttons -- occupies roughly this space, so reserving it stops the
+  // header reflowing under the cursor a moment after the page paints.
+  if (!mounted) return <div className="h-9 w-[212px]" aria-hidden />;
 
   // A connected Solana wallet is the answer to "who is paying", so it is shown
   // in place of the connect buttons exactly as an EVM one is.
@@ -338,7 +341,8 @@ export function WalletConnect() {
   // `address` may be whatever wallet an extension auto-connected rather than
   // the one this user signed in with, and showing it invites acting on the
   // wrong account.
-  if (!walletSettled) return null;
+  // Same reservation, same reason: this resolves into a chip of its own.
+  if (!walletSettled) return <div className="h-9 w-[212px]" aria-hidden />;
 
   // Same shape as the Solana branch above. The chip no longer carries an x, so
   // without this an EVM payer had a balance to look at and no way to disconnect.
@@ -376,11 +380,24 @@ export function WalletConnect() {
               if (only && injected) connect({ connector: injected });
               else setPicking((p) => !p);
             }}
-            disabled={isPending || connecting}
+            // Held until wallet discovery has finished.
+            //
+            // The branch above reads solanaWallets, which is empty until the
+            // re-scan at 800ms and may not be after -- so without this the same
+            // button, in the same position, with the same label, connected
+            // directly if you were fast and opened a picker if you were not.
+            // Nothing on screen distinguished the two. A control must not change
+            // what it does without changing how it looks, so it now says it is
+            // still working out the answer.
+            disabled={isPending || connecting || !walletsScanned}
             className="px-4 py-2 text-scale-2 font-mono bg-signal text-signal-ink
                        hover:bg-signal/90 transition-colors disabled:opacity-50 whitespace-nowrap"
           >
-            {isPending || connecting ? "Connecting..." : "Connect Wallet"}
+            {isPending || connecting
+              ? "Connecting..."
+              : !walletsScanned
+                ? "Checking wallets…"
+                : "Connect Wallet"}
           </button>
 
           {picking && (
@@ -433,18 +450,27 @@ export function WalletConnect() {
 }
 
 export function WalletConnectCompact() {
-  const [mounted, setMounted] = useState(false);
+  const mounted = useHydrated();
   const { address, isConnected } = useAccount();
   const { connect, connectors, isPending } = useConnect();
   const { walletSettled } = useWalletGate();
   // Same identity as the desktop nav. Reading wagmi alone here would recreate
   // the split on mobile: connected on Solana, still asking you to connect.
-  const { identity, solanaWallets, connectSolana, disconnect, connecting } = usePayerIdentity();
+  const { identity, solanaWallets, walletsScanned, connectSolana, disconnect, connecting } =
+    usePayerIdentity();
   const [picking, setPicking] = useState(false);
 
-  useEffect(() => { setMounted(true); }, []);
-  if (!mounted) return null;
-  if (!walletSettled) return null;
+  // Two sequential nulls stood here, and this component is what ArcSettlePanel
+  // renders on its not-connected branch -- so a payer opening a payment link saw
+  // the amount they owed with NO WAY TO CONNECT A WALLET AT ALL until both the
+  // hydration pass and the Circle session resolution had finished. The control
+  // they needed simply was not on the page yet.
+  //
+  // One reserved box covers both waits, sized to the button row that replaces
+  // it, so the panel does not jump when it arrives.
+  if (!mounted || !walletSettled) {
+    return <div className="h-9 w-full" aria-hidden />;
+  }
 
   if (identity?.kind === "solana") {
     return (
@@ -475,11 +501,22 @@ export function WalletConnectCompact() {
             if (solanaWallets.length === 0 && connector) connect({ connector });
             else setPicking((p) => !p);
           }}
-          disabled={(isPending || connecting) || (!connector && solanaWallets.length === 0)}
+          // Same discovery race as the desktop control above: this branches on
+          // solanaWallets, which is not final until the re-scan lands.
+          disabled={
+            isPending ||
+            connecting ||
+            !walletsScanned ||
+            (!connector && solanaWallets.length === 0)
+          }
           className="px-4 py-2 text-scale-2 font-medium font-mono bg-signal text-signal-ink
                      w-full hover:bg-signal/90 transition-colors disabled:opacity-50 whitespace-nowrap"
         >
-          {isPending || connecting ? "Connecting..." : "Connect Wallet"}
+          {isPending || connecting
+            ? "Connecting..."
+            : !walletsScanned
+              ? "Checking wallets…"
+              : "Connect Wallet"}
         </button>
         {picking && (
           <div className="absolute left-0 right-0 top-full mt-1 z-40 border border-border bg-surface">

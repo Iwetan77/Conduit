@@ -1,0 +1,9 @@
+{
+  "recordedAt": "2026-08-27T23:58:23Z",
+  "apiBase": "https://conduit-z56x.onrender.com",
+  "endpoints": {
+    "/healthz": { "status": 200, "bytes": 0, "bytesGzip": 0, "seconds": 0.623977 },
+    "/v1/currencies": { "status": 200, "bytes": 1074, "bytesGzip": 486, "seconds": 0.600516 },
+    "/v1/balances?address=0x0000000000000000000000000000000000000001": { "status": 200, "bytes": 1292, "bytesGzip": 531, "seconds": 0.611232 }
+  }
+}

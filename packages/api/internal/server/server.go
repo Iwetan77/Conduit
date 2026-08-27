@@ -204,11 +204,18 @@ func New(cfg Config) http.Handler {
 	}))
 	// Compression, before the request log so the log times the real response.
 	//
-	// Nothing compressed anything before this. GET /v1/settlements returns up to
-	// 200 rows of thirteen mostly-string fields -- highly repetitive JSON, which
-	// is the best case gzip has -- and every byte of it went out raw, to a
-	// dashboard that polls. This is the single largest bandwidth item in the
-	// repo and it costs one line.
+	// Worth being accurate about the size of this win, because it is smaller
+	// than it looks: production sits behind Render's edge, which ALREADY gzips
+	// responses for clients that ask. Measured against the deployed API, the
+	// browser-visible bytes were the same before and after this line
+	// (/v1/currencies: 1074 raw, 486 gzipped, both ways). So this is not the
+	// bandwidth saving it would appear to be from the numbers alone.
+	//
+	// What it does buy: the origin-to-edge hop is compressed rather than
+	// shipping raw JSON, the origin emits its own Vary: Accept-Encoding so any
+	// cache in front behaves correctly, and compression stops being something
+	// the platform happens to do for us. A move off Render, or a client reaching
+	// the origin directly, keeps it. Cheap insurance rather than a headline.
 	//
 	// Level 5 rather than the default: past there, gzip spends noticeably more
 	// CPU for very little further size on JSON, and CPU is the thing actually

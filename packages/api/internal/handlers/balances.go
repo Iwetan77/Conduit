@@ -13,10 +13,10 @@ import (
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/ethclient"
 
-	apierrors "github.com/kzn-labs/conduit/api/internal/errors"
+	"github.com/kzn-labs/conduit/api/internal/arcrpc"
 	"github.com/kzn-labs/conduit/api/internal/currency"
+	apierrors "github.com/kzn-labs/conduit/api/internal/errors"
 )
 
 // Multicall3 is deployed at the same canonical address on every chain Circle
@@ -118,11 +118,10 @@ func (h *Balances) balancesFor(ctx context.Context, addr string) ([]balanceRow, 
 }
 
 func (h *Balances) readOnChain(ctx context.Context, addr string) ([]balanceRow, error) {
-	client, err := ethclient.DialContext(ctx, h.ArcRPC)
+	client, err := arcrpc.Get(ctx, h.ArcRPC)
 	if err != nil {
 		return nil, fmt.Errorf("dial arc rpc: %w", err)
 	}
-	defer client.Close()
 
 	mcABI, err := abi.JSON(strings.NewReader(multicall3ABI))
 	if err != nil {

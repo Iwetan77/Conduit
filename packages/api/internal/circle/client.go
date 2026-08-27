@@ -27,6 +27,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/kzn-labs/conduit/api/internal/httpx"
 )
 
 const DefaultBaseURL = "https://api.circle.com"
@@ -47,7 +49,7 @@ func New(baseURL, apiKey string) *Client {
 	return &Client{
 		baseURL:    baseURL,
 		apiKey:     apiKey,
-		httpClient: &http.Client{Timeout: 15 * time.Second},
+		httpClient: httpx.Client(15 * time.Second),
 	}
 }
 

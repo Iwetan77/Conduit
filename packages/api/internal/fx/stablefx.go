@@ -13,6 +13,7 @@ import (
 
 	"github.com/kzn-labs/conduit/api/internal/currency"
 	apierrors "github.com/kzn-labs/conduit/api/internal/errors"
+	"github.com/kzn-labs/conduit/api/internal/httpx"
 )
 
 // StableFXProvider talks to Circle's real StableFX sandbox/production API.
@@ -29,7 +30,7 @@ func NewStableFXProvider(baseURL, apiKey string) *StableFXProvider {
 	return &StableFXProvider{
 		baseURL:    baseURL,
 		apiKey:     apiKey,
-		httpClient: &http.Client{Timeout: 15 * time.Second},
+		httpClient: httpx.Client(15 * time.Second),
 	}
 }
 

@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/kzn-labs/conduit/api/internal/httpx"
 )
 
 // RPCProxy forwards browser JSON-RPC calls to Arc's RPC server-side.
@@ -42,7 +44,7 @@ func NewRPCProxy(upstream string) *RPCProxy {
 	}
 	return &RPCProxy{
 		Upstream: upstream,
-		Client:   &http.Client{Timeout: 20 * time.Second},
+		Client:   httpx.Client(20 * time.Second),
 	}
 }
 

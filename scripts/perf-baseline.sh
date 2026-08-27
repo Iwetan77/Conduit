@@ -98,8 +98,18 @@ echo "==> measuring API at $API -> perf/${PREFIX}-api.json"
         -w '%{http_code} %{size_download} %{time_total}\n' \
         --max-time 30 "$API$path" 2>/dev/null || echo "000 0 0"
     )
-    printf '    "%s": { "status": %s, "bytes": %s, "seconds": %s }' \
-      "$path" "${code:-0}" "${bytes:-0}" "${secs:-0}"
+    # Measured again asking for compression, because `bytes` above does NOT
+    # capture it: curl sends no Accept-Encoding unless told to, so a server that
+    # gzips everything scores identically to one that gzips nothing. Recorded as
+    # a SEPARATE field rather than replacing `bytes`, so an old baseline taken
+    # before this existed still compares like-for-like against a new run.
+    read -r gzbytes < <(
+      curl -s -o /dev/null --compressed \
+        -w '%{size_download}\n' \
+        --max-time 30 "$API$path" 2>/dev/null || echo "0"
+    )
+    printf '    "%s": { "status": %s, "bytes": %s, "bytesGzip": %s, "seconds": %s }' \
+      "$path" "${code:-0}" "${bytes:-0}" "${gzbytes:-0}" "${secs:-0}"
   done
 
   printf '\n  }\n}\n'
@@ -110,7 +120,13 @@ const f = `perf/${process.env.PREFIX}-api.json`;
 const d = JSON.parse(require("fs").readFileSync(f, "utf8"));
 for (const [k, v] of Object.entries(d.endpoints)) {
   const note = v.status === 0 ? "  (unreachable)" : v.status >= 400 ? "  (error)" : "";
-  console.log(`    ${String(v.status).padEnd(4)} ${String(v.bytes).padStart(8)} B  ${v.seconds}s  ${k}${note}`);
+  const gz =
+    v.bytesGzip && v.bytes
+      ? `  gzip ${String(v.bytesGzip).padStart(7)} B (${Math.round((1 - v.bytesGzip / v.bytes) * 100)}% off)`
+      : "";
+  console.log(
+    `    ${String(v.status).padEnd(4)} ${String(v.bytes).padStart(8)} B${gz}  ${v.seconds}s  ${k}${note}`,
+  );
 }
 ' PREFIX="$PREFIX" 2>/dev/null || true
 

@@ -30,13 +30,13 @@ type createLinkRequest struct {
 	Amount            *bigAmount `json:"amount"`      // required for fixed; suggested default for open_with_suggested; must be omitted for open
 	MinAmount         *bigAmount `json:"min_amount"`  // open / open_with_suggested only
 	MaxAmount         *bigAmount `json:"max_amount"`  // open / open_with_suggested only
-	SettleCurrency    string   `json:"settle_currency"`
-	SettleAddress     string   `json:"settle_address"`
-	AcceptCurrencies  []string `json:"accept_currencies"`
-	Description       string   `json:"description"`
-	MerchantReference string   `json:"merchant_reference"`
-	ReusePolicy       string   `json:"reuse_policy"` // single_use (default) | multi_use
-	ExpiresIn         int64    `json:"expires_in"`   // seconds; 0/omitted = no expiry (a reusable QR isn't obligated to expire)
+	SettleCurrency    string     `json:"settle_currency"`
+	SettleAddress     string     `json:"settle_address"`
+	AcceptCurrencies  []string   `json:"accept_currencies"`
+	Description       string     `json:"description"`
+	MerchantReference string     `json:"merchant_reference"`
+	ReusePolicy       string     `json:"reuse_policy"` // single_use (default) | multi_use
+	ExpiresIn         int64      `json:"expires_in"`   // seconds; 0/omitted = no expiry (a reusable QR isn't obligated to expire)
 }
 
 type linkResponse struct {

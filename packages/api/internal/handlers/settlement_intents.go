@@ -13,9 +13,10 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/kzn-labs/conduit/api/internal/arcrpc"
 	"github.com/kzn-labs/conduit/api/internal/auth"
 	"github.com/kzn-labs/conduit/api/internal/currency"
 	apierrors "github.com/kzn-labs/conduit/api/internal/errors"
@@ -989,12 +990,11 @@ func (h *SettlementIntents) RecordDirectSettlement(w http.ResponseWriter, r *htt
 		writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
 		return
 	}
-	client, err := ethclient.DialContext(ctx, h.ArcRPC)
+	client, err := arcrpc.Get(ctx, h.ArcRPC)
 	if err != nil {
 		writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
 		return
 	}
-	defer client.Close()
 
 	receipt, err := client.TransactionReceipt(ctx, common.HexToHash(txHash))
 	if err != nil {

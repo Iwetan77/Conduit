@@ -16,6 +16,8 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	solanago "github.com/gagliardetto/solana-go"
 	"github.com/gagliardetto/solana-go/rpc"
+
+	"github.com/kzn-labs/conduit/api/internal/httpx"
 )
 
 // maxFeeCap is the maxFee this implementation authorizes per burn intent.
@@ -42,7 +44,7 @@ type GatewayProvider struct {
 func NewGatewayProvider(solanaRPCURL string, arcRecipient common.Address) *GatewayProvider {
 	return &GatewayProvider{
 		solanaRPC:    rpc.New(solanaRPCURL),
-		httpClient:   &http.Client{Timeout: 15 * time.Second},
+		httpClient:   httpx.Client(15 * time.Second),
 		apiBaseURL:   GatewayAPITestnetBaseURL,
 		arcRecipient: arcRecipient,
 	}

@@ -16,8 +16,10 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
 	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/kzn-labs/conduit/api/internal/auth"
 	bridgepkg "github.com/kzn-labs/conduit/api/internal/bridge"
 	"github.com/kzn-labs/conduit/api/internal/circle"
@@ -200,6 +202,19 @@ func New(cfg Config) http.Handler {
 		AllowCredentials: false,
 		MaxAge:           300,
 	}))
+	// Compression, before the request log so the log times the real response.
+	//
+	// Nothing compressed anything before this. GET /v1/settlements returns up to
+	// 200 rows of thirteen mostly-string fields -- highly repetitive JSON, which
+	// is the best case gzip has -- and every byte of it went out raw, to a
+	// dashboard that polls. This is the single largest bandwidth item in the
+	// repo and it costs one line.
+	//
+	// Level 5 rather than the default: past there, gzip spends noticeably more
+	// CPU for very little further size on JSON, and CPU is the thing actually
+	// billed on the API host.
+	r.Use(middleware.Compress(5))
+
 	// Request log, on by default for the dev server and opt-in elsewhere.
 	//
 	// Added because a blank dashboard is indistinguishable from three different
@@ -266,14 +281,21 @@ func New(cfg Config) http.Handler {
 			// everything else needs the key that creates it. Subaccounts (spec's
 			// "Conduit-Account" header flow) still require an authenticated parent
 			// account key — this only covers creating a brand new top-level account.
-			r.Get("/currencies", currenciesH.List)
+			// Reference data that changes only on deploy. Long enough to matter,
+			// with stale-while-revalidate so a refresh never blocks a payer.
+			r.Get("/currencies", cacheFor("public, max-age=60, stale-while-revalidate=300", currenciesH.List))
 			// Indicative FX rates, no state touched. Public so any payer surface can
 			// show "you'll receive ≈ X" — and whether the pair routes at all, and
 			// whether the amount clears the provider's minimum — BEFORE the payer
 			// commits to a checkout. See handlers.FxRates.
-			r.Get("/fx/rates", fxRatesH.Get)
+			// Two seconds, matching fxRateCacheTTL exactly. A quote promised as
+			// fresher than the server holds it would be priced on nothing.
+			r.Get("/fx/rates", cacheFor("public, max-age=2", fxRatesH.Get))
 			// Public: a payer has no API key, and this is read-only chain data.
-			r.Get("/balances", balancesH.List)
+			// PRIVATE, not public: this is one address's money, and a shared cache
+			// holding it would serve one payer's balance to another. Ten seconds
+			// matches balanceCacheTTL.
+			r.Get("/balances", cacheFor("private, max-age=10", balancesH.List))
 			// Public JSON-RPC relay to Arc (method-allowlisted, fixed upstream).
 			// No API key: reads are public chain data and a broadcast carries an
 			// already-signed transaction. See handlers.RPCProxy.
@@ -312,12 +334,15 @@ func New(cfg Config) http.Handler {
 			// a payer landing on a bare payment link has no API key. Deliberately
 			// exposes only amount/currency/status/source_chain/expiry, never
 			// account_id/settle_address/reference/metadata.
-			r.Get("/settlement_intents/{id}/public", intentsH.GetPublic)
+			// no-store: this carries live payment status. A cached copy shows a
+			// payer "unpaid" for something they have already paid.
+			r.Get("/settlement_intents/{id}/public", cacheFor("no-store", intentsH.GetPublic))
 
 			// Payment links: same "no API key" reasoning as the settlement_intent
 			// public route above -- a payer opening a bare link/QR has no
 			// credentials. GetPublic and Pay are the two payer-facing calls.
-			r.Get("/payment_links/{id}/public", paymentLinksH.GetPublic)
+			// no-store, for the same reason as the intent above.
+			r.Get("/payment_links/{id}/public", cacheFor("no-store", paymentLinksH.GetPublic))
 			r.Post("/payment_links/{id}/pay", paymentLinksH.Pay)
 
 			// Cross-currency FX for the payer surface. Same "no API key" reasoning
@@ -457,6 +482,22 @@ func newBridgeHandler(cfg Config, stableFX *fx.StableFXProvider, dispatcher *web
 		StaleAfter: cfg.BridgeStaleAfter,
 		ArcRPC:     arcRPC,
 	}, nil
+}
+
+// cacheFor sets Cache-Control on a GET whose freshness the server already
+// bounds internally.
+//
+// Every header written with this MUST match a TTL the code actually enforces.
+// A header is a promise about staleness, and one that outlives the server's own
+// cache is a promise to serve data the server has already decided is too old --
+// on a payments API, that is how someone reads "unpaid" for an invoice that has
+// been settled. So these are derived from the same constants the handlers use,
+// never chosen for effect.
+func cacheFor(value string, next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", value)
+		next(w, r)
+	}
 }
 
 var errNoRelayerKey = errors.New("ARC_RELAYER_KEY not configured")

@@ -52,7 +52,32 @@ func main() {
 	server.StartBackgroundWorkers(ctx, pool, cfg.ArcRPC, os.Getenv("CONDUIT_ROUTER_ADDRESS"), cfg)
 
 	log.Printf("conduit-api listening on :%s", addr)
-	srv := &http.Server{Addr: ":" + addr, Handler: handler, ReadHeaderTimeout: 5 * time.Second}
+	// Only ReadHeaderTimeout was set, which bounds the headers and nothing else.
+	// A client that sent headers and then stalled mid-body held a connection and
+	// a goroutine open indefinitely, and a response to a client that stopped
+	// reading was never abandoned. Neither needs malice to happen -- a payer on
+	// a phone walking into a lift does both.
+	//
+	// IdleTimeout is the one that actually pays for itself day to day: without
+	// it, keep-alive connections are held open by Go's default (which falls back
+	// to ReadTimeout), so the dashboard's polling leaves sockets pinned on a
+	// host billed for what it holds.
+	srv := &http.Server{
+		Addr:              ":" + addr,
+		Handler:           handler,
+		ReadHeaderTimeout: 5 * time.Second,
+		// Generous for the JSON bodies this API takes; the largest is a burn
+		// intent set, measured in kilobytes.
+		ReadTimeout: 15 * time.Second,
+		// Above the slowest synchronous handler by a real margin. The longest is
+		// the Arc RPC relay at a 20s upstream timeout; everything slower than
+		// that -- funding polls, WaitMined, settlement -- already runs detached
+		// on context.Background() precisely so no payer waits on a socket for it.
+		// Verified before choosing this number, because a WriteTimeout under a
+		// synchronous handler would cut a payment off mid-response.
+		WriteTimeout: 30 * time.Second,
+		IdleTimeout:  120 * time.Second,
+	}
 	log.Fatal(srv.ListenAndServe())
 }
 

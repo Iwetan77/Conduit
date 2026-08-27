@@ -16,6 +16,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/kzn-labs/conduit/api/internal/httpx"
 	"github.com/kzn-labs/conduit/api/internal/models"
 )
 
@@ -75,7 +77,7 @@ type Dispatcher struct {
 }
 
 func NewDispatcher(pool *pgxpool.Pool) *Dispatcher {
-	return &Dispatcher{pool: pool, client: &http.Client{Timeout: 10 * time.Second}}
+	return &Dispatcher{pool: pool, client: httpx.Client(10 * time.Second)}
 }
 
 // Enqueue creates a webhook_deliveries row for every endpoint on accountID

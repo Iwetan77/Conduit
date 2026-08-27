@@ -18,9 +18,10 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/kzn-labs/conduit/api/internal/arcrpc"
 	bridgepkg "github.com/kzn-labs/conduit/api/internal/bridge"
 	"github.com/kzn-labs/conduit/api/internal/currency"
 	apierrors "github.com/kzn-labs/conduit/api/internal/errors"
@@ -557,11 +558,10 @@ func (h *Bridge) verifyMintToRelayer(ctx context.Context, mintTxHash string) (*b
 		return nil, fmt.Errorf("no mint transaction hash to verify")
 	}
 
-	client, err := ethclient.DialContext(ctx, h.ArcRPC)
+	client, err := arcrpc.Get(ctx, h.ArcRPC)
 	if err != nil {
 		return nil, fmt.Errorf("dial arc: %w", err)
 	}
-	defer client.Close()
 
 	receipt, err := client.TransactionReceipt(ctx, common.HexToHash(mintTxHash))
 	if err != nil {
@@ -615,11 +615,10 @@ func (h *Bridge) transferUSDCFromRelayer(ctx context.Context, to string, amount 
 	// Locked below, around nonce read + send only -- not around WaitMined,
 	// which would serialise every payout on block time for no extra safety:
 	// PendingNonceAt already counts transactions sitting in the mempool.
-	client, err := ethclient.DialContext(ctx, h.ArcRPC)
+	client, err := arcrpc.Get(ctx, h.ArcRPC)
 	if err != nil {
 		return "", fmt.Errorf("dial arc: %w", err)
 	}
-	defer client.Close()
 
 	usdc := common.HexToAddress("0x3600000000000000000000000000000000000000")
 	toAddr := common.HexToAddress(to)

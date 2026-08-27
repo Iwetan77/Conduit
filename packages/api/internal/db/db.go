@@ -3,6 +3,10 @@ package db
 import (
 	"context"
 	"fmt"
+	"log"
+	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/golang-migrate/migrate/v4"
@@ -30,9 +34,15 @@ func Connect(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
 	// This is not free: every first request after an idle period pays for the
 	// database to wake, a few hundred milliseconds. That is the right trade
 	// while uptime is the thing being billed. On a host that does NOT bill for
-	// uptime (a fixed-size instance, or Supabase's free tier), raise MinConns to
-	// 2 instead -- there the idle connection costs nothing and removes the wake
-	// from the first request.
+	// uptime (a fixed-size instance, or Supabase's free tier), a warm connection
+	// costs nothing and removes that wake from the first request -- so there,
+	// set CONDUIT_DB_MIN_CONNS=2.
+	//
+	// Deliberately an env var rather than a constant to edit at cutover. The
+	// right value is a property of the DATABASE, and the database is named by an
+	// env var too: leaving it in code means the day DATABASE_URL is repointed,
+	// the pool is still tuned for the host it just left, and nothing anywhere
+	// says so.
 	//
 	// CONNECTION STRING, if pointing this at Supabase: use the SESSION pooler
 	// (port 5432 on the pooler host). The transaction pooler on 6543 does not
@@ -42,10 +52,12 @@ func Connect(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
 	cfg.MaxConnIdleTime = 3 * time.Minute
 	cfg.MaxConnLifetime = 30 * time.Minute
 	cfg.HealthCheckPeriod = 1 * time.Minute
-	cfg.MinConns = 0
+	cfg.MinConns = minConns()
 	// Render's free instance is small; an unbounded pool would let a burst
 	// open more server-side connections than either side handles well.
 	cfg.MaxConns = 10
+
+	log.Printf("db: pool configured (min_conns=%d max_conns=%d)", cfg.MinConns, cfg.MaxConns)
 
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
@@ -56,6 +68,26 @@ func Connect(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
 		return nil, fmt.Errorf("db: ping: %w", err)
 	}
 	return pool, nil
+}
+
+// minConns reads CONDUIT_DB_MIN_CONNS, defaulting to 0.
+//
+// Zero is the safe default because it is the value that cannot cost money by
+// accident: it is correct on a compute-billed database, and on a flat-rate one
+// it costs a few hundred milliseconds on the first request after an idle spell.
+// A bad env value falls back to it loudly rather than refusing to boot -- a
+// typo in a pool hint is not worth taking the API down for.
+func minConns() int32 {
+	raw := strings.TrimSpace(os.Getenv("CONDUIT_DB_MIN_CONNS"))
+	if raw == "" {
+		return 0
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 0 {
+		log.Printf("db: ignoring invalid CONDUIT_DB_MIN_CONNS=%q, using 0", raw)
+		return 0
+	}
+	return int32(n)
 }
 
 // Migrate runs every pending migration in migrationsDir against databaseURL.

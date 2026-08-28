@@ -135,6 +135,7 @@ func New(cfg Config) http.Handler {
 	balanceTxH := &handlers.BalanceTransactions{Pool: cfg.Pool}
 	settlementsH := &handlers.Settlements{Pool: cfg.Pool}
 	walletHistoryH := &handlers.WalletHistory{Pool: cfg.Pool}
+	usernamesH := &handlers.Usernames{Pool: cfg.Pool}
 	paymentLinksH := &handlers.PaymentLinks{Pool: cfg.Pool, AppBaseURL: cfg.AppBaseURL}
 	bridgeH, err := newBridgeHandler(cfg, stableFX, dispatcher)
 	if err != nil {
@@ -384,6 +385,24 @@ func New(cfg Config) http.Handler {
 			// an on-chain read the way same-currency history does.
 			r.Post("/wallet_settlements", walletHistoryH.List)
 
+			// Usernames. Public for the same reason the link routes are: the
+			// person typing a name into /send is a payer with no API key, and
+			// resolving a name to an address is the entire point of the feature.
+			//
+			// no-store on both. Resolution decides where money goes, so a stale
+			// answer is a misdirected payment; availability is checked while
+			// someone types and a cached "free" would invite them to claim a name
+			// that is already gone.
+			r.Get("/usernames/{username}", cacheFor("no-store", usernamesH.Resolve))
+			r.Get("/usernames/{username}/available", cacheFor("no-store", usernamesH.Available))
+			r.Get("/wallets/{address}/username", cacheFor("no-store", usernamesH.ByWallet))
+			// Claiming with a wallet signature rather than a session, because a
+			// payer with only an EVM wallet HAS no session -- their account is
+			// created lazily on first send. The signature is the credential, and
+			// the name being claimed is inside the signed message so a captured
+			// one cannot be replayed for a different name.
+			r.Post("/usernames/claim", usernamesH.ClaimWithWallet)
+
 			// Cross-chain bridge endpoints are deliberately unauthenticated: this
 			// is the payer surface (see spec), and a Solana-side payer has no
 			// Conduit API key or Arc wallet at all. Only registered when
@@ -411,6 +430,9 @@ func New(cfg Config) http.Handler {
 
 			r.Get("/accounts", accountsH.List)
 			r.Get("/accounts/me", accountsH.Me)
+			// Claiming a name is an account action, so it sits behind the same
+			// auth as the rest of them. Read is public; write never is.
+			r.Post("/accounts/me/username", usernamesH.Claim)
 			// Ends every session for the account. Authenticated because it acts
 			// on the caller's own account, and only meaningful to a session
 			// caller -- see Accounts.Logout.

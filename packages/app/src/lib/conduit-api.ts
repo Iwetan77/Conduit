@@ -170,6 +170,14 @@ export interface Account {
   id: string;
   name: string;
   logo_url?: string;
+  /**
+   * The name this account is paid under, or null until claimed.
+   *
+   * Null and absent must stay distinguishable — "no username yet" is what
+   * triggers the one-time prompt, so the field is always present on the wire
+   * rather than omitted when empty.
+   */
+  username: string | null;
   settle_currency: string;
   settle_address: string;
   livemode: boolean;
@@ -224,6 +232,84 @@ export function createSubAccount(body: { name: string; settle_currency: string; 
 // account without needing its id up front (Settings loads this to edit).
 export function getMyAccount() {
   return request<Account>("/v1/accounts/me");
+}
+
+// ── Usernames ───────────────────────────────────────────────────────────────
+//
+// A name to be paid under, instead of 42 hex characters. Bound to the ACCOUNT
+// rather than the wallet, so a person and their business can each have one on
+// the same wallet and still resolve to different places.
+
+export interface UsernameResolution {
+  username: string;
+  /** The account's own name — what to show a sender before they confirm. */
+  display_name: string;
+  settle_address: string;
+  settle_currency: string;
+}
+
+/**
+ * Resolve a name to the address a payment should go to.
+ *
+ * Returns null when nobody holds the name, rather than throwing: /send calls
+ * this on a partially typed name, where "no such user yet" is the normal case
+ * and not an error worth surfacing.
+ */
+export async function resolveUsername(name: string): Promise<UsernameResolution | null> {
+  try {
+    return await request<UsernameResolution>(`/v1/usernames/${encodeURIComponent(name)}`);
+  } catch {
+    return null;
+  }
+}
+
+export interface UsernameAvailability {
+  available: boolean;
+  /** Present whenever available is false, and always safe to show verbatim. */
+  reason?: string;
+}
+
+/** Live check while someone types. Always answers; never throws for "taken". */
+export function checkUsernameAvailable(name: string) {
+  return request<UsernameAvailability>(
+    `/v1/usernames/${encodeURIComponent(name)}/available`,
+  );
+}
+
+/** Claim a name for the signed-in account. Once only — the server enforces it. */
+export function claimUsername(username: string) {
+  return request<{ username: string }>("/v1/accounts/me/username", {
+    method: "POST",
+    body: { username },
+  });
+}
+
+/**
+ * Claim a name using a wallet signature instead of a session.
+ *
+ * For a payer who connected an EVM wallet and nothing else: they have no
+ * session because their account is created lazily on first send, and they are
+ * half the people this feature is for.
+ */
+export function claimUsernameWithWallet(body: {
+  wallet: string;
+  username: string;
+  timestamp: number;
+  signature: string;
+}) {
+  return request<{ username: string }>("/v1/usernames/claim", { method: "POST", body });
+}
+
+/** The name held by a wallet's own personal account, or null. Never throws for "none". */
+export async function getUsernameForWallet(address: string): Promise<string | null> {
+  try {
+    const res = await request<{ username: string | null }>(
+      `/v1/wallets/${encodeURIComponent(address)}/username`,
+    );
+    return res.username;
+  } catch {
+    return null;
+  }
 }
 
 // Ends every session for the account, server-side.

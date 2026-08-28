@@ -30,6 +30,9 @@ const (
 	CodeInternal              Code = "internal_error"
 	CodeRateLimited           Code = "rate_limited"
 
+	CodeUsernameTaken      Code = "username_taken"
+	CodeUsernameAlreadySet Code = "username_already_set"
+
 	CodeLinkExpired           Code = "payment_link_expired"
 	CodeLinkVoided            Code = "payment_link_voided"
 	CodeLinkAlreadyUsed       Code = "payment_link_already_used"
@@ -43,8 +46,8 @@ type entry struct {
 }
 
 var registry = map[Code]entry{
-	CodeFxQuoteExpired:        {http.StatusConflict, "The FX quote has expired. Request a new quote."},
-	CodeFxNoRoute:             {http.StatusUnprocessableEntity, "No route exists between these currencies right now."},
+	CodeFxQuoteExpired: {http.StatusConflict, "The FX quote has expired. Request a new quote."},
+	CodeFxNoRoute:      {http.StatusUnprocessableEntity, "No route exists between these currencies right now."},
 	// Measured against the live provider: the floor is ~1.00 USD of value, on
 	// the amount being converted -- not a per-currency rule. It bites hardest on
 	// low-unit-value currencies (1 ZAR is about 6 US cents, so "10 ZAR" is only
@@ -65,6 +68,15 @@ var registry = map[Code]entry{
 	CodeUnauthorized:          {http.StatusUnauthorized, "Missing or invalid API key."},
 	CodeForbidden:             {http.StatusForbidden, "This API key is not permitted to perform this action."},
 	CodeInternal:              {http.StatusInternalServerError, "An internal error occurred."},
+
+	// 409 rather than 400: the request was well formed and the name was free
+	// when the sender last looked. Somebody else simply got there first, and
+	// that is a state conflict, not a mistake by the caller.
+	CodeUsernameTaken: {http.StatusConflict, "That username is already taken."},
+	// A username is what other people save and send money to, so it is claimed
+	// once. Reassigning one would let a payment addressed from memory land with
+	// whoever picked up the abandoned name.
+	CodeUsernameAlreadySet: {http.StatusConflict, "This account already has a username."},
 
 	CodeLinkExpired:           {http.StatusConflict, "This payment link has expired."},
 	CodeLinkVoided:            {http.StatusConflict, "This payment link has been voided."},

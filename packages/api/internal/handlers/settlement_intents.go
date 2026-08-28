@@ -263,6 +263,17 @@ func (h *SettlementIntents) CreateDirect(w http.ResponseWriter, r *http.Request)
 // from migration 0008 turns a concurrent double-insert into a conflict we
 // resolve by re-reading, so a payer never accumulates one account per send.
 func (h *SettlementIntents) personalAccountForWallet(ctx context.Context, wallet, settleCurrency string) (string, error) {
+	return personalAccountForWallet(ctx, h.Pool, wallet, settleCurrency)
+}
+
+// personalAccountForWallet is the shared definition, so "which account is this
+// wallet's own" has exactly one answer in the codebase.
+//
+// Extracted when usernames needed it too. A second copy of this lookup would be
+// a second copy of the identity predicate below, and that predicate has already
+// been wrong once (see migration 0015) in a way that attached payer links to a
+// merchant's books.
+func personalAccountForWallet(ctx context.Context, pool *pgxpool.Pool, wallet, settleCurrency string) (string, error) {
 	// "Has no login identity" is the test for a personal account, and it has to
 	// name every column an identity can live in. It used to check
 	// privy_user_id alone, which stopped meaning that the moment migration 0014
@@ -275,7 +286,7 @@ func (h *SettlementIntents) personalAccountForWallet(ctx context.Context, wallet
 	             AND lower(login_wallet) = lower($1)`
 
 	var accountID string
-	err := h.Pool.QueryRow(ctx, lookup, wallet).Scan(&accountID)
+	err := pool.QueryRow(ctx, lookup, wallet).Scan(&accountID)
 	if err == nil {
 		return accountID, nil
 	}
@@ -290,7 +301,7 @@ func (h *SettlementIntents) personalAccountForWallet(ctx context.Context, wallet
 	// appending the full 42-char address here only produced an ugly overflowing
 	// "Personal 0xa51dd4...b0..." header on mobile.
 	name := "Personal"
-	_, err = h.Pool.Exec(ctx,
+	_, err = pool.Exec(ctx,
 		`INSERT INTO accounts (id, name, settle_currency, settle_address, login_wallet, livemode)
 		 VALUES ($1,$2,$3,$4,$5,false)
 		 ON CONFLICT DO NOTHING`,
@@ -302,7 +313,7 @@ func (h *SettlementIntents) personalAccountForWallet(ctx context.Context, wallet
 
 	// ON CONFLICT DO NOTHING means a racing request may have won; re-read
 	// rather than assuming our id landed.
-	if scanErr := h.Pool.QueryRow(ctx, lookup, wallet).Scan(&accountID); scanErr != nil {
+	if scanErr := pool.QueryRow(ctx, lookup, wallet).Scan(&accountID); scanErr != nil {
 		return "", scanErr
 	}
 	return accountID, nil
@@ -342,7 +353,12 @@ func (h *SettlementIntents) GetPublic(w http.ResponseWriter, r *http.Request) {
 	resp.ID = id
 	err := h.Pool.QueryRow(r.Context(),
 		`SELECT si.amount::text, si.status, si.settle_currency, si.source_chain, si.expires_at, si.settle_address,
-		        a.name, a.logo_url, COALESCE(si.return_url,'')
+		        -- The username is the name this person chose to be paid under,
+		        -- so it wins over the account's own name. Without it a personal
+		        -- account falls back to the literal string "Personal", which is
+		        -- what every payer-created link said it came from: a payment
+		        -- request from nobody in particular.
+		        COALESCE(NULLIF(a.username, ''), a.name), a.logo_url, COALESCE(si.return_url,'')
 		 FROM settlement_intents si JOIN accounts a ON a.id = si.account_id
 		 WHERE si.id = $1`,
 		id,

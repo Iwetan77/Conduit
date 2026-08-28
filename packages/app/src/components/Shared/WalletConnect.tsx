@@ -14,6 +14,8 @@ import {
 import { shortenAddress } from "@/lib/format";
 import { usePayerIdentity } from "@/lib/use-payer-identity";
 import { usePayerUsdc } from "@/lib/use-payer-usdc";
+import { useUsername } from "@/lib/use-username";
+import { UserMark } from "@/components/Shared/UserMark";
 import { chainLabel, usdcDisplay } from "@/lib/unified-balance";
 import { CIRCLE_CONNECTOR_ID } from "@/lib/circle/connector";
 
@@ -190,6 +192,9 @@ function ConnectedChip({
 }) {
   const [open, setOpen] = useState(false);
   const { identity } = usePayerIdentity();
+  // The name this person is paid under, when they have claimed one. Falls back
+  // to the shortened address, which is all there ever was before.
+  const { username } = useUsername();
   const usdc = usePayerUsdc({
     address: identity?.address,
     family: identity?.kind,
@@ -205,9 +210,14 @@ function ConnectedChip({
         className={`inline-flex items-center ${compact ? "gap-1.5 px-3 py-1.5" : "gap-2 px-3 py-2"}
                     bg-surface border border-border hover:border-ink-dim transition-colors`}
       >
-        <span className={`${compact ? "w-1.5 h-1.5" : "w-2 h-2 animate-pulse"} bg-signal`} />
+        {/* Who, not merely whether.
+            A pulsing green square stood here saying "connected" -- which the
+            address beside it already said, restated as an animation that never
+            stopped. The mark now carries the person's initials once they have a
+            username, and the chip shows the NAME rather than hex. */}
+        <UserMark username={username} size={compact ? "sm" : "md"} />
         <span className={`${compact ? "text-scale-1" : "text-scale-2"} font-mono text-ink`}>
-          {shortenAddress(address, compact ? 3 : 4)}
+          {username || shortenAddress(address, compact ? 3 : 4)}
         </span>
       </button>
 

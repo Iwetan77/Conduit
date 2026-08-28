@@ -25,9 +25,13 @@ type createAccountRequest struct {
 }
 
 type accountResponse struct {
-	ID             string  `json:"id"`
-	Name           string  `json:"name"`
-	LogoURL        *string `json:"logo_url,omitempty"`
+	ID      string  `json:"id"`
+	Name    string  `json:"name"`
+	LogoURL *string `json:"logo_url,omitempty"`
+	// Null until claimed. The app uses exactly this to decide whether to ask
+	// for one, so it must be present on the response rather than omitted when
+	// empty -- an absent field and an unclaimed name would be indistinguishable.
+	Username       *string `json:"username"`
 	SettleCurrency string  `json:"settle_currency"`
 	SettleAddress  string  `json:"settle_address"`
 	Livemode       bool    `json:"livemode"`
@@ -249,9 +253,11 @@ func (h *Accounts) Me(w http.ResponseWriter, r *http.Request) {
 
 	var resp accountResponse
 	err := h.Pool.QueryRow(r.Context(),
-		`SELECT id, name, logo_url, settle_currency, settle_address, livemode FROM accounts WHERE id = $1`,
+		`SELECT id, name, logo_url, username, settle_currency, settle_address, livemode
+		   FROM accounts WHERE id = $1`,
 		principal.AccountID,
-	).Scan(&resp.ID, &resp.Name, &resp.LogoURL, &resp.SettleCurrency, &resp.SettleAddress, &resp.Livemode)
+	).Scan(&resp.ID, &resp.Name, &resp.LogoURL, &resp.Username,
+		&resp.SettleCurrency, &resp.SettleAddress, &resp.Livemode)
 	if err != nil {
 		writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
 		return

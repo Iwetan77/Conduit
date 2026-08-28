@@ -84,6 +84,14 @@ type usernameResolution struct {
 	// a payer typing a name has no API key and needs an address to pay to.
 	SettleAddress  string `json:"settle_address"`
 	SettleCurrency string `json:"settle_currency"`
+	// "personal" or "business".
+	//
+	// One wallet can hold both, and both can hold a name, so a name alone does
+	// not say which you are paying. @Ivan resolving to "Ivan and Sons" is
+	// correct and still reads as a surprise unless the surface can say it is
+	// the BUSINESS. The namespace stays single and unambiguous -- one name, one
+	// destination -- and this is what removes the confusion instead.
+	AccountType string `json:"account_type"`
 }
 
 // Resolve turns a name into the address to pay. Public, and necessarily so.
@@ -101,11 +109,14 @@ func (h *Usernames) Resolve(w http.ResponseWriter, r *http.Request) {
 
 	var res usernameResolution
 	err := h.Pool.QueryRow(r.Context(),
-		`SELECT username, name, settle_address, settle_currency
+		`SELECT username, name, settle_address, settle_currency,
+		        CASE WHEN privy_user_id IS NULL AND auth_subject IS NULL
+		             THEN 'personal' ELSE 'business' END AS account_type
 		   FROM accounts
 		  WHERE lower(username) = lower($1)`,
 		name,
-	).Scan(&res.Username, &res.DisplayName, &res.SettleAddress, &res.SettleCurrency)
+	).Scan(&res.Username, &res.DisplayName, &res.SettleAddress, &res.SettleCurrency,
+		&res.AccountType)
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeErr(w, apierrors.E(apierrors.CodeNotFound, "no account with that username"))
 		return
@@ -290,11 +301,24 @@ func (h *Usernames) ByWallet(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, apierrors.E(apierrors.CodeInvalidRequest, "address"))
 		return
 	}
+	// ANY account on this wallet, not just the personal one.
+	//
+	// It filtered to personal accounts, which is the wrong question. One wallet
+	// can hold both a personal account and a merchant account -- that is the
+	// whole reason usernames bind to accounts -- and the name may sit on either.
+	// Someone who claimed a name while signed in as their business then saw the
+	// anonymous dot in the nav forever: the name existed, on an account this
+	// query refused to look at.
+	//
+	// Personal first when both have one, because this is the fallback used when
+	// there is NO session; with a session the caller prefers /accounts/me, which
+	// is the authoritative answer for whoever is actually signed in.
 	var username *string
 	err := h.Pool.QueryRow(r.Context(),
 		`SELECT username FROM accounts
-		  WHERE privy_user_id IS NULL AND auth_subject IS NULL
-		    AND lower(login_wallet) = lower($1)`,
+		  WHERE lower(login_wallet) = lower($1) AND username IS NOT NULL
+		  ORDER BY (privy_user_id IS NULL AND auth_subject IS NULL) DESC
+		  LIMIT 1`,
 		wallet,
 	).Scan(&username)
 	if errors.Is(err, pgx.ErrNoRows) || (err == nil && username == nil) {

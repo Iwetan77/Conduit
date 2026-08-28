@@ -13,7 +13,7 @@
 import { useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import { useHydrated } from "@/lib/use-hydrated";
-import { useUsername } from "@/lib/use-username";
+import { USERNAME_PROMPT_EVENT, useUsername } from "@/lib/use-username";
 
 // The prompt is a modal almost nobody sees twice, so its code should not be in
 // the first load of every page.
@@ -34,8 +34,12 @@ const DISMISS_KEY = "conduit.usernamePromptDismissed";
 
 export function UsernameGate() {
   const hydrated = useHydrated();
-  const { shouldPrompt } = useUsername();
+  const { shouldPrompt, eligible, username } = useUsername();
   const [dismissed, setDismissed] = useState(true);
+  // Asked for explicitly, from the wallet menu. Overrides the dismissal --
+  // someone who just clicked "Set a username" is not to be told they already
+  // said not now.
+  const [requested, setRequested] = useState(false);
 
   // Starts dismissed and is released after mount, so the server render and the
   // first client render agree — reading sessionStorage during render would be
@@ -48,7 +52,19 @@ export function UsernameGate() {
     }
   }, []);
 
-  if (!hydrated || dismissed || !shouldPrompt) return null;
+  useEffect(() => {
+    const open = () => setRequested(true);
+    window.addEventListener(USERNAME_PROMPT_EVENT, open);
+    return () => window.removeEventListener(USERNAME_PROMPT_EVENT, open);
+  }, []);
+
+  // Two ways in: the automatic first-sign-in ask, and an explicit request from
+  // the wallet menu. The explicit one ignores the dismissal but still respects
+  // the facts -- there is nothing to ask a Solana wallet, or someone who
+  // already has a name.
+  const asked = requested && eligible && !username;
+  if (!hydrated) return null;
+  if (!asked && (dismissed || !shouldPrompt)) return null;
 
   return (
     <UsernamePrompt
@@ -61,6 +77,7 @@ export function UsernameGate() {
           // recorded server-side either way.
         }
         setDismissed(true);
+        setRequested(false);
       }}
     />
   );

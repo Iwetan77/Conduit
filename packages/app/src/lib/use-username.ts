@@ -28,6 +28,19 @@ export const usernameQk = {
   byWallet: (address?: string) => ["username", "wallet", address?.toLowerCase()] as const,
 };
 
+/**
+ * Asks the gate to open the naming prompt.
+ *
+ * An event rather than shared state, matching how sign-in already works here
+ * (see wallet-gate): the button that asks and the component that renders are on
+ * opposite sides of the tree, and neither should have to know the other exists.
+ */
+export const USERNAME_PROMPT_EVENT = "conduit:set-username";
+
+export function requestUsernamePrompt() {
+  window.dispatchEvent(new Event(USERNAME_PROMPT_EVENT));
+}
+
 export interface UsernameState {
   /** The claimed name, or null when there isn't one yet. */
   username: string | null;

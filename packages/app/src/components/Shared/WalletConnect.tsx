@@ -14,7 +14,7 @@ import {
 import { shortenAddress } from "@/lib/format";
 import { usePayerIdentity } from "@/lib/use-payer-identity";
 import { usePayerUsdc } from "@/lib/use-payer-usdc";
-import { useUsername } from "@/lib/use-username";
+import { requestUsernamePrompt, useUsername } from "@/lib/use-username";
 import { UserMark } from "@/components/Shared/UserMark";
 import { chainLabel, usdcDisplay } from "@/lib/unified-balance";
 import { CIRCLE_CONNECTOR_ID } from "@/lib/circle/connector";
@@ -194,7 +194,7 @@ function ConnectedChip({
   const { identity } = usePayerIdentity();
   // The name this person is paid under, when they have claimed one. Falls back
   // to the shortened address, which is all there ever was before.
-  const { username } = useUsername();
+  const { username, eligible: eligibleForUsername } = useUsername();
   const usdc = usePayerUsdc({
     address: identity?.address,
     family: identity?.kind,
@@ -280,6 +280,24 @@ function ConnectedChip({
                   </div>
                 ))}
             </>
+          )}
+          {/* Claiming a name later, without a settings page.
+              "Not now" used to be permanent: the prompt asks once per session
+              and there was nowhere else to say yes, so skipping it meant never
+              getting a username at all. This menu is already the identity
+              control -- it is where the address and Disconnect live -- so it is
+              where the name belongs too, rather than a page nobody would find. */}
+          {eligibleForUsername && !username && (
+            <button
+              onClick={() => {
+                setOpen(false);
+                requestUsernamePrompt();
+              }}
+              className="w-full mt-2 pt-2 border-t border-border text-left
+                         font-mono text-scale-1 text-signal hover:text-signal/80 transition-colors"
+            >
+              Set a username
+            </button>
           )}
           {/* Disconnect lives in here, not beside the chip.
               That is the pattern the Google session already used, and a payer

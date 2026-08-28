@@ -246,6 +246,15 @@ export interface UsernameResolution {
   display_name: string;
   settle_address: string;
   settle_currency: string;
+  /**
+   * "personal" or "business".
+   *
+   * One wallet can hold both kinds of account and both can hold a name, so a
+   * name alone does not say which is being paid — @Ivan resolving to "Ivan and
+   * Sons" is correct and still reads as a surprise unless the screen says it is
+   * the business.
+   */
+  account_type: "personal" | "business";
 }
 
 /**

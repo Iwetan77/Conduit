@@ -12,10 +12,12 @@
 // intent, the confirm screen — keeps working on an address and needs to know
 // nothing about names.
 import { useEffect, useRef, useState } from "react";
+import { useAccount } from "wagmi";
 import { isAddress } from "viem";
 import { resolveUsername, type UsernameResolution } from "@/lib/conduit-api";
 import { shortenAddress } from "@/lib/format";
 import { UserMark } from "@/components/Shared/UserMark";
+import { contactId, useContacts } from "@/lib/contacts";
 
 interface AddressInputProps {
   value: string;
@@ -113,12 +115,29 @@ export function AddressInput({ value, onChange, placeholder }: AddressInputProps
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [text]);
 
+  // Contacts belong to the wallet doing the saving, so the list follows the
+  // signed-in wallet rather than the browser.
+  const { address: owner } = useAccount();
+  const { contacts, save: saveCurrent, remove: removeSaved, has } = useContacts(owner);
+
   const typedAddress = isAddress(text.trim());
   // Looser than looksLikeUsername on purpose: the suffix should appear from the
   // first letter, while the LOOKUP still waits for three. Someone typing "iv"
   // is plainly typing a name and should be able to see that the app knows it.
   const nameLike = !!text.trim() && !text.trim().startsWith("0x");
   const resolved = lookup.state === "found";
+  // Offered only for a recipient that is actually settled -- a resolved name or
+  // a complete address -- and never for one already saved. Saving a
+  // half-typed address is how a contact list fills with things that cannot be
+  // paid.
+  const canSave =
+    !!owner &&
+    (resolved || typedAddress) &&
+    !has(
+      resolved
+        ? { username: lookup.result.username, address: lookup.result.settle_address }
+        : { address: text.trim() },
+    );
   const isValid = !text || typedAddress || resolved;
   const showError =
     touched && !!text && !isValid && lookup.state !== "resolving";
@@ -171,16 +190,81 @@ export function AddressInput({ value, onChange, placeholder }: AddressInputProps
       {/* Who the money is actually going to.
           Shown whenever a name resolved, because the whole risk of paying by
           name is that a name is not an address -- so the address it became is
-          put on screen before anyone can send to it. */}
+          put on screen before anyone can send to it.
+
+          The account TYPE is on it because one wallet can hold both a personal
+          and a business account, and both can hold a name. @Ivan resolving to
+          "Ivan and Sons" is correct and still reads as a surprise unless the
+          screen says it is the business. One namespace, stated plainly. */}
       {resolved && (
         <div className="flex items-center gap-2 border border-signal/30 bg-signal/5 px-3 py-2">
           <UserMark username={lookup.result.username} size="sm" />
           <span className="text-sm font-mono text-ink truncate">
             {lookup.result.display_name}
           </span>
+          <span
+            className={`shrink-0 px-1.5 py-0.5 text-[10px] font-mono uppercase tracking-wider border ${
+              lookup.result.account_type === "business"
+                ? "border-signal/40 text-signal"
+                : "border-border text-ink-dim"
+            }`}
+          >
+            {lookup.result.account_type === "business" ? "Business" : "Personal"}
+          </span>
           <span className="ml-auto text-scale-1 font-mono text-ink-dim shrink-0">
             {shortenAddress(lookup.result.settle_address)}
           </span>
+        </div>
+      )}
+
+      {/* Save, right where the decision is made.
+          A contact list nobody can add to is furniture, and a separate screen
+          for adding one is a screen nobody visits. The moment you have just
+          confirmed who someone is, is the moment saving them costs nothing. */}
+      {canSave && (
+        <button
+          type="button"
+          onClick={() =>
+            saveCurrent({
+              username: resolved ? lookup.result.username : undefined,
+              address: resolved ? lookup.result.settle_address : text.trim(),
+              label: resolved ? lookup.result.display_name : shortenAddress(text.trim()),
+            })
+          }
+          className="self-start text-scale-1 font-mono text-ink-dim hover:text-signal transition-colors"
+        >
+          + Save to contacts
+        </button>
+      )}
+
+      {/* The list, only when the field is empty.
+          It is a shortcut for starting, not a thing to read while typing -- and
+          showing it under a half-typed name would compete with the resolution
+          above it. */}
+      {!text && contacts.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 pt-0.5">
+          {contacts.map((c) => (
+            <span key={contactId(c)} className="group inline-flex items-center">
+              <button
+                type="button"
+                onClick={() => setText(c.username ?? c.address)}
+                className="flex items-center gap-1.5 border border-border px-2 py-1
+                           font-mono text-scale-1 text-ink-dim
+                           hover:text-ink hover:border-ink-dim/40 transition-colors"
+              >
+                <UserMark username={c.username} size="sm" />
+                {c.label}
+              </button>
+              <button
+                type="button"
+                aria-label={`Remove ${c.label} from contacts`}
+                onClick={() => removeSaved(contactId(c))}
+                className="ml-0.5 px-1 text-ink-dim/40 hover:text-danger transition-colors"
+              >
+                ×
+              </button>
+            </span>
+          ))}
         </div>
       )}
 

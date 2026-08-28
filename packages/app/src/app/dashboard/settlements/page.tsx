@@ -62,6 +62,21 @@ export default function SettlementsPage() {
 
   const fmtMoney = (n: number) => n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
+  // Did these payments all land in the same place?
+  //
+  // A "settled to" column was removed once because it showed the merchant's one
+  // receiving address on every row -- pure noise. That premise no longer holds:
+  // a business can now choose its payout address and change it, so rows either
+  // side of a change went to different wallets, and a ledger that cannot say
+  // which is not a ledger.
+  //
+  // Shown only when it actually varies, so a merchant who never changes
+  // anything is not given a column of one repeated value, and one who did
+  // change cannot miss it. The CSV export carries it unconditionally, since
+  // reconciliation happens outside this table.
+  const destinations = new Set(filtered.map((s) => s.settle_address.toLowerCase()));
+  const showDestination = destinations.size > 1;
+
   return (
     <div>
       <PageHeader title="Settlements" description="Every payment that has landed, with the on-chain transaction behind it." />
@@ -154,6 +169,7 @@ export default function SettlementsPage() {
                 <th className="px-4 py-3 font-medium">Date</th>
                 <th className="px-4 py-3 font-medium">Reference</th>
                 <th className="px-4 py-3 font-medium">Counterparty</th>
+                {showDestination && <th className="px-4 py-3 font-medium">Settled to</th>}
                 <th className="px-4 py-3 font-medium text-right">Paid</th>
                 <th className="px-4 py-3 font-medium text-right">Received</th>
                 <th className="px-4 py-3 font-medium text-right">Rate</th>
@@ -175,6 +191,11 @@ export default function SettlementsPage() {
                     <td className="px-4 py-3 font-mono text-xs">
                       {s.payer_address ? shortenAddress(s.payer_address) : <span className="text-ink-dim">—</span>}
                     </td>
+                    {showDestination && (
+                      <td className="px-4 py-3 font-mono text-xs">
+                        {shortenAddress(s.settle_address)}
+                      </td>
+                    )}
                     <td className="px-4 py-3 whitespace-nowrap font-mono text-right">{formatMinorUnits(s.pay_amount, s.pay_currency)}</td>
                     <td className="px-4 py-3 whitespace-nowrap font-mono text-right">{formatMinorUnits(s.settle_amount, s.settle_currency)}</td>
                     <td className="px-4 py-3 font-mono text-right">{s.rate_applied ?? "—"}</td>

@@ -57,7 +57,8 @@ func (h *BalanceTransactions) Export(w http.ResponseWriter, r *http.Request) {
 		`SELECT bt.created_at::text, COALESCE(si.id,''), COALESCE(si.reference,''),
 		        COALESCE(s.pay_currency,''), COALESCE(s.pay_amount::text,''),
 		        bt.currency, bt.net::text, COALESCE(s.rate_applied::text,''),
-		        bt.fee::text, bt.net::text, COALESCE(s.tx_hash,'')
+		        bt.fee::text, bt.net::text, COALESCE(s.tx_hash,''),
+		        COALESCE(si.settle_address,'')
 		 FROM balance_transactions bt
 		 LEFT JOIN settlements s ON s.id = bt.settlement_id
 		 LEFT JOIN settlement_intents si ON si.id = s.intent_id
@@ -74,11 +75,21 @@ func (h *BalanceTransactions) Export(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/csv")
 	w.Header().Set("Content-Disposition", `attachment; filename="conduit-balance-transactions.csv"`)
 	cw := csv.NewWriter(w)
-	cw.Write([]string{"date", "intent_id", "reference", "pay_currency", "pay_amount", "settle_currency", "settle_amount", "rate_applied", "fee", "net", "tx_hash"})
+	// settle_address is WHERE THE MONEY WENT, and it belongs in an export used
+	// for bookkeeping. It was omitted while every payment necessarily landed at
+	// the account's one address, which made the column identical on every row.
+	// A business can now choose its payout address and change it, so two rows in
+	// the same export can have settled to two different places -- and a ledger
+	// that cannot say which is not a ledger.
+	//
+	// Read from the INTENT, not the account: settle_address is copied onto the
+	// intent when it is created, so each row reports where that payment actually
+	// went rather than where the next one would go.
+	cw.Write([]string{"date", "intent_id", "reference", "pay_currency", "pay_amount", "settle_currency", "settle_amount", "rate_applied", "fee", "net", "tx_hash", "settle_address"})
 
 	for rows.Next() {
-		var date, intentID, reference, payCurrency, payAmount, settleCurrency, settleAmount, rateApplied, fee, net, txHash string
-		if err := rows.Scan(&date, &intentID, &reference, &payCurrency, &payAmount, &settleCurrency, &settleAmount, &rateApplied, &fee, &net, &txHash); err != nil {
+		var date, intentID, reference, payCurrency, payAmount, settleCurrency, settleAmount, rateApplied, fee, net, txHash, settleAddress string
+		if err := rows.Scan(&date, &intentID, &reference, &payCurrency, &payAmount, &settleCurrency, &settleAmount, &rateApplied, &fee, &net, &txHash, &settleAddress); err != nil {
 			return // partial CSV already streamed; can't recover mid-stream
 		}
 
@@ -105,7 +116,7 @@ func (h *BalanceTransactions) Export(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		cw.Write([]string{date, intentID, reference, payCurrency, payAmount, settleCurrency, settleAmount, rateApplied, fee, net, txHash})
+		cw.Write([]string{date, intentID, reference, payCurrency, payAmount, settleCurrency, settleAmount, rateApplied, fee, net, txHash, settleAddress})
 	}
 	cw.Flush()
 }

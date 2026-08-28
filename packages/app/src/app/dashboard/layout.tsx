@@ -1,6 +1,7 @@
 "use client";
 
 import { useMyAccount } from "@/lib/queries";
+import { PayoutAddressGate } from "@/components/Dashboard/PayoutAddressGate";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -327,6 +328,14 @@ function CircleDashboard({ children }: { children: React.ReactNode }) {
   const [accountReady, setAccountReady] = useState(false);
   const [needsOnboarding, setNeedsOnboarding] = useState(false);
   const onCircle = isConnected && connector?.id === CIRCLE_CONNECTOR_ID;
+  // Declared with the other hooks, above every early return below.
+  //
+  // Not moved down next to the gate it feeds, however tempting that reads: a
+  // hook placed after a conditional return is exactly the shape that took the
+  // whole site down with React #310 twice, and this component returns early
+  // five times. Enabled only once the account exists, so it costs nothing on
+  // the sign-in and onboarding screens.
+  const { data: myAccount } = useMyAccount(accountReady);
 
   // Is a sign-in still being resolved?
   //
@@ -424,7 +433,16 @@ function CircleDashboard({ children }: { children: React.ReactNode }) {
     );
   }
   if (!accountReady) return null;
-  return <DashboardChrome signOut={signOut}>{children}</DashboardChrome>;
+  // Asked once, before anything else in the dashboard: where should this
+  // business be paid? The account bootstrap defaults settle_address to the
+  // sign-in wallet without asking, so until this is answered a business is
+  // mixing its takings with its owner's own money by accident rather than by
+  // choice. Renders its children untouched the moment it has an answer.
+  return (
+    <PayoutAddressGate account={myAccount}>
+      <DashboardChrome signOut={signOut}>{children}</DashboardChrome>
+    </PayoutAddressGate>
+  );
 }
 
 // First-login onboarding for a Circle merchant. Same required fields as the

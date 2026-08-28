@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/kzn-labs/conduit/api/internal/auth"
@@ -34,7 +35,12 @@ type accountResponse struct {
 	Username       *string `json:"username"`
 	SettleCurrency string  `json:"settle_currency"`
 	SettleAddress  string  `json:"settle_address"`
-	Livemode       bool    `json:"livemode"`
+	// False until the owner has explicitly said where business income should
+	// land. The dashboard gates on this, so it must be present on every
+	// response rather than omitted when unset -- absent and false have to mean
+	// the same thing to a client, and only one of them does if it is omitted.
+	PayoutConfirmed bool `json:"payout_confirmed"`
+	Livemode        bool `json:"livemode"`
 	// APIKey is only ever present in the create response, exactly once.
 	APIKey *createdKey `json:"api_key,omitempty"`
 }
@@ -253,11 +259,12 @@ func (h *Accounts) Me(w http.ResponseWriter, r *http.Request) {
 
 	var resp accountResponse
 	err := h.Pool.QueryRow(r.Context(),
-		`SELECT id, name, logo_url, username, settle_currency, settle_address, livemode
+		`SELECT id, name, logo_url, username, settle_currency, settle_address,
+		        payout_confirmed_at IS NOT NULL, livemode
 		   FROM accounts WHERE id = $1`,
 		principal.AccountID,
 	).Scan(&resp.ID, &resp.Name, &resp.LogoURL, &resp.Username,
-		&resp.SettleCurrency, &resp.SettleAddress, &resp.Livemode)
+		&resp.SettleCurrency, &resp.SettleAddress, &resp.PayoutConfirmed, &resp.Livemode)
 	if err != nil {
 		writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
 		return
@@ -280,6 +287,35 @@ func (h *Accounts) Me(w http.ResponseWriter, r *http.Request) {
 // Restricted to session callers. An sk_ key has no session to end, and letting
 // a leaked key sign the merchant's dashboard out would hand an attacker a
 // denial of service against the account's own owner.
+// ConfirmPayoutAddress records that the owner has decided where business
+// income lands, WITHOUT changing the address.
+//
+// The other half of the payout gate. Setting a new address confirms it
+// implicitly (see Update), but "keep sending it to the wallet I sign in with"
+// is an equally valid answer and needs somewhere to be recorded -- otherwise a
+// one-person business is asked the same question at every sign-in forever, and
+// a prompt that cannot be answered is one people learn to dismiss unread.
+//
+// Deliberately does not take an address. A caller that wants to CHANGE the
+// address uses Update, which validates it; letting this endpoint set one too
+// would be a second, unvalidated path to the field that decides where money
+// goes.
+func (h *Accounts) ConfirmPayoutAddress(w http.ResponseWriter, r *http.Request) {
+	principal, ok := auth.FromContext(r.Context())
+	if !ok {
+		writeErr(w, apierrors.E(apierrors.CodeUnauthorized, ""))
+		return
+	}
+	if _, err := h.Pool.Exec(r.Context(),
+		`UPDATE accounts SET payout_confirmed_at = now() WHERE id = $1`,
+		principal.AccountID,
+	); err != nil {
+		writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"payout_confirmed": true})
+}
+
 func (h *Accounts) Logout(w http.ResponseWriter, r *http.Request) {
 	principal, _ := auth.FromContext(r.Context())
 	if principal.KeyType != auth.KeyTypeSession {
@@ -324,13 +360,28 @@ func (h *Accounts) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if req.SettleAddress != nil && !common.IsHexAddress(*req.SettleAddress) {
+		// Validated here because this is where money starts going somewhere
+		// else. A typo in a payout address is not recoverable by us -- the
+		// settlement is on-chain and final -- so a malformed one must never be
+		// stored, however it arrived.
+		writeErr(w, apierrors.E(apierrors.CodeInvalidRequest, "settle_address"))
+		return
+	}
+
 	ctx := r.Context()
 	tag, err := h.Pool.Exec(ctx,
 		`UPDATE accounts SET
 		   name = COALESCE($1, name),
 		   logo_url = COALESCE($2, logo_url),
 		   settle_currency = COALESCE($3, settle_currency),
-		   settle_address = COALESCE($4, settle_address)
+		   settle_address = COALESCE($4, settle_address),
+		   -- Setting the payout address IS confirming it. Someone who has just
+		   -- typed where their money should go has answered the question the
+		   -- gate exists to ask, and asking again afterwards would be the kind
+		   -- of prompt people learn to click through without reading.
+		   payout_confirmed_at = CASE WHEN $4::text IS NOT NULL
+		                              THEN now() ELSE payout_confirmed_at END
 		 WHERE id = $5 AND (id = $6 OR parent_id = $6)`,
 		req.Name, req.LogoURL, req.SettleCurrency, req.SettleAddress, id, principal.AccountID,
 	)

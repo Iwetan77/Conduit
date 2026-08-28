@@ -433,6 +433,10 @@ func New(cfg Config) http.Handler {
 			// Claiming a name is an account action, so it sits behind the same
 			// auth as the rest of them. Read is public; write never is.
 			r.Post("/accounts/me/username", usernamesH.Claim)
+			// "Keep sending it where it already goes." The other answer --
+			// naming a different address -- confirms itself through the account
+			// update, which validates the address.
+			r.Post("/accounts/me/payout/confirm", accountsH.ConfirmPayoutAddress)
 			// Ends every session for the account. Authenticated because it acts
 			// on the caller's own account, and only meaningful to a session
 			// caller -- see Accounts.Logout.

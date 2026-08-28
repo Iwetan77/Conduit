@@ -3,85 +3,63 @@
 import { usePayerIdentity } from "@/lib/use-payer-identity";
 import { ArcOnlyNotice } from "@/components/Shared/ArcOnlyNotice";
 import { useHydrated } from "@/lib/use-hydrated";
-import { useEffect, useState } from "react";
+import { useMemo } from "react";
 import { useAccount } from "wagmi";
 import { Nav, MobileNav } from "@/components/Shared/Nav";
 import {
   HistoryTable,
   onChainReceiptsToRows,
   walletSettlementsToRows,
-  type HistoryRow,
 } from "@/components/Shared/HistoryTable";
 import { WalletConnect } from "@/components/Shared/WalletConnect";
+import { useOnChainHistory, useWalletFxHistory } from "@/lib/payer-queries";
 
 export default function HistoryPage() {
   const { address, isConnected, connector } = useAccount();
-  const [onChainRows, setOnChainRows] = useState<HistoryRow[]>([]);
-  const [fxRows, setFxRows] = useState<HistoryRow[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string>("");
-  // Cross-currency history needs a wallet signature; not fatal if it's
-  // skipped or declined — the on-chain half still loads and this only shows
-  // if that half specifically failed.
-  const [fxError, setFxError] = useState<string>("");
   const mounted = useHydrated();
   const { identity } = usePayerIdentity();
 
-  const load = async () => {
-    if (!isConnected || !address) return;
-    setIsLoading(true);
-    setError("");
-    setFxError("");
+  // Both halves cached, and each still fills in independently of the other.
+  //
+  // Same-currency: a pure on-chain read, no server involved. Cross-currency:
+  // Circle's maker settles via Permit2, which never touches ConduitRouter, so
+  // those payments have no on-chain event at all — the only record is Conduit's
+  // own database, reached with a wallet signature proving this is genuinely
+  // that wallet's history to see.
+  //
+  // That signature is why caching matters most here. It used to be requested on
+  // every mount, so leaving the page and coming back meant approving a wallet
+  // prompt again to see rows the browser had just displayed. It is now once per
+  // wallet per five minutes; the Refresh button forces it when actually wanted.
+  const ready = mounted && isConnected && !!address;
+  const onChain = useOnChainHistory(address, ready);
+  const fx = useWalletFxHistory(address, connector, ready);
 
-    // Same-currency: pure on-chain read, no server involved. Cross-currency:
-    // Circle's maker settles via Permit2, which never touches ConduitRouter,
-    // so those payments have no on-chain event to read at all — the only
-    // record of them is Conduit's own database, reached here with a wallet
-    // signature proving this is genuinely that wallet's history to see.
-    // Run both concurrently; each fills in independently of the other.
-    const onChainPromise = (async () => {
-      try {
-        const { ReceiptClient } = await import("@conduit/sdk");
-        const { arcReadProvider } = await import("@/lib/arc-provider");
-        const receiptClient = new ReceiptClient(arcReadProvider());
-        const receipts = await receiptClient.getHistory(address as `0x${string}`, { limit: 50 });
-        setOnChainRows(onChainReceiptsToRows(receipts, address));
-      } catch (err) {
-        console.error("Failed to load on-chain history:", err);
-        // "Failed to fetch" = Arc's public RPC rate-limiting the browser —
-        // say that, not a bare fetch error.
-        setError("Arc's public RPC is rate-limiting right now. Wait a few seconds and retry.");
-      }
-    })();
+  const onChainRows = useMemo(
+    () => (onChain.data && address ? onChainReceiptsToRows(onChain.data, address) : []),
+    [onChain.data, address],
+  );
+  const fxRows = useMemo(
+    () => (fx.data ? walletSettlementsToRows(fx.data) : []),
+    [fx.data],
+  );
 
-    const fxPromise = (async () => {
-      try {
-        const { getWalletProvider } = await import("@/lib/wallet-provider");
-        const { signWalletHistoryRequest } = await import("@/lib/wallet-history-signature");
-        const { getWalletSettlements } = await import("@/lib/conduit-api");
-        const provider = await getWalletProvider(connector);
-        const { timestamp, signature } = await signWalletHistoryRequest(address, provider);
-        const rows = await getWalletSettlements(address, timestamp, signature);
-        setFxRows(walletSettlementsToRows(rows));
-      } catch (err) {
-        console.error("Failed to load cross-currency history:", err);
-        // A declined signature is the most common failure here and isn't
-        // really an error — the payer just chose not to prove wallet
-        // ownership right now. Say so without alarming language; same-
-        // currency history above is unaffected either way.
-        setFxError("Sign the request in your wallet to see cross-currency payments too.");
-      }
-    })();
-
-    await Promise.all([onChainPromise, fxPromise]);
-    setIsLoading(false);
+  // "Failed to fetch" here is Arc's public RPC rate-limiting the browser — say
+  // that, not a bare fetch error.
+  const error = onChain.error
+    ? "Arc's public RPC is rate-limiting right now. Wait a few seconds and retry."
+    : "";
+  // A declined signature is the most common failure on this half and is not
+  // really an error — the payer just chose not to prove wallet ownership right
+  // now. Said without alarm; the same-currency half above is unaffected.
+  const fxError = fx.error
+    ? "Sign the request in your wallet to see cross-currency payments too."
+    : "";
+  const isLoading = onChain.isLoading || fx.isLoading;
+  const load = () => {
+    void onChain.refetch();
+    void fx.refetch();
   };
-
-  useEffect(() => {
-    if (!mounted || !isConnected || !address) return;
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mounted, isConnected, address]);
 
   const rows = [...onChainRows, ...fxRows];
 

@@ -56,7 +56,18 @@ export function walletSettlementsToRows(rows: WalletSettlementRow[]): HistoryRow
     return {
     key: r.id,
     direction: received ? ("received" as const) : ("sent" as const),
-    counterpartyAddress: r.settle_address,
+    // The COUNTERPARTY, which depends on the direction.
+    //
+    // This was settle_address either way, and settle_address is the payout
+    // address -- so on a received row it named the wallet's own address and
+    // every incoming payment read as "From <you>", as though the money had been
+    // sent to itself.
+    //
+    // Empty when the server reports no payer: a bridged payment's Arc-side
+    // sender is Conduit's relayer, and the payer's real wallet is on another
+    // chain. The table prints "From an unknown wallet" for that rather than
+    // substituting an address it does have, which is how this bug started.
+    counterpartyAddress: received ? (r.payer_address ?? "") : r.settle_address,
     currency: isoToToken(received ? r.settle_currency : r.pay_currency) as Currency,
     amount: BigInt(received ? r.settle_amount : r.pay_amount),
     settledAt: Number(r.settled_at),
@@ -108,6 +119,19 @@ export function HistoryTable({ rows, isLoading }: HistoryTableProps) {
       <div className="divide-y divide-border">
         {sorted.map((row) => {
           const isSender = row.direction === "sent";
+          // Computed once and used by both layouts. The mobile and desktop
+          // blocks below each built this string themselves, which is two places
+          // for the same rule to be got wrong independently.
+          //
+          // An empty counterparty is a real state, not a bug to paper over: a
+          // bridged payment arrives via Conduit's relayer and the payer's own
+          // wallet is on another chain, so there is no Arc address to name.
+          // shortenAddress("") would render "0x…" and imply one exists.
+          const counterpartyLabel = row.counterpartyAddress
+            ? `${isSender ? "To" : "From"} ${shortenAddress(row.counterpartyAddress)}`
+            : isSender
+              ? "To an unknown wallet"
+              : "From another chain";
           const txShort = row.txHash
             ? `${row.txHash.slice(0, 6)}…${row.txHash.slice(-4)}`
             : "—";
@@ -133,9 +157,7 @@ export function HistoryTable({ rows, isLoading }: HistoryTableProps) {
                     {isSender ? "↑" : "↓"}
                   </span>
                   <span className="text-scale-2 font-mono text-ink truncate">
-                    {isSender
-                      ? `To ${shortenAddress(row.counterpartyAddress)}`
-                      : `From ${shortenAddress(row.counterpartyAddress)}`}
+                    {counterpartyLabel}
                   </span>
                   <TokenBadge currency={row.currency} size="sm" />
                 </div>
@@ -155,9 +177,7 @@ export function HistoryTable({ rows, isLoading }: HistoryTableProps) {
                   </span>
                   <div className="flex flex-col">
                     <span className="text-scale-2 font-mono text-ink">
-                      {isSender
-                        ? `To ${shortenAddress(row.counterpartyAddress)}`
-                        : `From ${shortenAddress(row.counterpartyAddress)}`}
+                      {counterpartyLabel}
                     </span>
                     <TokenBadge currency={row.currency} size="sm" />
                   </div>

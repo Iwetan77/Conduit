@@ -92,8 +92,10 @@ const nextConfig = {
     "/pay/**": [
       "./packages/app/src/app/pay/**/*.woff",
       "./packages/app/src/app/pay/**/conduit-wordmark.png",
+      "./packages/app/src/app/pay/**/flags/*.svg",
       "./src/app/pay/**/*.woff",
       "./src/app/pay/**/conduit-wordmark.png",
+      "./src/app/pay/**/flags/*.svg",
     ],
   },
 

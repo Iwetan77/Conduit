@@ -398,9 +398,20 @@ export default function SendPage() {
                             .join(" + ")}`}
                     </p>
                   )}
-                  {/* Shown BESIDE a disabled button now. It used to sit beside
-                      an enabled one, which is how someone pressed it early. */}
-                  {decision.status === "resolving" && (
+                  {/* Only while a balance read is genuinely outstanding.
+                      This was shown for any "resolving" decision, and a route
+                      is also unresolvable when no AMOUNT has been typed yet --
+                      which is the state the page opens in. So it sat there
+                      permanently on arrival, directly beneath a Pay with list
+                      that had already loaded and was showing real balances.
+                      It claimed to be doing something it had already finished.
+
+                      Kept rather than deleted because it does have one real
+                      job: explaining why Review Payment is disabled while a
+                      slow chain is still answering. Requiring an amount is what
+                      separates that from the false case -- with no amount there
+                      is nothing to check and nothing being waited on. */}
+                  {decision.status === "resolving" && required.data !== undefined && (
                     <p className="text-center text-scale-1 font-mono text-ink-dim">
                       Checking your balances…
                     </p>

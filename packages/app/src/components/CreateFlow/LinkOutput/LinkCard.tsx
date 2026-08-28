@@ -3,7 +3,8 @@
 import { useRef } from "react";
 import { toPng } from "html-to-image";
 import type { Currency } from "@conduit/sdk/lite";
-import { formatAmount } from "@/lib/format";
+import { formatAmount, formatAmountHero } from "@/lib/format";
+import { TokenIcon } from "@/components/Shared/TokenBadge";
 import { useCopy } from "@/lib/use-copy";
 
 interface LinkCardProps {
@@ -27,9 +28,15 @@ export function LinkCard({
   const { copied, copy } = useCopy();
 
   const shortRecipient = `${recipientAddress.slice(0, 6)}...${recipientAddress.slice(-4)}`;
-  const displayAmount = amount > 0n
-    ? formatAmount(amount, currency)
-    : `Pay what you want · ${currency}`;
+  const hasAmount = amount > 0n;
+  const heroAmount = hasAmount ? formatAmountHero(amount, currency) : "";
+  // ~250px of card width for the text once padding and the 34px mark are out,
+  // and Anton's digits run about 0.58em. 48px ceiling, 20px floor so a very
+  // long amount stays legible rather than vanishing.
+  const heroSize = Math.max(
+    20,
+    Math.min(48, Math.floor(250 / (0.58 * `${heroAmount} ${currency}`.length))),
+  );
 
   const downloadPng = async () => {
     if (!cardRef.current) return;
@@ -102,15 +109,79 @@ export function LinkCard({
           {label && (
             <p style={{ color: "var(--ink-dim)", fontSize: "13px", marginBottom: "8px" }}>{label}</p>
           )}
-          <p style={{
-            fontFamily: "Anton, sans-serif",
-            fontWeight: 800,
-            fontSize: "48px",
-            color: "var(--ink)",
-            lineHeight: 1,
-          }}>
-            {displayAmount}
-          </p>
+          {/* Token MARK, amount, then the symbol as a label.
+              This was one string from formatAmount, which meant the currency
+              appeared twice -- as a glyph welded to the first digit and again
+              as a code. For CHFAU that rendered "CHF500.00 CHFAU", and the card
+              is the first thing anyone sees of a payment request.
+              The icon carries the currency visually (a real coin mark or the
+              country's flag, never a letter pretending to be a logo), and the
+              number and symbol sit beside it at equal weight -- so nothing
+              collides no matter how many letters the token's name has. */}
+          {hasAmount ? (
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: "10px",
+                flexWrap: "wrap",
+              }}
+            >
+              <TokenIcon currency={currency} px={34} />
+              {/* Amount and asset at ONE size, sized to fit.
+                  The symbol used to be a 20px label beside a 48px number,
+                  which read as a footnote floating next to the amount -- but
+                  which asset is being asked for is not a footnote. Equal
+                  sizing needs the pair to be able to shrink, so the size comes
+                  from the line's own length; 48px stays the ceiling so a short
+                  amount lands exactly as it did. */}
+              <span
+                style={{
+                  fontFamily: "Anton, sans-serif",
+                  fontWeight: 800,
+                  fontSize: `${heroSize}px`,
+                  color: "var(--ink)",
+                  lineHeight: 1,
+                }}
+              >
+                {heroAmount}
+              </span>
+              <span
+                style={{
+                  fontFamily: "Anton, sans-serif",
+                  fontWeight: 800,
+                  fontSize: `${heroSize}px`,
+                  color: "var(--ink-dim)",
+                  lineHeight: 1,
+                }}
+              >
+                {currency}
+              </span>
+            </div>
+          ) : (
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: "10px",
+              }}
+            >
+              <TokenIcon currency={currency} px={28} />
+              <span
+                style={{
+                  fontFamily: "Anton, sans-serif",
+                  fontWeight: 800,
+                  fontSize: "28px",
+                  color: "var(--ink)",
+                  lineHeight: 1.1,
+                }}
+              >
+                Pay what you want
+              </span>
+            </div>
+          )}
           <p style={{ color: "var(--ink-dim)", fontSize: "13px", marginTop: "8px" }}>
             Pay in any currency
           </p>

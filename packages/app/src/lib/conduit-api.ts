@@ -776,6 +776,12 @@ export interface WalletSettlementRow {
   settle_currency: string;
   settle_amount: string;
   settle_address: string;
+  /**
+   * Who paid. Null on a bridged payment: the Arc-side sender is Conduit's own
+   * relayer and the payer's real wallet is on another chain, so there is no
+   * honest Arc address to name.
+   */
+  payer_address: string | null;
   rate_applied: string | null;
   settled_at: string; // unix seconds, as a string
   /** "sent" when this wallet funded it, "received" when it was paid out to. */

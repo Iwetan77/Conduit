@@ -4,10 +4,11 @@ import { usePayerIdentity } from "@/lib/use-payer-identity";
 import { ArcOnlyNotice } from "@/components/Shared/ArcOnlyNotice";
 import { useHydrated } from "@/lib/use-hydrated";
 import { ARC_RPC_URL } from "@/lib/wagmi";
+import { useWalletLinks } from "@/lib/payer-queries";
 
 import Link from "next/link";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useAccount } from "wagmi";
 import type { PaymentDeclaration } from "@conduit/sdk/lite";
 import { Nav, MobileNav } from "@/components/Shared/Nav";
@@ -20,57 +21,21 @@ import { useCopy } from "@/lib/use-copy";
 
 export default function LinksPage() {
   const { address, isConnected, connector } = useAccount();
-  const [declarations, setDeclarations] = useState<PaymentDeclaration[]>([]);
-  const [paymentCounts, setPaymentCounts] = useState<Record<string, number>>({});
-  const [isLoading, setIsLoading] = useState(false);
   const [deactivating, setDeactivating] = useState<string | null>(null);
   const [selectedDecl, setSelectedDecl] = useState<PaymentDeclaration | null>(null);
   const { copied, copy } = useCopy();
   const { identity } = usePayerIdentity();
   const mounted = useHydrated();
 
-  const loadDeclarations = async () => {
-    if (!address) return;
-    setIsLoading(true);
-    try {
-      const { ConduitClient, ReceiptClient } = await import("@conduit/sdk");
-      const { arcReadProvider } = await import("@/lib/arc-provider");
-      const provider = arcReadProvider();
-      const mockSigner = {
-        getAddress: async () => address,
-        sendTransaction: async () => ({ hash: "0x", wait: async () => ({ status: 1, blockNumber: 0 }) }),
-      };
-
-      const receiptClient = new ReceiptClient(provider);
-      const conduitClient = new ConduitClient({ signer: mockSigner, rpcUrl: ARC_RPC_URL });
-
-      const [decls, receipts] = await Promise.all([
-        conduitClient.getDeclarations(address as `0x${string}`),
-        receiptClient.getHistory(address as `0x${string}`, { limit: 200 }),
-      ]);
-
-      setDeclarations(decls);
-
-      // Count payments received per declaration
-      const counts: Record<string, number> = {};
-      for (const r of receipts) {
-        if (r.recipient.toLowerCase() === address.toLowerCase()) {
-          counts[r.declarationId] = (counts[r.declarationId] ?? 0) + 1;
-        }
-      }
-      setPaymentCounts(counts);
-    } catch (err) {
-      console.error("Failed to load declarations:", err);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    if (mounted && isConnected && address) {
-      loadDeclarations();
-    }
-  }, [mounted, isConnected, address]);
+  // Cached, so coming back to this page shows the links that were on screen a
+  // moment ago and refreshes them in place. It used to re-run a full Arc RPC
+  // read -- declarations plus 200 receipts -- on every mount, behind a spinner,
+  // for rows that had not changed.
+  const linksQuery = useWalletLinks(address, mounted && isConnected);
+  const declarations = linksQuery.data?.declarations ?? [];
+  const paymentCounts = linksQuery.data?.paymentCounts ?? {};
+  const isLoading = linksQuery.isLoading;
+  const loadDeclarations = () => linksQuery.refetch();
 
   const handleDeactivate = async (declarationId: string) => {
     if (!window.confirm("Deactivate this link? It cannot be reactivated.")) return;

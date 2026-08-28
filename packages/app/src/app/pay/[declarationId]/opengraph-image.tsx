@@ -19,12 +19,23 @@ export const contentType = "image/png";
 
 const API_BASE = process.env.NEXT_PUBLIC_CONDUIT_API_URL ?? "http://localhost:8080";
 
-// The currency's own symbol. Keyed by the ISO code the API sends, which is why
-// EURAU appears as itself: it is a token symbol standing in for an ISO code,
-// because EUR is already EURC's (see lib/currencies.ts).
-const SYMBOLS: Record<string, string> = {
-  USD: "$", EUR: "€", EURAU: "€", BRL: "R$", AUD: "A$", MXN: "MX$",
-  CAD: "C$", GBP: "£", ZAR: "R", KRW: "₩", CHF: "Fr",
+// The token's own mark, mirroring TokenIcon in components/Shared/TokenBadge.
+//
+// A glyph table used to sit here and print in FRONT of the amount, which put
+// the currency on the card twice and welded a multi-letter code onto the first
+// digit: CHF's entry rendered "Fr500.00 CHFAU". The card is what gets pasted
+// into WhatsApp and X, so that was the version of a payment request most people
+// would ever see.
+//
+// Keyed by TOKEN symbol, not the ISO code -- isoToToken has already run by the
+// time these are used, and keying on ISO is what made EURAU need a special case
+// (EUR is already EURC's).
+const COIN_GLYPHS: Record<string, string> = { USDC: "$", EURC: "€" };
+// Circle's regional stablecoins have no coin artwork, so they show the
+// country's flag, exactly as the app does.
+const FLAG_FOR: Record<string, string> = {
+  BRLA: "BR", AUDF: "AU", MXNB: "MX", QCAD: "CA", GBPA: "GB",
+  ZARU: "ZA", KRW1: "KR", CHFAU: "CH", EURAU: "EU",
 };
 
 // Read off disk, once per warm instance.
@@ -59,6 +70,28 @@ function loadAssets() {
     };
   })();
   return assets;
+}
+
+// Flags, read from disk on demand and cached per country.
+//
+// Copied into this directory rather than imported from country-flag-icons:
+// the app's TokenIcon uses that package's React components, which satori
+// cannot render, and a node_modules path is not reliably traced into the
+// deployed function. Real .svg files beside the fonts, covered by the same
+// tracing rule, and small enough that all nine together are under 7 kB.
+//
+// Failure is non-fatal on purpose. Everything about this card is best-effort:
+// a missing flag should cost the mark, never the whole image.
+const flagCache = new Map<string, Promise<string | null>>();
+function loadFlag(country: string) {
+  let hit = flagCache.get(country);
+  if (!hit) {
+    hit = readFile(join(ASSET_DIR, "flags", `${country}.svg`))
+      .then((buf) => `data:image/svg+xml;base64,${buf.toString("base64")}`)
+      .catch(() => null);
+    flagCache.set(country, hit);
+  }
+  return hit;
 }
 
 async function fetchInfo(id: string | undefined) {
@@ -106,21 +139,46 @@ export default async function Image({
 
   let amount = "";
   let token = "";
-  let glyph = "";
   if (info?.amount && info?.settle_currency) {
     try {
       token = isoToToken(info.settle_currency);
       const human = toHumanAmount(BigInt(info.amount), currencyDecimals(token));
+      // A whole amount stays whole. Two trailing zeros were the largest thing
+      // on the card after the number itself and said nothing; grouping stays,
+      // because that is what makes a big request readable at a glance.
       amount = Number(human).toLocaleString("en-US", {
-        minimumFractionDigits: 2,
+        minimumFractionDigits: 0,
         maximumFractionDigits: 2,
       });
-      glyph = SYMBOLS[info.settle_currency] ?? "";
     } catch {
       amount = "";
       token = "";
     }
   }
+
+  // The token's mark: a flag for the regional stablecoins, a coin for USDC and
+  // EURC, and nothing at all when neither applies -- the symbol beside the
+  // amount still names it, so a missing mark costs decoration rather than
+  // meaning.
+  const flagSrc = token && FLAG_FOR[token] ? await loadFlag(FLAG_FOR[token]) : null;
+  const coinGlyph = token ? COIN_GLYPHS[token] : undefined;
+
+  // The amount and its symbol are set at ONE size, sized to fit.
+  //
+  // The symbol used to be fixed at 60px next to a 148px number, which read as a
+  // footnote floating beside the amount rather than as part of it -- and the
+  // symbol is not a footnote, it is which asset is being asked for.
+  //
+  // Equal sizing only works if the pair can shrink: "1,234,567.89 KRW1" at
+  // 148px is far wider than the card. So the size is derived from the line's
+  // own length. Anton's digits run about 0.58em wide, and roughly 930px is left
+  // once the padding and the token mark are taken out; 148px stays the ceiling
+  // so a short amount still lands as hard as it did.
+  const heroLine = `${amount} ${token}`;
+  const heroSize = Math.max(
+    56,
+    Math.min(148, Math.floor((flagSrc || coinGlyph ? 930 : 1050) / (0.58 * heroLine.length))),
+  );
 
   // The grid, drawn rather than imported. The site's background grid is a CSS
   // layer this renderer has no access to, and without it the card reads as a
@@ -193,11 +251,52 @@ export default async function Image({
             </div>
 
             {amount && token ? (
-              <div style={{ display: "flex", alignItems: "baseline", gap: 18, marginTop: 10 }}>
-                <div style={{ color: "#B2F55A", fontSize: 148, lineHeight: 1 }}>
-                  {`${glyph}${amount}`}
-                </div>
-                <div style={{ color: "#f5f5f5", fontSize: 60, lineHeight: 1 }}>{token}</div>
+              <div style={{ display: "flex", alignItems: "center", gap: 18, marginTop: 10 }}>
+                {/* The mark first, then the number alone, then the symbol.
+                    The glyph used to be welded to the first digit, so CHFAU
+                    read "Fr500.00 CHFAU" -- the currency stated twice, once as
+                    letters touching the number. A mark cannot collide with a
+                    digit however many letters the token's name has. */}
+                {flagSrc ? (
+                  // Circle-cropped so a 3:2 flag sits as an equal beside the
+                  // round coin marks, matching TokenIcon in the app.
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      width: 104,
+                      height: 104,
+                      borderRadius: 52,
+                      overflow: "hidden",
+                    }}
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={flagSrc} width={156} height={104} alt="" />
+                  </div>
+                ) : coinGlyph ? (
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      width: 104,
+                      height: 104,
+                      borderRadius: 52,
+                      border: "3px solid #B2F55A",
+                      color: "#B2F55A",
+                      fontSize: 56,
+                      lineHeight: 1,
+                    }}
+                  >
+                    {coinGlyph}
+                  </div>
+                ) : null}
+                {/* Same size, so the pair reads as one amount. Only the colour
+                    separates them -- the number in signal green, the asset in
+                    white -- which distinguishes without demoting either. */}
+                <div style={{ color: "#B2F55A", fontSize: heroSize, lineHeight: 1 }}>{amount}</div>
+                <div style={{ color: "#f5f5f5", fontSize: heroSize, lineHeight: 1 }}>{token}</div>
               </div>
             ) : (
               <div style={{ color: "#B2F55A", fontSize: 96, lineHeight: 1, marginTop: 10 }}>

@@ -33,8 +33,16 @@ services:
         sync: false
       # Public app origin, used to build hosted_url on payment links. Get
       # this wrong and every generated link/QR points at the wrong host.
+      #
+      # Pinned here rather than left to the dashboard, because it HAD drifted:
+      # every link and QR generated in production carried the deploy-preview
+      # host (useconduit-app.vercel.app) instead of the real domain. A link is
+      # the product -- it gets pasted into WhatsApp and X and outlives whatever
+      # host was current the day it was made -- so the value belongs in git
+      # where a wrong one shows up in review, not in a console where nothing
+      # ever reads it back.
       - key: CONDUIT_APP_BASE_URL
-        sync: false
+        value: https://useconduit.xyz
 
       # Conduit's own router on Arc testnet. The settlement indexer watches it
       # for PaymentSettled, so leaving it unset silently disables that path.

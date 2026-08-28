@@ -40,15 +40,23 @@ type walletHistoryRequest struct {
 }
 
 type walletSettlementRow struct {
-	ID             string  `json:"id"`
-	TxHash         string  `json:"tx_hash"`
-	PayCurrency    string  `json:"pay_currency"`
-	PayAmount      string  `json:"pay_amount"`
-	SettleCurrency string  `json:"settle_currency"`
-	SettleAmount   string  `json:"settle_amount"`
-	SettleAddress  string  `json:"settle_address"`
-	RateApplied    *string `json:"rate_applied"`
-	SettledAt      string  `json:"settled_at"`
+	ID             string `json:"id"`
+	TxHash         string `json:"tx_hash"`
+	PayCurrency    string `json:"pay_currency"`
+	PayAmount      string `json:"pay_amount"`
+	SettleCurrency string `json:"settle_currency"`
+	SettleAmount   string `json:"settle_amount"`
+	SettleAddress  string `json:"settle_address"`
+	// Who paid. Null on a bridged payment, where the Arc-side sender is
+	// Conduit's own relayer and the payer's real wallet is on another chain --
+	// see migration 0013. Null means "we do not know", which the UI has to say
+	// rather than filling the gap with whatever address it has to hand.
+	//
+	// Without this the page had only settle_address to show, so a RECEIVED row
+	// named the wallet's own payout address and read as paying yourself.
+	PayerAddress *string `json:"payer_address"`
+	RateApplied  *string `json:"rate_applied"`
+	SettledAt    string  `json:"settled_at"`
 	// "sent" when this wallet funded the payment, "received" when it was the
 	// payout address. Lets /history colour and sign the row correctly.
 	Direction string `json:"direction"`
@@ -140,6 +148,7 @@ func (h *WalletHistory) List(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.Pool.Query(r.Context(),
 		`SELECT s.id, s.tx_hash, s.pay_currency, s.pay_amount::text,
 		        si.settle_currency, s.settle_amount::text, si.settle_address,
+		        COALESCE(s.payer_address, ft.pay_address) AS payer_address,
 		        s.rate_applied::text, s.settled_at,
 		        CASE WHEN lower(si.settle_address) = lower($1) THEN 'received' ELSE 'sent' END AS direction
 		 FROM settlements s
@@ -162,8 +171,8 @@ func (h *WalletHistory) List(w http.ResponseWriter, r *http.Request) {
 		var rate *string
 		var settledAt time.Time
 		if err := rows.Scan(&row.ID, &row.TxHash, &row.PayCurrency, &row.PayAmount,
-			&row.SettleCurrency, &row.SettleAmount, &row.SettleAddress, &rate, &settledAt,
-			&row.Direction); err != nil {
+			&row.SettleCurrency, &row.SettleAmount, &row.SettleAddress, &row.PayerAddress,
+			&rate, &settledAt, &row.Direction); err != nil {
 			writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
 			return
 		}

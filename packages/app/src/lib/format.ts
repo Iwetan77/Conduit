@@ -128,9 +128,34 @@ export function tryParseAmount(value: string, currency: Currency): bigint | unde
   }
 }
 
-// Shorten an address for display
+// Shorten an address for display.
+//
+// Returns anything that is NOT a long hex address untouched, which it did not
+// used to do. The slicing is unconditional arithmetic -- first chars+2, last
+// chars -- so on a short string the two halves OVERLAP and it repeats itself:
+// a receipt whose recipient had become the username "Ivan" rendered
+// "Ivan...Ivan" in the To row.
+//
+// That happens because these call sites take a display value, and a display
+// value stopped always being an address the moment usernames existed. Guarding
+// here rather than at each caller: there are a dozen of them, they all want
+// "shorten this if it needs shortening", and the next one added will not know
+// about this either.
 export function shortenAddress(address: string, chars = 4): string {
-  return `${address.slice(0, chars + 2)}...${address.slice(-chars)}`;
+  const value = (address ?? "").trim();
+  // Only an ADDRESS gets shortened. Length alone is not the test: "Ivan and
+  // Sons" is long enough to slice and came out as "Ivan a...Sons", which is
+  // worse than the full name and worse than the bug it replaced. A name is
+  // never improved by having its middle removed -- if it does not fit, that is
+  // the layout's problem to solve with truncation, not this function's.
+  if (!looksLikeAddress(value)) return value;
+  if (value.length <= chars * 2 + 2) return value;
+  return `${value.slice(0, chars + 2)}...${value.slice(-chars)}`;
+}
+
+/** EVM hex, or a base58 Solana pubkey. Anything else is a name. */
+function looksLikeAddress(value: string): boolean {
+  return /^0x[0-9a-fA-F]{8,}$/.test(value) || /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(value);
 }
 
 // Format a unix timestamp as a readable date

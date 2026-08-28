@@ -126,6 +126,14 @@ export function AddressInput({ value, onChange, placeholder }: AddressInputProps
   // is plainly typing a name and should be able to see that the app knows it.
   const nameLike = !!text.trim() && !text.trim().startsWith("0x");
   const resolved = lookup.state === "found";
+  // The name to show for a resolved recipient. Falls back to the username when
+  // the account's own name carries no information beyond its type -- see the
+  // note at the render site.
+  const primaryLabel = resolved
+    ? lookup.result.display_name.trim().toLowerCase() === lookup.result.account_type
+      ? lookup.result.username
+      : lookup.result.display_name
+    : "";
   // Offered only for a recipient that is actually settled -- a resolved name or
   // a complete address -- and never for one already saved. Saving a
   // half-typed address is how a contact list fills with things that cannot be
@@ -199,8 +207,14 @@ export function AddressInput({ value, onChange, placeholder }: AddressInputProps
       {resolved && (
         <div className="flex items-center gap-2 border border-signal/30 bg-signal/5 px-3 py-2">
           <UserMark username={lookup.result.username} size="sm" />
+          {/* The NAME, and never the badge restated as one.
+              A personal account's stored name is the literal string "Personal"
+              (migration 0010), so showing display_name beside a PERSONAL badge
+              printed the same word twice and told the sender nothing about who
+              they were paying. When the name is just the account type, the
+              username is the actual identity and goes here instead. */}
           <span className="text-sm font-mono text-ink truncate">
-            {lookup.result.display_name}
+            {primaryLabel}
           </span>
           <span
             className={`shrink-0 px-1.5 py-0.5 text-[10px] font-mono uppercase tracking-wider border ${
@@ -228,7 +242,10 @@ export function AddressInput({ value, onChange, placeholder }: AddressInputProps
             saveCurrent({
               username: resolved ? lookup.result.username : undefined,
               address: resolved ? lookup.result.settle_address : text.trim(),
-              label: resolved ? lookup.result.display_name : shortenAddress(text.trim()),
+              // primaryLabel, not display_name: saving a personal account would
+              // otherwise file it in the contact list as "Personal", which is
+              // every personal account's name and identifies nobody.
+              label: resolved ? primaryLabel : shortenAddress(text.trim()),
             })
           }
           className="self-start text-scale-1 font-mono text-ink-dim hover:text-signal transition-colors"

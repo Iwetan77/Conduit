@@ -16,6 +16,8 @@ import { useBalances } from "@/lib/use-balances";
 import { usePayerUsdc, spendableUsdc } from "@/lib/use-payer-usdc";
 import { chainLabel, usdcDisplay } from "@/lib/unified-balance";
 import { shortenAddress } from "@/lib/format";
+import { useUsername } from "@/lib/use-username";
+import { UserMark } from "./UserMark";
 
 // Public payer-side nav. The merchant side is entered from the landing
 // page ("Sign in as a merchant") — deliberately NOT a persistent nav item,
@@ -69,6 +71,9 @@ function WalletMenu({ address }: { address: `0x${string}` }) {
   // a payer three different USDC numbers and none of them was what they could
   // spend.
   const crossChain = usePayerUsdc({ address, family: "evm", enabled: open });
+  // Not gated on `open`: the chip shows the name whether or not the menu has
+  // ever been opened, which is the whole point of it being on the chip.
+  const { username } = useUsername();
   const spendable = spendableUsdc(balances.USDC ?? 0n, crossChain);
 
   const held = TOKEN_LIST.map((currency) => ({ currency, raw: balances[currency] })).filter(
@@ -101,8 +106,19 @@ function WalletMenu({ address }: { address: `0x${string}` }) {
                    bg-surface border border-border
                    hover:border-ink-dim transition-colors"
       >
-        <span className="w-2 h-2 bg-signal animate-pulse" />
-        <span className="text-scale-2 font-mono text-ink">{shortenAddress(address)}</span>
+        {/* Who, not merely whether.
+            A pulsing green square stood here saying "connected" -- which the
+            address beside it already said, restated as an animation that never
+            stopped. It carries the person's initial once they have a username,
+            and the chip shows the NAME rather than hex.
+
+            NOTE: WalletConnect has its own ConnectedChip that looks almost
+            identical. This is the one the nav actually renders. Two chips for
+            one job is why a fix to the other one changed nothing here. */}
+        <UserMark username={username} />
+        <span className="text-scale-2 font-mono text-ink">
+          {username || shortenAddress(address)}
+        </span>
         <svg
           className={`w-3 h-3 text-ink-dim transition-transform ${open ? "rotate-180" : ""}`}
           fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}

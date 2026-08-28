@@ -12,6 +12,7 @@ import { PayerCurrencyPicker } from "@/components/SendFlow/PayerCurrencyPicker";
 import { RoutePreview } from "@/components/SendFlow/RoutePreview";
 import { ReceiptCard } from "@/components/Shared/ReceiptCard";
 import { FxReceiptCard } from "@/components/Shared/FxReceiptCard";
+import { SaveContactButton } from "@/components/Shared/SaveContactButton";
 import { WalletConnectCompact } from "@/components/Shared/WalletConnect";
 import { Rocket } from "@/components/Shared/Rocket";
 
@@ -197,6 +198,9 @@ export function ArcSettlePanel({
         <p className="text-ink-dim text-xs font-mono text-center">
           Paid to {displayName}. You can close this page.
         </p>
+        {/* Offered here because this is the moment it is worth nothing to
+            accept: they have just confirmed who this is by paying them. */}
+        <SaveContactButton address={settleAddress} label={displayName} />
       </div>
     );
   }
@@ -215,6 +219,9 @@ export function ArcSettlePanel({
         <p className="text-ink-dim text-xs font-mono text-center">
           Paid to {displayName}. You can close this page.
         </p>
+        {/* Offered here because this is the moment it is worth nothing to
+            accept: they have just confirmed who this is by paying them. */}
+        <SaveContactButton address={settleAddress} label={displayName} />
       </div>
     );
   }

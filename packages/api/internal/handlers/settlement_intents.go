@@ -358,7 +358,25 @@ func (h *SettlementIntents) GetPublic(w http.ResponseWriter, r *http.Request) {
 		        -- account falls back to the literal string "Personal", which is
 		        -- what every payer-created link said it came from: a payment
 		        -- request from nobody in particular.
-		        COALESCE(NULLIF(a.username, ''), a.name), a.logo_url, COALESCE(si.return_url,'')
+		        --
+		        -- And when THIS account has no name, any name on the same
+		        -- WALLET will do. One wallet can hold a personal account and a
+		        -- business account, and a name claimed while signed in as the
+		        -- business sits on the business row -- so a link created from
+		        -- the same wallet's personal account found nothing and said
+		        -- "Personal", to someone who had plainly claimed a username.
+		        -- It is one person and one wallet; the handle is theirs either
+		        -- way. Personal preferred when both have one.
+		        COALESCE(
+		            NULLIF(a.username, ''),
+		            (SELECT w.username FROM accounts w
+		              WHERE w.username IS NOT NULL
+		                AND w.login_wallet IS NOT NULL
+		                AND lower(w.login_wallet) = lower(a.login_wallet)
+		              ORDER BY (w.privy_user_id IS NULL AND w.auth_subject IS NULL) DESC
+		              LIMIT 1),
+		            a.name
+		        ), a.logo_url, COALESCE(si.return_url,'')
 		 FROM settlement_intents si JOIN accounts a ON a.id = si.account_id
 		 WHERE si.id = $1`,
 		id,

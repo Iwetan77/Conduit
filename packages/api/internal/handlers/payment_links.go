@@ -355,7 +355,24 @@ func (h *PaymentLinks) GetPublic(w http.ResponseWriter, r *http.Request) {
 	var expiresAt *time.Time
 	err := h.Pool.QueryRow(r.Context(),
 		`SELECT pl.amount_mode, pl.amount::text, pl.min_amount::text, pl.max_amount::text, pl.settle_currency, pl.settle_address,
-		        COALESCE(pl.description,''), pl.status, pl.expires_at, a.name, a.logo_url
+		        COALESCE(pl.description,''), pl.status, pl.expires_at,
+		        -- Same rule as the settlement intent's public view: the name
+		        -- someone chose to be paid under beats the account's own name,
+		        -- and a name held by another account on the SAME WALLET beats
+		        -- the generic fallback. A link is a link whichever surface made
+		        -- it, so both must answer "who is this from" identically --
+		        -- otherwise the same person is one name on a link and another
+		        -- on an intent.
+		        COALESCE(
+		            NULLIF(a.username, ''),
+		            (SELECT w.username FROM accounts w
+		              WHERE w.username IS NOT NULL
+		                AND w.login_wallet IS NOT NULL
+		                AND lower(w.login_wallet) = lower(a.login_wallet)
+		              ORDER BY (w.privy_user_id IS NULL AND w.auth_subject IS NULL) DESC
+		              LIMIT 1),
+		            a.name
+		        ), a.logo_url
 		 FROM payment_links pl JOIN accounts a ON a.id = pl.account_id
 		 WHERE pl.id = $1`,
 		id,

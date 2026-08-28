@@ -9,13 +9,26 @@
 // balance merely confirmed, when it should be the other way round: the balance
 // is the fact, and the route follows from it.
 //
-// Deliberately does NOT cover Arc. Arc balances come from useBalances, which
-// reads every settle currency rather than USDC alone, and SOURCE_CHAINS is the
-// Gateway source list with Arc excluded on purpose (Arc is the destination).
-// Callers combine the two -- see routeForAmount below.
+// Arc INCLUDED, which it was not before, and its absence was a bug people saw.
+//
+// The two balances have genuinely different shapes and must not be conflated:
+// SOURCE_CHAINS is the Gateway source list with Arc excluded on purpose (Arc is
+// the destination domain, so it cannot be deposited into the pool), while the
+// Arc balance is a plain wallet balance read through useBalances. What was
+// wrong was leaving the combining to each caller. They disagreed: /send threaded
+// Arc up out of PayerCurrencyPicker via a callback, and the nav menu simply
+// never read it and printed the pool under the heading "Your USDC".
+//
+// So this hook now answers both questions, separately and by name:
+//   funded / pooledMinor  -- the Gateway pool. Feeds routing and burn intents.
+//   arcMinor              -- USDC on Arc.
+//   holdings / heldMinor  -- everything, Arc included. For DISPLAY only.
+// and spendableUsdc() below turns them into the one number a single payment is
+// allowed to draw on. Nothing outside this file should be doing that sum itself.
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
+  ARC_CHAIN,
   fundedChains,
   getUnifiedUsdc,
   getWalletUsdc,
@@ -23,6 +36,7 @@ import {
   type PayerAdapter,
   type UnifiedUsdc,
 } from "@/lib/unified-balance";
+import { useBalances } from "@/lib/use-balances";
 
 export interface PayerUsdc {
   loading: boolean;
@@ -32,20 +46,47 @@ export interface PayerUsdc {
   /** Chains holding a non-zero balance, richest first. */
   funded: Array<{ chain: string; minor: bigint }>;
   /**
-   * The payer's spendable cross-chain USDC: every source chain, summed.
+   * The Gateway pool: every SOURCE chain, summed. Arc is NOT in here.
    *
-   * This is a real balance now, and it is the number to show and to check an
-   * amount against. It used to be deliberately named so it could NOT be
-   * mistaken for one ("a portfolio figure, never a spendable one") because a
-   * payment could only ever draw from a single chain. Circle Gateway pools
-   * deposited balance across chains behind one signature, so the sum is what
-   * the payer can actually spend.
+   * Named `spendableMinor` until it caused the bug it is renamed to prevent.
+   * The nav menu rendered it under the label "Your USDC", so a payer holding 12
+   * on Arc and 40 across Base and Polygon was told they had 40 -- their Arc
+   * balance, on the chain everything settles on, silently missing from a figure
+   * claiming to be their USDC.
+   *
+   * "Spendable" was the wrong word for it in both directions: it excludes money
+   * they hold, and it is not by itself the ceiling on a payment either (see
+   * spendableUsdc, which takes the larger of this and Arc). It is the pool, so
+   * it is called the pool.
    *
    * Single-family by construction: the hook reads EVM chains for an EVM wallet
    * and Solana for a Solana wallet, never both, because balances in two
    * families cannot pool into one signature.
    */
-  spendableMinor: bigint;
+  pooledMinor: bigint;
+  /**
+   * USDC held on Arc. Zero for a Solana wallet, which cannot sign on Arc.
+   */
+  arcMinor: bigint;
+  /**
+   * Everything this payer holds: Arc plus the pool.
+   *
+   * A HOLDINGS figure, for anywhere that answers "how much USDC do I have".
+   * Deliberately NOT the same as what one payment can spend -- see
+   * spendableUsdc for that, and never substitute this for it.
+   */
+  heldMinor: bigint;
+  /**
+   * Every chain holding a non-zero balance INCLUDING Arc, richest first.
+   *
+   * The display counterpart to `funded`. Kept separate because `funded` feeds
+   * planAllocations, which turns it into Gateway burn intents -- and Arc is the
+   * destination domain, so an Arc entry there would build an intent to burn on
+   * the chain being minted to.
+   */
+  holdings: Array<{ chain: string; minor: bigint }>;
+  /** True once the Arc read has actually landed (or is not applicable). */
+  arcSettled: boolean;
   /**
    * The largest single chain, kept only for the places that genuinely need one
    * chain -- naming a route, or reporting a source to the API.
@@ -76,7 +117,11 @@ const EMPTY: PayerUsdc = {
   error: "",
   unified: null,
   funded: [],
-  spendableMinor: 0n,
+  pooledMinor: 0n,
+  arcMinor: 0n,
+  heldMinor: 0n,
+  holdings: [],
+  arcSettled: false,
   maxSingleChainMinor: 0n,
 };
 
@@ -103,6 +148,27 @@ export function usePayerUsdc({
   enabled = true,
 }: UsePayerUsdcOptions): PayerUsdc {
   const [state, setState] = useState<PayerUsdc>(EMPTY);
+
+  // Arc, read here rather than by each caller.
+  //
+  // It used to be every caller's own problem, and they disagreed: /send threaded
+  // it up out of PayerCurrencyPicker through an onBalancesChange callback, while
+  // the nav menu simply never read it and printed the pool as "Your USDC". One
+  // hook that answers "where is this payer's USDC" cannot disagree with itself.
+  //
+  // Costs nothing extra: useBalances is a React Query key shared app-wide, so
+  // the nav menu and the send form still make one request between them.
+  //
+  // EVM only. `address` is a Solana pubkey for a Solana wallet, which cannot
+  // sign on Arc at all -- crediting it an Arc balance would show money that no
+  // route on the page can spend. Hooks run unconditionally either way; it is
+  // the QUERY that is disabled, never the call.
+  const wantsArc = enabled && family === "evm" && !!address;
+  const { balances: arcBalances, settled: arcRead } = useBalances(address, wantsArc);
+  const arcMinor = wantsArc ? (arcBalances.USDC ?? 0n) : 0n;
+  // A Solana wallet has no Arc read to wait for, so it is settled by definition
+  // -- otherwise every caller gating on this would wait forever.
+  const arcSettled = wantsArc ? arcRead : true;
 
   useEffect(() => {
     if (!enabled || !address) {
@@ -146,11 +212,12 @@ export function usePayerUsdc({
         // fewer, larger draws means fewer deposits and fewer wallet prompts.
         const funded = fundedChains(unified);
         return {
+          ...EMPTY,
           loading: false,
           error: "",
           unified,
           funded,
-          spendableMinor: funded.reduce((sum, c) => sum + c.minor, 0n),
+          pooledMinor: funded.reduce((sum, c) => sum + c.minor, 0n),
           maxSingleChainMinor: funded[0]?.minor ?? 0n,
         };
       })();
@@ -174,7 +241,24 @@ export function usePayerUsdc({
     };
   }, [address, family, provider, enabled]);
 
-  return state;
+  // Arc folded in on the way out, not into the cached read.
+  //
+  // The module cache above is keyed by wallet and holds the Gateway result,
+  // which is slow and worth remembering. The Arc balance is React Query's to
+  // own -- it refetches on its own schedule -- so baking a snapshot of it into
+  // that cache would pin a stale Arc figure for the life of the page.
+  return useMemo(() => {
+    const holdings = [...state.funded];
+    if (arcMinor > 0n) holdings.push({ chain: ARC_CHAIN, minor: arcMinor });
+    holdings.sort((a, b) => (b.minor > a.minor ? 1 : b.minor < a.minor ? -1 : 0));
+    return {
+      ...state,
+      arcMinor,
+      arcSettled,
+      heldMinor: state.pooledMinor + arcMinor,
+      holdings,
+    };
+  }, [state, arcMinor, arcSettled]);
 }
 
 /**
@@ -191,14 +275,19 @@ export function usePayerUsdc({
  * them would print a number nothing can spend: 12 on Arc plus 20 on Polygon
  * plus 20 on Base is not 52 of spending power, it is 40, because the 12 can
  * never join the other two.
+ *
+ * That 52 is a real figure and worth showing -- it is what the payer HOLDS, and
+ * `heldMinor` is where it lives. The mistake is showing it HERE, as though a
+ * payment could reach it. /send shows both and says in one line why they differ,
+ * which is the only version that does not leave a payer doubting both numbers.
  */
 export function spendableUsdc(
   arcMinor: bigint,
   usdc: PayerUsdc,
 ): { minor: bigint; via: "arc" | "chains"; chains: Array<{ chain: string; minor: bigint }> } {
-  return arcMinor > usdc.spendableMinor
+  return arcMinor > usdc.pooledMinor
     ? { minor: arcMinor, via: "arc", chains: [] }
-    : { minor: usdc.spendableMinor, via: "chains", chains: usdc.funded };
+    : { minor: usdc.pooledMinor, via: "chains", chains: usdc.funded };
 }
 
 /**

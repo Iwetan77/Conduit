@@ -29,15 +29,37 @@ if [ -z "$URL" ]; then
 fi
 
 # Markers are strings rendered by the page's own body, chosen to be stable and
-# to appear nowhere in the layout. Matched on the PATH so any host works.
+# to appear nowhere in the layout.
+#
+# Matched on the PATH alone, so the host and any query string cannot affect the
+# choice. Deriving the path first is what makes the "/" case expressible: keyed
+# off the whole URL, "is this the landing page" and "is this any URL at all"
+# are the same glob.
 if [ -z "$MARKER" ]; then
-  case "$URL" in
-    */send|*/send/*|*/send\?*)   MARKER="Pay anyone in the currency they want" ;;
-    */docs|*/docs/*)             MARKER="Quickstart" ;;
-    */pay/*)                     MARKER="Powered by" ;;
-    */history|*/history/*)       MARKER="History" ;;
-    */links|*/links/*)           MARKER="Links" ;;
-    *)                           MARKER="Send &amp; Scan to Pay" ;;  # landing hero
+  URL_PATH="${URL#*://}"        # drop scheme
+  URL_PATH="/${URL_PATH#*/}"    # drop host, keep a leading slash
+  [ "$URL_PATH" = "/${URL#*://}" ] && URL_PATH="/"   # no path at all
+  URL_PATH="${URL_PATH%%\?*}"   # drop query
+  URL_PATH="${URL_PATH%/}"      # drop one trailing slash
+  case "$URL_PATH" in
+    "")                MARKER="Send &amp; Scan to Pay" ;;  # landing hero
+    /send|/send/*)     MARKER="Pay anyone in the currency they want" ;;
+    /docs|/docs/*)     MARKER="Quickstart" ;;
+    /pay/*)            MARKER="Powered by" ;;
+    /history)          MARKER="History" ;;
+    /links)            MARKER="Links" ;;
+    /create)           MARKER="Create Payment" ;;
+    # An unmapped path used to fall through to the landing page's hero string,
+    # so it reported "body did not server-render" for a page that had rendered
+    # perfectly -- the marker was simply being looked for in the wrong page. A
+    # check that cries wolf gets read as a real regression and costs a
+    # debugging session, so say what is actually wrong instead: nobody told it
+    # what to look for. Exit 2, distinct from a real failure's 1.
+    *)
+      echo "SKIP  $URL — no marker mapped for $URL_PATH." >&2
+      echo "      Pass one explicitly: $0 $URL \"some string the page body renders\"" >&2
+      exit 2
+      ;;
   esac
 fi
 

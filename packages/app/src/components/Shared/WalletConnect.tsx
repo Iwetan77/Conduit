@@ -170,8 +170,15 @@ function GoogleSignIn({ fullWidth = false, short = false }: { fullWidth?: boolea
 // beside it -- and the balance, the one thing a payer wants to know before
 // typing an amount, was nowhere on the page. Tapping the chip now answers it.
 //
-// Per chain, never summed. One payment draws from a single chain, so a total
-// would promise an amount that cannot be sent.
+// Shows HOLDINGS -- every chain including Arc, summed, with the breakdown
+// under it. That is the honest answer to "how much USDC do I have", which is
+// the question a chip showing an address is being tapped to answer.
+//
+// It is deliberately not the same number as the send form's spendable ceiling,
+// because those are different questions: one payment settles on Arc or bridges
+// in from the pooled chains and cannot do both, so the most a single send can
+// move is the larger side, not the total. /send says so in a line under its
+// Pay with control rather than leaving the two figures to contradict each other.
 function ConnectedChip({
   address,
   compact = false,
@@ -209,31 +216,50 @@ function ConnectedChip({
           <p className="font-mono text-[10px] uppercase tracking-widest text-ink-dim">
             Your USDC
           </p>
-          {usdc.loading && usdc.funded.length === 0 ? (
+          {/* Waits for BOTH reads, not just the first to land.
+              This is now a total across two independent sources, and they do
+              not arrive together -- Arc is one cached API call while the pool
+              fans out across a dozen chains. Showing whichever landed first
+              would print a total that is genuinely wrong for as long as the
+              other is outstanding, then silently jump. A figure someone is
+              about to make a payment against does not get to do that. */}
+          {usdc.loading || !usdc.arcSettled ? (
             <p className="font-mono text-scale-1 text-ink-dim">Reading…</p>
-          ) : usdc.funded.length === 0 ? (
+          ) : usdc.holdings.length === 0 ? (
             <p className="font-mono text-scale-1 text-ink-dim">
               {usdc.error || "None found on any supported chain."}
             </p>
           ) : (
             <>
               {/* The balance first, the chains under it.
-                  A column of per-chain rows presented one spendable amount as
-                  several separate ones. Circle Gateway pools them behind a
+                  A column of per-chain rows presented one amount as several
+                  separate ones. Circle Gateway pools the source chains behind a
                   single signature, so the total is the balance and the rows are
-                  a breakdown of where it currently sits. */}
+                  a breakdown of where it currently sits.
+
+                  HOLDINGS, so Arc is in it. This read the Gateway pool alone,
+                  which excludes Arc by design -- so a payer holding 12 on Arc
+                  and 40 across Base and Polygon opened a menu headed "Your USDC"
+                  and saw 40, with the chain everything settles on missing from
+                  the list entirely.
+
+                  Not the same number as what one payment can spend, and that is
+                  correct: Arc settles directly while the pool bridges in, and a
+                  single payment draws from one or the other. This menu answers
+                  "what do I have"; the Pay with control on /send answers "what
+                  can this payment use". */}
               <div className="flex items-baseline justify-between gap-4">
                 <span className="font-mono text-scale-3 text-ink">
-                  {usdcDisplay(usdc.spendableMinor)}
+                  {usdcDisplay(usdc.heldMinor)}
                 </span>
                 <span className="font-mono text-scale-1 text-ink-dim">
-                  {usdc.funded.length === 1
-                    ? chainLabel(usdc.funded[0].chain)
-                    : `${usdc.funded.length} chains`}
+                  {usdc.holdings.length === 1
+                    ? chainLabel(usdc.holdings[0].chain)
+                    : `${usdc.holdings.length} chains`}
                 </span>
               </div>
-              {usdc.funded.length > 1 &&
-                usdc.funded.map((c) => (
+              {usdc.holdings.length > 1 &&
+                usdc.holdings.map((c) => (
                   <div key={c.chain} className="flex items-baseline justify-between gap-4">
                     <span className="font-mono text-scale-1 text-ink-dim">
                       {chainLabel(c.chain)}

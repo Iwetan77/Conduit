@@ -135,7 +135,11 @@ export default function SendPage() {
   // Arc only counts for an EVM wallet: payerBalances is read against the wagmi
   // address, and a Solana wallet cannot sign on Arc at all, so crediting it an
   // Arc balance would offer a route that fails at the last step.
-  const arcUsdc = identity?.kind === "evm" ? (payerBalances.USDC ?? 0n) : 0n;
+  // Straight from the hook now, rather than threaded up out of the picker.
+  // usePayerUsdc reads Arc through the same shared query, and it already
+  // returns 0 for a Solana wallet, so the family check that used to live here
+  // is enforced in one place instead of being repeated at every call site.
+  const arcUsdc = sourceUsdc.arcMinor;
   // This one was a CORRECTNESS bug, not a cosmetic one.
   //
   // `route` was null until the balances landed, and canProceed did not require
@@ -144,12 +148,12 @@ export default function SendPage() {
   // which cannot settle their payment. It failed later, inside their wallet,
   // for reasons they could not connect to anything they had done.
   //
-  // payerBalances comes from PayerCurrencyPicker rather than from useBalances
-  // directly, so "have the Arc balances arrived" is "is the map non-empty" --
-  // which is also what a genuinely empty wallet looks like. Treating an
-  // unconnected/unfetched state as settled would put the old bug straight back,
-  // so it is settled only once a wallet is connected AND the map has arrived.
-  const arcSettled = !isConnected || Object.keys(payerBalances).length > 0;
+  // "Have the Arc balances arrived" now comes from the query's own success
+  // flag, via the hook. It used to be inferred as "is the map the picker handed
+  // up non-empty", which cannot tell a read that has not landed from a wallet
+  // that genuinely holds nothing -- the exact conflation this guard exists to
+  // avoid, sitting inside the guard itself.
+  const arcSettled = sourceUsdc.arcSettled;
   const decision = useRouteDecision(required.data, arcUsdc, sourceUsdc, arcSettled);
   const route = decision.status === "resolved" ? decision.route : null;
   // The most this wallet can pay, and by which route. Arc and the Gateway pool
@@ -260,12 +264,6 @@ export default function SendPage() {
                   label="They receive"
                 />
 
-                {/* What this wallet actually holds, per chain.
-                    A connected wallet used to show nothing but an x to
-                    disconnect, so the one question a payer has at this point --
-                    do I have the money, and where -- had no answer on screen.
-                    Per chain, never summed: one payment draws from one chain,
-                    so a total would promise something the rails cannot do. */}
                 {/* The "YOUR USDC — 40 across Polygon, Base" panel stood here.
                     Removed as duplication: the wallet menu in the nav already
                     shows the same figure with the same per-chain breakdown, and
@@ -289,6 +287,29 @@ export default function SendPage() {
                   />
                 )}
 
+                {/* Why the balance here can be smaller than the one in the
+                    wallet menu.
+                    The menu shows what the payer HOLDS, Arc included. This
+                    control shows what THIS payment can draw on, which is the
+                    larger of Arc or the pooled chains -- never their sum,
+                    because a single payment settles directly on Arc or bridges
+                    in from the pool, and cannot do both.
+                    Shown only when the two genuinely differ. Two numbers on two
+                    screens with no explanation is how a payer ends up trusting
+                    neither, and the fix for that is a sentence, not hiding one
+                    of them. */}
+                {mounted &&
+                  isConnected &&
+                  payerCurrency === "USDC" &&
+                  sourceUsdc.heldMinor > spendable.minor && (
+                    <p className="text-ink-dim text-xs leading-relaxed">
+                      You hold {formatAmount(sourceUsdc.heldMinor, "USDC")} in total. One payment
+                      draws from {spendable.via === "arc" ? "Arc" : "your pooled chains"} or the
+                      other, not both — so up to {formatAmount(spendable.minor, "USDC")} can go in a
+                      single send.
+                    </p>
+                  )}
+
                 {crossCurrency && (
                   <div className="border border-border bg-surface p-3 space-y-1">
                     <p className="text-ink text-sm font-mono">
@@ -305,11 +326,20 @@ export default function SendPage() {
                     short on EURC for a USDC payment used to sail past this and
                     fail at the wallet prompt, after an intent had been created.
                     formatAmount already appends the currency — naming it again
-                    printed "~$50.00 USDC USDC". */}
+                    printed "~$50.00 USDC USDC".
+
+                    "You have" vs "you can send": when the payer holds more than
+                    one payment can draw on, "you have 40" is simply false — the
+                    wallet menu says 52 on the same screen. The number is right,
+                    the verb was wrong, and disagreeing with yourself in two
+                    places is worse than either figure alone. */}
                 {insufficient && required.data !== undefined && payerBalance !== undefined && (
                   <p className="text-danger text-sm font-mono">
                     Insufficient {payerCurrency}: this payment needs ~
-                    {formatAmount(required.data, payerCurrency)}, you have{" "}
+                    {formatAmount(required.data, payerCurrency)},{" "}
+                    {payerCurrency === "USDC" && sourceUsdc.heldMinor > payerBalance
+                      ? "you can send"
+                      : "you have"}{" "}
                     {formatAmount(payerBalance, payerCurrency)}.
                   </p>
                 )}

@@ -292,11 +292,14 @@ export default async function Image({
                     {coinGlyph}
                   </div>
                 ) : null}
-                {/* Same size, so the pair reads as one amount. Only the colour
-                    separates them -- the number in signal green, the asset in
-                    white -- which distinguishes without demoting either. */}
+                {/* Same size, so the pair reads as one amount. Colour is what
+                    separates them: the number in signal green, the asset in
+                    grey. Equal weight without equal loudness -- the amount is
+                    what someone is deciding about, and the token names it.
+                    The same grey as "PAYMENT REQUEST FROM" above, so the card
+                    has one voice for labels rather than a third tone. */}
                 <div style={{ color: "#B2F55A", fontSize: heroSize, lineHeight: 1 }}>{amount}</div>
-                <div style={{ color: "#f5f5f5", fontSize: heroSize, lineHeight: 1 }}>{token}</div>
+                <div style={{ color: "#8a8a8a", fontSize: heroSize, lineHeight: 1 }}>{token}</div>
               </div>
             ) : (
               <div style={{ color: "#B2F55A", fontSize: 96, lineHeight: 1, marginTop: 10 }}>

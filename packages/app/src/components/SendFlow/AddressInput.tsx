@@ -46,27 +46,48 @@ export function AddressInput({ value, onChange, placeholder }: AddressInputProps
   const [lookup, setLookup] = useState<Lookup>({ state: "idle" });
   const latest = useRef(0);
 
-  // Keep the field in step when the parent changes the value itself (clearing
-  // the form, scanning a QR). Skipped while a name is resolved, or echoing the
-  // resolved address back would replace the name the person typed.
+  // What this field last told the parent. Anything else arriving in `value` came
+  // from somewhere ELSE -- a QR scan, a form reset -- and should replace what is
+  // in the box.
+  const reported = useRef(value);
+
+  const report = (v: string) => {
+    reported.current = v;
+    onChange(v);
+  };
+
+  // Adopt an externally-set value, and ONLY an externally-set one.
+  //
+  // This used to compare against `value` directly and also re-run whenever the
+  // lookup state changed, which made the field unusable: typing the third
+  // character of a name starts a debounced lookup, and during that debounce the
+  // parent still holds the two-character value. The effect then fired on the
+  // state change, saw text !== value, and reset the box to two characters. It
+  // was impossible to type a name at all -- "iva" became "iv" on every attempt.
+  //
+  // Comparing against what we last REPORTED is the fix: while a lookup is in
+  // flight the parent is legitimately behind us, and being behind is not the
+  // same as having been changed by someone else.
   useEffect(() => {
-    if (lookup.state === "found") return;
-    setText((current) => (current === value ? current : value));
-  }, [value, lookup.state]);
+    if (value !== reported.current) {
+      reported.current = value;
+      setText(value);
+    }
+  }, [value]);
 
   useEffect(() => {
     const raw = text.trim();
 
     if (isAddress(raw)) {
       setLookup({ state: "idle" });
-      onChange(raw);
+      report(raw);
       return;
     }
     if (!looksLikeUsername(raw)) {
       setLookup({ state: "idle" });
       // Report the raw text so the parent's own validation still sees a
       // half-typed address as invalid rather than as an empty field.
-      onChange(raw);
+      report(raw);
       return;
     }
 
@@ -77,13 +98,13 @@ export function AddressInput({ value, onChange, placeholder }: AddressInputProps
       if (seq !== latest.current) return;
       if (result) {
         setLookup({ state: "found", result });
-        onChange(result.settle_address);
+        report(result.settle_address);
       } else {
         setLookup({ state: "missing" });
         // Deliberately NOT the previous address. A name that does not resolve
         // must leave nothing payable behind it, or someone edits a good name
         // into a bad one and pays whoever the old one pointed at.
-        onChange("");
+        report("");
       }
     }, DEBOUNCE_MS);
     return () => clearTimeout(t);
@@ -93,6 +114,10 @@ export function AddressInput({ value, onChange, placeholder }: AddressInputProps
   }, [text]);
 
   const typedAddress = isAddress(text.trim());
+  // Looser than looksLikeUsername on purpose: the suffix should appear from the
+  // first letter, while the LOOKUP still waits for three. Someone typing "iv"
+  // is plainly typing a name and should be able to see that the app knows it.
+  const nameLike = !!text.trim() && !text.trim().startsWith("0x");
   const resolved = lookup.state === "found";
   const isValid = !text || typedAddress || resolved;
   const showError =
@@ -103,31 +128,43 @@ export function AddressInput({ value, onChange, placeholder }: AddressInputProps
       <label className="text-xs font-mono text-ink-dim uppercase tracking-wider">
         Recipient
       </label>
-      <div className="relative">
+      {/* The suffix lives in the BOX, never in the input.
+          Typing a name should not require typing "@ conduit" too -- that is how
+          the name reads, not part of the name, and anyone who typed it would
+          fail validation on a character the field itself put in their head. So
+          the box is the bordered element and the input sits inside it
+          transparently, with the suffix beside it as furniture.
+
+          Only while a NAME is being typed. An address is not @ anything, and
+          hanging the suffix off 0x… would suggest it were. */}
+      <div
+        className={`flex items-center border bg-surface px-4 transition-colors ${
+          showError
+            ? "border-danger/50 focus-within:border-danger"
+            : isValid && text
+              ? "border-signal/50 focus-within:border-signal"
+              : "border-border focus-within:border-ink-dim/30"
+        }`}
+      >
         <input
           type="text"
           value={text}
           onChange={(e) => setText(e.target.value)}
           onBlur={() => setTouched(true)}
           placeholder={placeholder ?? "username or 0x..."}
-          className={`w-full px-4 py-3 font-mono text-sm
-                       bg-surface border transition-colors outline-none
-                       text-ink placeholder:text-ink-dim
-                       ${
-                         showError
-                           ? "border-danger/50 focus:border-danger"
-                           : isValid && text
-                             ? "border-signal/50 focus:border-signal"
-                             : "border-border focus:border-ink-dim/30"
-                       }`}
+          className="flex-1 min-w-0 bg-transparent py-3 font-mono text-sm
+                     text-ink outline-none placeholder:text-ink-dim"
           spellCheck={false}
           autoComplete="off"
           autoCapitalize="none"
         />
-        {isValid && text && lookup.state !== "resolving" && (
-          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-signal text-sm">
-            ✓
+        {nameLike && (
+          <span aria-hidden className="shrink-0 pl-2 font-mono text-sm text-ink-dim/60 select-none">
+            @ conduit
           </span>
+        )}
+        {isValid && text && lookup.state !== "resolving" && (
+          <span className="shrink-0 pl-2 text-signal text-sm">✓</span>
         )}
       </div>
 

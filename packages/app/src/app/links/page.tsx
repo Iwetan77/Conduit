@@ -5,6 +5,7 @@ import { ArcOnlyNotice } from "@/components/Shared/ArcOnlyNotice";
 import { useHydrated } from "@/lib/use-hydrated";
 import { ARC_RPC_URL } from "@/lib/wagmi";
 import { useWalletLinks } from "@/lib/payer-queries";
+import { payUrlFor } from "@/lib/app-url";
 
 import Link from "next/link";
 
@@ -135,19 +136,14 @@ export default function LinksPage() {
                         )}
                       </div>
                       <p className="text-xs font-mono text-ink-dim truncate">
-                        {typeof window !== "undefined"
-                          ? `${window.location.origin}/pay/${decl.declarationId}`
-                          : decl.paymentUrl}
+                        {payUrlFor(decl.declarationId)}
                       </p>
                     </div>
 
                     <div className="flex items-center gap-2 shrink-0 flex-wrap">
                       <button
                         onClick={() => {
-                          const url = typeof window !== "undefined"
-                            ? `${window.location.origin}/pay/${decl.declarationId}`
-                            : decl.paymentUrl;
-                          copy(url, decl.declarationId);
+                          copy(payUrlFor(decl.declarationId), decl.declarationId);
                         }}
                         className={`px-3 py-1.5 text-xs border transition-colors ${
                           copied === decl.declarationId
@@ -211,9 +207,7 @@ export default function LinksPage() {
                 </p>
                 <LinkCard
                   declarationId={selectedDecl.declarationId}
-                  paymentUrl={typeof window !== "undefined"
-                    ? `${window.location.origin}/pay/${selectedDecl.declarationId}`
-                    : selectedDecl.paymentUrl}
+                  paymentUrl={payUrlFor(selectedDecl.declarationId)}
                   amount={selectedDecl.amount}
                   currency={selectedDecl.currency}
                   recipientAddress={selectedDecl.recipient}

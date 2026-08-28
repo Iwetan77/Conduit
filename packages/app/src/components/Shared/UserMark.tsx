@@ -22,9 +22,9 @@ export function UserMark({
   size?: "sm" | "md";
 }) {
   const px = size === "sm" ? 18 : 22;
-  const initials = initialsFor(username);
+  const initial = initialsFor(username);
 
-  if (!initials) {
+  if (!initial) {
     return (
       <span
         aria-hidden
@@ -40,33 +40,28 @@ export function UserMark({
       // mark itself is decorative and must not be announced twice.
       aria-hidden
       className="flex items-center justify-center shrink-0 bg-signal text-signal-ink font-mono font-bold leading-none"
-      style={{ width: px, height: px, fontSize: px * 0.45 }}
+      // 0.55 rather than the 0.45 two letters needed: one letter in the same
+      // box would otherwise look lost in it.
+      style={{ width: px, height: px, fontSize: px * 0.55 }}
     >
-      {initials}
+      {initial}
     </span>
   );
 }
 
 /**
- * One or two letters from a username.
+ * The initial: one letter, the first of the name.
  *
- * Splits on the separators a person actually uses inside a handle
- * ("ada_lovelace" -> AL), and otherwise takes the first two letters rather than
- * a single one, which reads as an accident at this size. Digits are skipped
- * when a letter is available, so "ivan2024" is IV and not I2.
+ * Ivan is I. Not IV -- an initial is the first letter of a name, and two
+ * letters of one word reads as an abbreviation of something else.
+ *
+ * A leading digit or underscore is skipped in favour of the first LETTER, so
+ * "_ivan" and "2fast" still show a letter rather than punctuation; only a name
+ * with no letters at all falls back to its first character.
  */
 export function initialsFor(username?: string | null): string {
   const name = (username ?? "").trim();
   if (!name) return "";
-
-  const parts = name.split(/[_\s.-]+/).filter(Boolean);
-  if (parts.length > 1) {
-    const first = parts[0]![0];
-    const second = parts[1]![0];
-    return `${first}${second}`.toUpperCase();
-  }
-
-  const letters = name.replace(/[^A-Za-z]/g, "");
-  const source = letters.length >= 2 ? letters : name;
-  return source.slice(0, 2).toUpperCase();
+  const firstLetter = name.match(/[A-Za-z]/)?.[0];
+  return (firstLetter ?? name[0]!).toUpperCase();
 }

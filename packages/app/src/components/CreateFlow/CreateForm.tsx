@@ -7,6 +7,7 @@ import type { Currency } from "@conduit/sdk/lite";
 import { AmountInput } from "@/components/SendFlow/AmountInput";
 import { WalletConnect } from "@/components/Shared/WalletConnect";
 import { usePayerIdentity } from "@/lib/use-payer-identity";
+import { payUrlFor } from "@/lib/app-url";
 
 interface CreateFormProps {
   onSuccess: (declarationId: string, paymentUrl: string, amount: string, currency: Currency, label: string) => void;
@@ -60,7 +61,12 @@ export function CreateForm({ onSuccess }: CreateFormProps) {
         settle_address: address,
       });
 
-      const paymentUrl = `${window.location.origin}/pay/${intent.id}`;
+      // The SERVER's hosted_url first -- it is built from CONDUIT_APP_BASE_URL
+      // and is the authority on where a link lives. window.location.origin used
+      // to be used here, which stamped whatever host the creator happened to be
+      // browsing (a vercel.app preview, say) into a link meant to be pasted
+      // into WhatsApp and outlive that deployment.
+      const paymentUrl = intent.hosted_url || payUrlFor(intent.id);
       onSuccess(intent.id, paymentUrl, createFlow.amount, createFlow.currency, createFlow.label);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create payment link");

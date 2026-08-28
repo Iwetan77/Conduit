@@ -56,12 +56,21 @@ export function useUsername(): UsernameState {
 
   const isEvm = identity?.kind === "evm";
   const walletAddress = isEvm ? identity?.address : undefined;
-  // Only for a wallet WITHOUT a session -- with one, /accounts/me is the
-  // authority and a second lookup could disagree with it.
+  // Run for a signed-in wallet too, not only a session-less one.
+  //
+  // It was gated on `!session` on the theory that /accounts/me is the authority
+  // when there is one. It is the authority for THAT account -- and the account
+  // the session points at is not always the one holding the name. Somebody
+  // signed in with Google whose name was claimed against their own wallet's
+  // personal account saw /accounts/me return null and kept the anonymous dot in
+  // the nav, having just claimed a username.
+  //
+  // Both are asked now and the session answer still wins when it has one; this
+  // only fills the gap where it does not.
   const walletLookup = useQuery({
     queryKey: usernameQk.byWallet(walletAddress),
     queryFn: () => getUsernameForWallet(walletAddress!),
-    enabled: !session && !!walletAddress,
+    enabled: !!walletAddress,
     // A name is claimed once and never changes, so there is nothing to poll
     // for. Refetching on focus would be a request per tab switch for an answer
     // that cannot have moved.
@@ -72,12 +81,17 @@ export function useUsername(): UsernameState {
   const eligible = session || isEvm;
 
   if (session) {
-    const username = account.data?.username ?? null;
+    // Session account first, then the wallet's own. See the note on the query.
+    const username = account.data?.username ?? walletLookup.data ?? null;
+    const settled = !account.isLoading && (!walletAddress || !walletLookup.isLoading);
     return {
       username,
-      loading: account.isLoading,
+      loading: !settled,
       eligible: true,
-      shouldPrompt: !account.isLoading && !!account.data && username === null,
+      // Only once BOTH have answered. Prompting on the session's null while the
+      // wallet lookup is still in flight asks someone to claim a name they may
+      // already hold.
+      shouldPrompt: settled && !!account.data && username === null,
     };
   }
 

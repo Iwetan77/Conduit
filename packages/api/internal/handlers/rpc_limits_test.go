@@ -85,3 +85,44 @@ func TestRPCRequestLimits(t *testing.T) {
 		})
 	}
 }
+
+// The proxy must accept the exact range packages/sdk actually asks for.
+//
+// This is the bug it exists to prevent, and it is worth a test of its own
+// because nothing else could catch it. The other cases here are written in
+// terms of maxLogBlockRange, so they pass at ANY value of that constant --
+// including the 5,000 it sat at while the SDK's getHistory requested 9,000.
+// Every log scan the app made was refused with "range is too wide", and since
+// that is an error rather than an empty result the SDK retried each of eight
+// ranges three times with backoff. /history and /links took about thirty
+// seconds to render nothing, and the on-chain half of both was silently empty.
+//
+// So the number is written out here literally, on purpose. If the SDK's chunk
+// grows past what the proxy allows, this fails instead of two pages quietly
+// going blank.
+//
+// Mirrors packages/sdk/src/receipt.ts: CHUNK = 9_000, and ranges are built as
+// [start, start+CHUNK-1] -- a span of 8,999.
+func TestProxyAllowsTheChunkTheSdkSends(t *testing.T) {
+	const sdkSpan = 8_999
+
+	body := fmt.Sprintf(
+		`{"jsonrpc":"2.0","id":1,"method":"eth_getLogs","params":[{"fromBlock":"0x0","toBlock":"0x%x"}]}`,
+		sdkSpan,
+	)
+	if reason := rpcRequestAllowed([]byte(body)); reason != "" {
+		t.Fatalf("the proxy refuses the SDK's own chunk size (%d blocks): %s\n"+
+			"maxLogBlockRange is %d -- every getHistory call the app makes is a 403, "+
+			"so /history and /links scan the chain, get nothing, and retry until they give up.",
+			sdkSpan, reason, maxLogBlockRange)
+	}
+
+	// And the bound still bounds: one block past Arc's own ceiling is refused.
+	tooWide := fmt.Sprintf(
+		`{"jsonrpc":"2.0","id":1,"method":"eth_getLogs","params":[{"fromBlock":"0x0","toBlock":"0x%x"}]}`,
+		maxLogBlockRange+1,
+	)
+	if rpcRequestAllowed([]byte(tooWide)) == "" {
+		t.Fatal("an unbounded scan was forwarded -- the cap has stopped capping")
+	}
+}

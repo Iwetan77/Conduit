@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -89,7 +90,23 @@ func (p *RPCProxy) Handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, p.Upstream, bytes.NewReader(body))
+	// An explicit deadline on the upstream call, not just the client's.
+	//
+	// Arc's RPC intermittently HANGS: measured against the deployed proxy, a
+	// 9,000-block eth_getLogs is about 0.6s at any depth, but roughly one call
+	// in eight stalled, once for 45 seconds -- past the shared client's own
+	// timeout, which should have bounded it. Rather than work out which layer
+	// dropped the bound, the deadline is stated here where the call is made, so
+	// it holds regardless of how the client is configured later.
+	//
+	// Fifteen seconds is more than twenty times a healthy call and well under
+	// the server's write timeout, so a stalled upstream becomes a prompt 502
+	// that the browser can retry instead of a request held open until something
+	// else gives up.
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.Upstream, bytes.NewReader(body))
 	if err != nil {
 		writeRPCError(w, http.StatusBadGateway, "could not build upstream request")
 		return
@@ -122,7 +139,25 @@ const (
 	// arguments rather than by the call itself. An unbounded range asks the
 	// node to scan the chain; a few of those in a batch is a denial of service
 	// aimed at Arc's public endpoint using our proxy as the amplifier.
-	maxLogBlockRange = 5_000
+	//
+	// TEN thousand, which is Arc's OWN cap, and no lower.
+	//
+	// It was 5,000 while packages/sdk's getHistory has always requested 9,000
+	// (CHUNK = 9_000, so a span of 8,999). The two never agreed, so every log
+	// scan the app made was refused here with 403 "range is too wide" -- and
+	// because that is a failure rather than an empty result, the SDK retried
+	// each of its eight ranges three times with backoff. /history and /links
+	// spent about thirty seconds producing nothing, and the on-chain half of
+	// both pages was silently empty the whole time.
+	//
+	// Being stricter than the upstream bought nothing: anyone wanting a 9,000
+	// block scan can ask Arc directly for one. The limit exists to stop an
+	// UNBOUNDED scan, and Arc's own ceiling is exactly the right value for it.
+	// The per-IP rate limiter is what bounds volume, and it still applies.
+	//
+	// If the SDK's chunk ever grows past this, TestProxyAllowsTheChunkTheSdkSends
+	// fails rather than the pages quietly going blank again.
+	maxLogBlockRange = 10_000
 )
 
 // rpcRequestAllowed returns "" when the request may be forwarded, or the reason

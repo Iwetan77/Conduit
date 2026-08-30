@@ -82,8 +82,23 @@ func tryConnectExisting(ctx context.Context, port uint32) (*pgxpool.Pool, error)
 	return pool, nil
 }
 
-func startTestDB(ctx context.Context, port uint32, tmpDir string, removeOnCleanup bool) (*pgxpool.Pool, func(), error) {
-	dbName := "conduit_test"
+// StartEmptyTestDB boots a real Postgres with NO migrations applied, returning
+// its URL and a shutdown func.
+//
+// Everything else here hands back an already-migrated database, which is what a
+// test wants and exactly what cmd/migrate-check cannot use: it has to run the
+// migrations itself, in both directions, to find out whether they work.
+func StartEmptyTestDB(port uint32) (string, func(), error) {
+	tmpDir, err := os.MkdirTemp("", "conduit-embedded-pg-*")
+	if err != nil {
+		return "", nil, fmt.Errorf("testdb: mkdir temp: %w", err)
+	}
+	return startEmptyPostgres(port, tmpDir, true)
+}
+
+// startEmptyPostgres boots the server and returns its URL. No migrations.
+func startEmptyPostgres(port uint32, tmpDir string, removeOnCleanup bool) (string, func(), error) {
+	const dbName = "conduit_test"
 
 	// BinariesPath is left at its default (shared, downloaded once and cached
 	// across runs) — only RuntimePath/DataPath need to be unique per instance,
@@ -96,45 +111,52 @@ func startTestDB(ctx context.Context, port uint32, tmpDir string, removeOnCleanu
 		RuntimePath(filepath.Join(tmpDir, "runtime")).
 		DataPath(filepath.Join(tmpDir, "data")))
 
-	if err := pg.Start(); err != nil {
-		if removeOnCleanup {
-			os.RemoveAll(tmpDir)
-		}
-		return nil, nil, fmt.Errorf("testdb: start embedded postgres: %w", err)
-	}
-
-	databaseURL := fmt.Sprintf("postgres://conduit:conduit@localhost:%d/%s?sslmode=disable", port, dbName)
-
 	removeIfConfigured := func() {
 		if removeOnCleanup {
 			os.RemoveAll(tmpDir)
 		}
 	}
 
-	if err := Migrate(databaseURL, migrationsDir()); err != nil {
-		pg.Stop()
+	if err := pg.Start(); err != nil {
 		removeIfConfigured()
+		return "", nil, fmt.Errorf("testdb: start embedded postgres: %w", err)
+	}
+
+	databaseURL := fmt.Sprintf("postgres://conduit:conduit@localhost:%d/%s?sslmode=disable", port, dbName)
+	stop := func() {
+		_ = pg.Stop()
+		removeIfConfigured()
+	}
+	return databaseURL, stop, nil
+}
+
+func startTestDB(ctx context.Context, port uint32, tmpDir string, removeOnCleanup bool) (*pgxpool.Pool, func(), error) {
+	databaseURL, stop, err := startEmptyPostgres(port, tmpDir, removeOnCleanup)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	if err := Migrate(databaseURL, MigrationsDir()); err != nil {
+		stop()
 		return nil, nil, fmt.Errorf("testdb: migrate: %w", err)
 	}
 
 	pool, err := Connect(ctx, databaseURL)
 	if err != nil {
-		pg.Stop()
-		removeIfConfigured()
+		stop()
 		return nil, nil, err
 	}
 
 	cleanup := func() {
 		pool.Close()
-		_ = pg.Stop()
-		removeIfConfigured()
+		stop()
 	}
 	return pool, cleanup, nil
 }
 
-// migrationsDir resolves packages/api/migrations relative to this source
-// file, so tests work regardless of the caller's working directory.
-func migrationsDir() string {
+// MigrationsDir resolves packages/api/migrations relative to this source
+// file, so callers work regardless of their working directory.
+func MigrationsDir() string {
 	_, thisFile, _, _ := runtime.Caller(0)
 	return filepath.Join(filepath.Dir(thisFile), "..", "..", "migrations")
 }

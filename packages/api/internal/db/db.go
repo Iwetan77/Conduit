@@ -104,3 +104,22 @@ func Migrate(databaseURL, migrationsDir string) error {
 	}
 	return nil
 }
+
+// MigrateDown reverts every applied migration, in reverse order.
+//
+// Nothing in the running API calls this and nothing should: it drops data. It
+// exists so cmd/migrate-check can prove that every .down.sql actually reverses
+// its .up.sql, which is the only way to find out that a down migration is wrong
+// BEFORE the day something has to be rolled back.
+func MigrateDown(databaseURL, migrationsDir string) error {
+	m, err := migrate.New("file://"+migrationsDir, databaseURL)
+	if err != nil {
+		return fmt.Errorf("db: migrate init: %w", err)
+	}
+	defer m.Close()
+
+	if err := m.Down(); err != nil && err != migrate.ErrNoChange {
+		return fmt.Errorf("db: migrate down: %w", err)
+	}
+	return nil
+}

@@ -251,17 +251,28 @@ func New(cfg Config) http.Handler {
 
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) })
 
-	// (deploy pipeline restored via deploy-api Action + Render Deploy Hook)
 	// Reports the deployed git commit so a deploy can be verified over HTTP
 	// instead of squinting at the dashboard. RENDER_GIT_COMMIT is injected
 	// by Render at build+runtime; it's a bare SHA (safe to interpolate).
+	//
+	// started_at is here because the commit alone cannot answer "did my push
+	// deploy?". Two builds of the same commit are indistinguishable by SHA, so
+	// a redeploy that succeeded and one that never ran look identical -- which
+	// is exactly the question being asked whenever anyone loads this endpoint.
+	// The process start time separates them: same commit with a newer start is
+	// a deploy that happened.
+	//
+	// Formatted once at boot rather than per request: it is a constant for the
+	// life of the process, and a handler that recomputes a constant is a
+	// handler that can drift from the thing it is reporting.
+	startedAt := time.Now().UTC().Format(time.RFC3339)
 	r.Get("/version", func(w http.ResponseWriter, r *http.Request) {
 		commit := os.Getenv("RENDER_GIT_COMMIT")
 		if commit == "" {
 			commit = "unknown"
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"commit":"` + commit + `"}`))
+		_, _ = w.Write([]byte(`{"commit":"` + commit + `","started_at":"` + startedAt + `"}`))
 	})
 
 	r.Route("/v1", func(r chi.Router) {

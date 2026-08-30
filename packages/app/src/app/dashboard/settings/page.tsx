@@ -7,7 +7,7 @@ import { useAccount } from "wagmi";
 import { WalletConnect } from "@/components/Shared/WalletConnect";
 import { CURRENCIES } from "@conduit/sdk/lite";
 import { updateAccount, type Account, ConduitApiError } from "@/lib/conduit-api";
-import { SETTLE_CURRENCIES, settleCurrencyLabel } from "@/lib/currencies";
+import { SettleCurrencySelect } from "@/components/Shared/SettleCurrencySelect";
 import { PageHeader } from "@/components/Dashboard/PageHeader";
 
 // Phase 4: recipient identity. What a payer sees instead of a bare hex
@@ -103,15 +103,7 @@ function BusinessIdentity() {
           <div className="flex gap-2">
             <div className="flex-1">
               <label className="text-scale-1 font-mono text-ink-dim uppercase tracking-wider block mb-1">Settle currency</label>
-              <select
-                className="w-full bg-surface border border-border px-3 py-2 text-sm focus:border-signal focus:outline-none"
-                value={settleCurrency}
-                onChange={(e) => setSettleCurrency(e.target.value)}
-              >
-                {SETTLE_CURRENCIES.map((c) => (
-                  <option key={c} value={c}>{settleCurrencyLabel(c)}</option>
-                ))}
-              </select>
+              <SettleCurrencySelect value={settleCurrency} onChange={setSettleCurrency} />
             </div>
           </div>
           <div>

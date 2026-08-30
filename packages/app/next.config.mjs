@@ -92,10 +92,15 @@ const nextConfig = {
     "/pay/**": [
       "./packages/app/src/app/pay/**/*.woff",
       "./packages/app/src/app/pay/**/conduit-wordmark.png",
-      "./packages/app/src/app/pay/**/flags/*.svg",
+      // The token logos, which live in public/ because the BROWSER needs them
+      // too (TokenIcon serves them as /tokens/X.svg). public/ is not otherwise
+      // traced into a function, so the card would silently lose every mark
+      // without this line -- non-fatal, loadTokenLogo catches, but the card
+      // would just quietly stop showing logos in production only.
+      "./packages/app/public/tokens/*.svg",
       "./src/app/pay/**/*.woff",
       "./src/app/pay/**/conduit-wordmark.png",
-      "./src/app/pay/**/flags/*.svg",
+      "./public/tokens/*.svg",
     ],
   },
 
@@ -107,7 +112,6 @@ const nextConfig = {
     optimizePackageImports: [
       "@web3icons/react",
       "framer-motion",
-      "country-flag-icons",
       "wagmi",
       "viem",
     ],

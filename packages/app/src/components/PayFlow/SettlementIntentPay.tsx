@@ -7,6 +7,7 @@ import type { Currency } from "@conduit/sdk/lite";
 import { currencyDecimals } from "@conduit/sdk/lite";
 import { formatAmountRaw, shortenAddress } from "@/lib/format";
 import { isoToToken } from "@/lib/currencies";
+import { TokenIcon } from "@/components/Shared/TokenBadge";
 // Loaded when reached. The cross chain flow is a screen the payer only sees
 // after choosing to fund from another chain, and it is one of the largest in
 // the app -- shipping it on first paint made every payer pay for a path most
@@ -157,10 +158,16 @@ export function SettlementIntentPay({ intentId }: SettlementIntentPayProps) {
       {bridgeStage !== "done" && (
         <div className="border border-border bg-surface p-4 space-y-1">
           <p className="text-ink-dim text-xs uppercase tracking-wider font-mono">Requesting</p>
-          <p className="text-ink font-mono text-2xl">
-            {formatAmountRaw(BigInt(intent.amount), currencyDecimals(isoToToken(intent.settle_currency)))}{" "}
-            {isoToToken(intent.settle_currency)}
-          </p>
+          {/* The token's own mark beside the amount, as on the share card and
+              the link card. This screen is where the payer decides, and it was
+              the one surface naming the asset in letters only. */}
+          <div className="flex items-center gap-2.5">
+            <TokenIcon currency={isoToToken(intent.settle_currency) as Currency} px={26} />
+            <p className="text-ink font-mono text-2xl">
+              {formatAmountRaw(BigInt(intent.amount), currencyDecimals(isoToToken(intent.settle_currency)))}{" "}
+              <span className="text-ink-dim">{isoToToken(intent.settle_currency)}</span>
+            </p>
+          </div>
         </div>
       )}
 

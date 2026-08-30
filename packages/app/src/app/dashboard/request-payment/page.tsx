@@ -4,8 +4,10 @@ import { useMyAccount } from "@/lib/queries";
 import { useEffect, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { createPaymentLink, type PaymentLink, type AmountMode, type ReusePolicy, ConduitApiError } from "@/lib/conduit-api";
-import { SETTLE_CURRENCIES as CURRENCIES, isoToToken, settleCurrencyLabel } from "@/lib/currencies";
-import { currencyDecimals } from "@conduit/sdk/lite";
+import { SETTLE_CURRENCIES as CURRENCIES, isoToToken } from "@/lib/currencies";
+import { SettleCurrencySelect } from "@/components/Shared/SettleCurrencySelect";
+import { TokenIcon } from "@/components/Shared/TokenBadge";
+import { currencyDecimals, type Currency } from "@conduit/sdk/lite";
 import { shortenAddress } from "@/lib/format";
 import { useCopy } from "@/lib/use-copy";
 import { PageHeader } from "@/components/Dashboard/PageHeader";
@@ -178,15 +180,11 @@ export default function RequestPaymentPage() {
                 required
               />
             )}
-            <select
-              className={`bg-surface border border-border px-3 py-2 text-sm focus:border-signal focus:outline-none ${amountMode === "open" ? "flex-1" : ""}`}
+            <SettleCurrencySelect
               value={settleCurrency}
-              onChange={(e) => setSettleCurrency(e.target.value)}
-            >
-              {CURRENCIES.map((c) => (
-                <option key={c} value={c}>{settleCurrencyLabel(c)}</option>
-              ))}
-            </select>
+              onChange={setSettleCurrency}
+              className={amountMode === "open" ? "flex-1" : "w-32"}
+            />
           </div>
         </div>
 
@@ -321,12 +319,13 @@ export default function RequestPaymentPage() {
                 type="button"
                 key={c}
                 onClick={() => toggleAccept(c)}
-                className={`text-xs px-2 py-1 border ${
+                className={`flex items-center gap-1.5 text-xs px-2 py-1 border ${
                   acceptCurrencies.includes(c)
                     ? "border-signal text-signal"
                     : "border-border text-ink-dim"
                 }`}
               >
+                <TokenIcon currency={isoToToken(c) as Currency} px={14} />
                 {isoToToken(c)}
               </button>
             ))}

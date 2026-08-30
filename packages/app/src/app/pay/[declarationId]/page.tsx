@@ -9,7 +9,6 @@ import { isoToToken } from "@/lib/currencies";
 import { PayPageClient } from "./PayPageClient";
 
 const API_BASE = process.env.NEXT_PUBLIC_CONDUIT_API_URL ?? "http://localhost:8080";
-const SYMBOLS: Record<string, string> = { EUR: "€", USD: "$", BRL: "R$", AUD: "A$", MXN: "MX$", CAD: "C$", GBP: "£", ZAR: "R", KRW: "₩" };
 
 interface PublicInfo {
   display_name?: string;
@@ -42,11 +41,15 @@ function formatMoney(minor: string | undefined, iso: string | undefined): string
   try {
     const token = isoToToken(iso);
     const human = toHumanAmount(BigInt(minor), currencyDecimals(token));
-    const symbol = SYMBOLS[iso] ?? "";
     const pretty = Number(human).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     // Label with the token being transferred (EURC), not the merchant's ISO
     // settle currency (EUR) — the payer signs for the former.
-    return `${symbol}${pretty} ${token}`;
+    //
+    // No fiat glyph in front of it. A "€" here named the currency EURC tracks,
+    // then the token named the asset, so the share TITLE read "€200.00 EURC" —
+    // the same doubling the card itself was fixed for. The table also had no
+    // CHF entry, so CHFAU silently got none while EUR did.
+    return `${pretty} ${token}`;
   } catch {
     return null;
   }

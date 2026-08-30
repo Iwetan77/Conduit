@@ -3,7 +3,7 @@
 import { useState } from "react";
 import type { Currency } from "@conduit/sdk/lite";
 import { currencyDecimals, toHumanAmount } from "@conduit/sdk/lite";
-import { TokenSelector } from "@/components/Shared/TokenBadge";
+import { TokenIcon, TokenSelector } from "@/components/Shared/TokenBadge";
 
 interface AmountInputProps {
   value: string;
@@ -13,8 +13,6 @@ interface AmountInputProps {
   label?: string;
   max?: bigint;
 }
-
-const SYMBOLS: Record<string, string> = { USDC: "$", EURC: "€", BRLA: "R$", AUDF: "A$", MXNB: "MX$", QCAD: "C$", GBPA: "£", ZARU: "R", CHFAU: "CHF", EURAU: "€" };
 
 export function AmountInput({
   value,
@@ -51,9 +49,11 @@ export function AmountInput({
                     ${showError ? "border-danger/50" : "border-border focus-within:border-ink-dim/30"}`}
       >
         <div className="flex items-center px-4 py-4 gap-3">
-          <span className="text-ink-dim text-2xl font-display select-none">
-            {SYMBOLS[currency] ?? ""}
-          </span>
+          {/* The token's own logo, not a fiat glyph. A "$" in front of a USDC
+              amount named the currency USDC tracks rather than the asset being
+              sent, "£" said the same thing for GBPA, and KRW1 had no entry at
+              all and so showed nothing. */}
+          <TokenIcon currency={currency} px={26} />
           <input
             type="number"
             value={value}

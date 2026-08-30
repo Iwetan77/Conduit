@@ -21,7 +21,7 @@ import {
   hasPersistedSession,
   restoreSession,
 } from "@/lib/circle/browser";
-import { SETTLE_CURRENCIES, settleCurrencyLabel } from "@/lib/currencies";
+import { SettleCurrencySelect } from "@/components/Shared/SettleCurrencySelect";
 import { Logo } from "@/components/Shared/Logo";
 import { PaymentToasts } from "@/components/Dashboard/PaymentToasts";
 
@@ -487,17 +487,7 @@ function CircleOnboarding({ address, onDone }: { address: string; onDone: () => 
             required
             className="w-full bg-surface border border-border p-2 text-sm text-ink"
           />
-          <select
-            value={settleCurrency}
-            onChange={(e) => setSettleCurrency(e.target.value)}
-            className="w-full bg-surface border border-border p-2 text-sm text-ink"
-          >
-            {SETTLE_CURRENCIES.map((c) => (
-              <option key={c} value={c}>
-                {settleCurrencyLabel(c)}
-              </option>
-            ))}
-          </select>
+          <SettleCurrencySelect value={settleCurrency} onChange={setSettleCurrency} />
           <button
             type="submit"
             disabled={busy}

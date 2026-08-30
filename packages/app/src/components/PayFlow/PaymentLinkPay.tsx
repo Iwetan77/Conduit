@@ -20,6 +20,7 @@ import {
 } from "@/lib/conduit-api";
 import { formatAmountRaw, shortenAddress } from "@/lib/format";
 import { isoToToken } from "@/lib/currencies";
+import { TokenIcon } from "@/components/Shared/TokenBadge";
 import { currencyDecimals } from "@conduit/sdk/lite";
 import { ArcSettlePanel } from "./ArcSettlePanel";
 import { usePayerIdentity } from "@/lib/use-payer-identity";
@@ -296,12 +297,20 @@ export function PaymentLinkPay({ linkId }: PaymentLinkPayProps) {
           <p className="text-ink-dim text-xs uppercase tracking-wider font-mono">
             {isFixed ? "Requesting" : "Amount"}
           </p>
+          {/* The token's own mark beside the amount, fixed or typed. This is
+              the screen the payer decides on, and it was the one surface
+              naming the asset in letters only. */}
           {isFixed && link.amount ? (
-            <p className="text-ink font-mono text-2xl">
-              {formatAmountRaw(BigInt(link.amount), decimals)} {settleToken}
-            </p>
+            <div className="flex items-center gap-2.5">
+              <TokenIcon currency={settleToken} px={26} />
+              <p className="text-ink font-mono text-2xl">
+                {formatAmountRaw(BigInt(link.amount), decimals)}{" "}
+                <span className="text-ink-dim">{settleToken}</span>
+              </p>
+            </div>
           ) : (
-            <div className="flex items-baseline gap-2">
+            <div className="flex items-center gap-2.5">
+              <TokenIcon currency={settleToken} px={26} />
               <input
                 inputMode="decimal"
                 className="flex-1 min-w-0 bg-transparent text-ink font-mono text-2xl focus:outline-none"

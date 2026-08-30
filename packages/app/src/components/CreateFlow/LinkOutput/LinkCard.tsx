@@ -114,10 +114,10 @@ export function LinkCard({
               appeared twice -- as a glyph welded to the first digit and again
               as a code. For CHFAU that rendered "CHF500.00 CHFAU", and the card
               is the first thing anyone sees of a payment request.
-              The icon carries the currency visually (a real coin mark or the
-              country's flag, never a letter pretending to be a logo), and the
-              number and symbol sit beside it at equal weight -- so nothing
-              collides no matter how many letters the token's name has. */}
+              The icon carries the currency visually -- the issuer's own logo,
+              never a letter pretending to be one -- and the number and symbol
+              sit beside it at equal weight, so nothing collides no matter how
+              many letters the token's name has. */}
           {hasAmount ? (
             <div
               style={{

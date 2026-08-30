@@ -11,32 +11,13 @@ import { ImageResponse } from "next/og";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { toHumanAmount, currencyDecimals } from "@conduit/sdk/lite";
-import { isoToToken } from "@/lib/currencies";
+import { isoToToken, TOKEN_LOGOS } from "@/lib/currencies";
 
 export const alt = "Conduit payment request";
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
 const API_BASE = process.env.NEXT_PUBLIC_CONDUIT_API_URL ?? "http://localhost:8080";
-
-// The token's own mark, mirroring TokenIcon in components/Shared/TokenBadge.
-//
-// A glyph table used to sit here and print in FRONT of the amount, which put
-// the currency on the card twice and welded a multi-letter code onto the first
-// digit: CHF's entry rendered "Fr500.00 CHFAU". The card is what gets pasted
-// into WhatsApp and X, so that was the version of a payment request most people
-// would ever see.
-//
-// Keyed by TOKEN symbol, not the ISO code -- isoToToken has already run by the
-// time these are used, and keying on ISO is what made EURAU need a special case
-// (EUR is already EURC's).
-const COIN_GLYPHS: Record<string, string> = { USDC: "$", EURC: "€" };
-// Circle's regional stablecoins have no coin artwork, so they show the
-// country's flag, exactly as the app does.
-const FLAG_FOR: Record<string, string> = {
-  BRLA: "BR", AUDF: "AU", MXNB: "MX", QCAD: "CA", GBPA: "GB",
-  ZARU: "ZA", KRW1: "KR", CHFAU: "CH", EURAU: "EU",
-};
 
 // Read off disk, once per warm instance.
 //
@@ -72,24 +53,30 @@ function loadAssets() {
   return assets;
 }
 
-// Flags, read from disk on demand and cached per country.
+// The token's own logo, read from disk on demand and cached per symbol.
 //
-// Copied into this directory rather than imported from country-flag-icons:
-// the app's TokenIcon uses that package's React components, which satori
-// cannot render, and a node_modules path is not reliably traced into the
-// deployed function. Real .svg files beside the fonts, covered by the same
-// tracing rule, and small enough that all nine together are under 7 kB.
+// The SAME files the browser gets from /tokens/X.svg — satori cannot render a
+// React component, so it needs the bytes rather than TokenIcon. Reading from
+// public/ keeps one copy of each issuer's mark: a card that showed a different
+// logo from the page it links to would be worse than one showing none.
+//
+// This used to be a country flag per token plus a drawn "$"/"€" disc. A flag
+// named the currency's country, not the asset -- and the card is what gets
+// pasted into WhatsApp and X, so it is the version of a payment request most
+// people ever see.
 //
 // Failure is non-fatal on purpose. Everything about this card is best-effort:
-// a missing flag should cost the mark, never the whole image.
-const flagCache = new Map<string, Promise<string | null>>();
-function loadFlag(country: string) {
-  let hit = flagCache.get(country);
+// a missing logo should cost the mark, never the whole image.
+const PUBLIC_TOKEN_DIR = join(process.cwd(), "public", "tokens");
+
+const logoCache = new Map<string, Promise<string | null>>();
+function loadTokenLogo(token: string) {
+  let hit = logoCache.get(token);
   if (!hit) {
-    hit = readFile(join(ASSET_DIR, "flags", `${country}.svg`))
+    hit = readFile(join(PUBLIC_TOKEN_DIR, `${token}.svg`))
       .then((buf) => `data:image/svg+xml;base64,${buf.toString("base64")}`)
       .catch(() => null);
-    flagCache.set(country, hit);
+    logoCache.set(token, hit);
   }
   return hit;
 }
@@ -156,12 +143,10 @@ export default async function Image({
     }
   }
 
-  // The token's mark: a flag for the regional stablecoins, a coin for USDC and
-  // EURC, and nothing at all when neither applies -- the symbol beside the
-  // amount still names it, so a missing mark costs decoration rather than
-  // meaning.
-  const flagSrc = token && FLAG_FOR[token] ? await loadFlag(FLAG_FOR[token]) : null;
-  const coinGlyph = token ? COIN_GLYPHS[token] : undefined;
+  // The token's own logo, or nothing at all when we have no artwork for it --
+  // the symbol beside the amount still names the asset, so a missing mark costs
+  // decoration rather than meaning.
+  const logoSrc = token && TOKEN_LOGOS.has(token) ? await loadTokenLogo(token) : null;
 
   // The amount and its symbol are set at ONE size, sized to fit.
   //
@@ -177,7 +162,7 @@ export default async function Image({
   const heroLine = `${amount} ${token}`;
   const heroSize = Math.max(
     56,
-    Math.min(148, Math.floor((flagSrc || coinGlyph ? 930 : 1050) / (0.58 * heroLine.length))),
+    Math.min(148, Math.floor((logoSrc ? 930 : 1050) / (0.58 * heroLine.length))),
   );
 
   // The grid, drawn rather than imported. The site's background grid is a CSS
@@ -256,41 +241,13 @@ export default async function Image({
                     The glyph used to be welded to the first digit, so CHFAU
                     read "Fr500.00 CHFAU" -- the currency stated twice, once as
                     letters touching the number. A mark cannot collide with a
-                    digit however many letters the token's name has. */}
-                {flagSrc ? (
-                  // Circle-cropped so a 3:2 flag sits as an equal beside the
-                  // round coin marks, matching TokenIcon in the app.
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      width: 104,
-                      height: 104,
-                      borderRadius: 52,
-                      overflow: "hidden",
-                    }}
-                  >
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={flagSrc} width={156} height={104} alt="" />
-                  </div>
-                ) : coinGlyph ? (
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      width: 104,
-                      height: 104,
-                      borderRadius: 52,
-                      border: "3px solid #B2F55A",
-                      color: "#B2F55A",
-                      fontSize: 56,
-                      lineHeight: 1,
-                    }}
-                  >
-                    {coinGlyph}
-                  </div>
+                    digit however many letters the token's name has.
+                    Square, because these are the issuers' own marks and they
+                    carry their own shape; cropping them to a circle would clip
+                    the ones that are not round. */}
+                {logoSrc ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={logoSrc} width={104} height={104} alt="" />
                 ) : null}
                 {/* Same size, so the pair reads as one amount. Colour is what
                     separates them: the number in signal green, the asset in

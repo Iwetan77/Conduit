@@ -131,6 +131,14 @@ func validateAmounts(req createLinkRequest) *apierrors.APIError {
 func (h *PaymentLinks) Create(w http.ResponseWriter, r *http.Request) {
 	principal, _ := auth.FromContext(r.Context())
 
+	// A link is the most durable thing this API makes -- printed, pasted into
+	// chats, and paid weeks later. One pointing at a business owner's personal
+	// wallet is the worst version of this bug, so it is refused before it exists.
+	if e := settlementWalletReady(r.Context(), h.Pool, principal.AccountID); e != nil {
+		writeErr(w, e)
+		return
+	}
+
 	var req createLinkRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, apierrors.E(apierrors.CodeInvalidRequest, "body"))

@@ -2,6 +2,7 @@
 
 import { useMyAccount } from "@/lib/queries";
 import { PayoutAddressGate } from "@/components/Dashboard/PayoutAddressGate";
+import { SettlementWalletProvisioner } from "@/components/Dashboard/SettlementWalletProvisioner";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -440,7 +441,17 @@ function CircleDashboard({ children }: { children: React.ReactNode }) {
   // choice. Renders its children untouched the moment it has an answer.
   return (
     <PayoutAddressGate account={myAccount}>
-      <DashboardChrome signOut={signOut}>{children}</DashboardChrome>
+      <DashboardChrome signOut={signOut}>
+        {/* Beside the dashboard, not in front of it. Creating the business's
+            own settlement wallet needs a Circle challenge, and holding a
+            merchant at a modal while that runs -- or worse, while it fails --
+            costs them the session they came for. */}
+        <SettlementWalletProvisioner
+          account={myAccount}
+          circleToken={currentSession()?.userToken ?? null}
+        />
+        {children}
+      </DashboardChrome>
     </PayoutAddressGate>
   );
 }

@@ -53,6 +53,16 @@ type Config struct {
 	CircleBaseURL string
 }
 
+// The blockchain identifier Arc wallets carry, in Circle's own vocabulary.
+//
+// Read back from a real ListWallets response rather than assumed
+// (docs/circle-wallet-capability.md). Named once because two places depend on
+// it and they must not drift: the login path asks Circle to create wallets on
+// it, and settlement provisioning refuses any wallet that is not on it. A
+// settlement address on the wrong chain is a valid address that no payment can
+// ever reach.
+const arcBlockchain = "ARC-TESTNET"
+
 // statusRecorder captures the status code so the request log can report it.
 type statusRecorder struct {
 	http.ResponseWriter
@@ -72,6 +82,15 @@ func New(cfg Config) http.Handler {
 	circleVerifier := auth.NewCircleVerifier(circleClient)
 	accountsH := &handlers.Accounts{Pool: cfg.Pool, CircleVerifier: circleVerifier}
 	apiKeysH := &handlers.ApiKeys{Pool: cfg.Pool}
+	// Arc is named once, here, and shared with the login path below rather than
+	// written out twice. A settlement wallet on the wrong chain is an address
+	// that is valid and that no payment can ever reach, so the two places that
+	// decide "is this Arc" must not be able to drift apart.
+	settlementWalletH := &handlers.SettlementWallet{
+		Pool:          cfg.Pool,
+		Client:        circleClient,
+		ArcBlockchain: arcBlockchain,
+	}
 	circleAuthH := &handlers.CircleAuth{
 		Client: circleClient,
 		// Arc plus every Circle-supported chain the cross-chain payer flow
@@ -85,7 +104,7 @@ func New(cfg Config) http.Handler {
 		// collapse to Arc alone, which is why ETH-SEPOLIA sat out until the
 		// retry was fixed.
 		Blockchains: []string{
-			"ARC-TESTNET",
+			arcBlockchain,
 			"ETH-SEPOLIA",
 			"BASE-SEPOLIA",
 			"MATIC-AMOY",
@@ -94,7 +113,7 @@ func New(cfg Config) http.Handler {
 			"OP-SEPOLIA",
 			"UNI-SEPOLIA",
 		},
-		FallbackBlockchains: []string{"ARC-TESTNET"},
+		FallbackBlockchains: []string{arcBlockchain},
 	}
 	// Server-side balance reads with a short cache. Keeps N browsers from
 	// each fanning out their own RPC calls and tripping Arc's rate limiter.
@@ -343,6 +362,9 @@ func New(cfg Config) http.Handler {
 			r.Post("/auth/circle/device", circleAuthH.StartLogin)
 			r.Post("/auth/circle/initialize", circleAuthH.Initialize)
 			r.Get("/auth/circle/wallets", circleAuthH.Wallets)
+			// An additional wallet for a user who already has one. Returns a
+			// challenge; the wallet exists only once the browser executes it.
+			r.Post("/auth/circle/wallets", circleAuthH.CreateWallet)
 			r.Post("/auth/circle/sign_typed_data", circleAuthH.SignTypedData)
 			r.Post("/auth/circle/sign_message", circleAuthH.SignMessage)
 			r.Post("/auth/circle/contract_execution", circleAuthH.ContractExecution)
@@ -448,6 +470,11 @@ func New(cfg Config) http.Handler {
 			// naming a different address -- confirms itself through the account
 			// update, which validates the address.
 			r.Post("/accounts/me/payout/confirm", accountsH.ConfirmPayoutAddress)
+			// Binds the settlement wallet the browser just created to this
+			// account. Behind session auth like the rest, and additionally
+			// requires the caller's Circle user token -- the address is read
+			// back from Circle with it rather than taken from the request.
+			r.Post("/accounts/me/settlement_wallet", settlementWalletH.Provision)
 			// Ends every session for the account. Authenticated because it acts
 			// on the caller's own account, and only meaningful to a session
 			// caller -- see Accounts.Logout.

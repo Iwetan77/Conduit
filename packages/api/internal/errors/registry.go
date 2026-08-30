@@ -38,6 +38,11 @@ const (
 	CodeLinkAlreadyUsed       Code = "payment_link_already_used"
 	CodeLinkAmountOutOfBounds Code = "payment_link_amount_out_of_bounds"
 	CodeLinkAmountRequired    Code = "payment_link_amount_required"
+
+	CodeSettlementWalletRequired Code = "settlement_wallet_required"
+	CodeSettlementWalletUnknown  Code = "settlement_wallet_unknown"
+	CodeSettlementWalletInvalid  Code = "settlement_wallet_invalid"
+	CodeSettlementWalletSet      Code = "settlement_wallet_already_set"
 )
 
 type entry struct {
@@ -83,6 +88,20 @@ var registry = map[Code]entry{
 	CodeLinkAlreadyUsed:       {http.StatusConflict, "This single-use payment link has already been paid."},
 	CodeLinkAmountOutOfBounds: {http.StatusUnprocessableEntity, "The amount is outside this link's allowed range."},
 	CodeLinkAmountRequired:    {http.StatusBadRequest, "An amount is required for this payment link."},
+
+	// 409, not 422: the request is fine and the account is simply not ready
+	// yet. Refusing here is the point -- the alternative is a settlement
+	// pointed at whichever wallet the owner happened to sign in with, which is
+	// how business income ends up in someone's personal wallet without anyone
+	// deciding that it should.
+	CodeSettlementWalletRequired: {http.StatusConflict, "This account has no settlement wallet yet. Finish setting one up before taking payments."},
+	// 403 rather than 404: the wallet may well exist, just not for this user.
+	// Saying which would let a caller enumerate other people's wallet ids.
+	CodeSettlementWalletUnknown: {http.StatusForbidden, "That wallet does not belong to the signed-in user."},
+	CodeSettlementWalletInvalid: {http.StatusUnprocessableEntity, "That wallet cannot be used for settlement."},
+	// Moving where income lands is a deliberate act with its own confirmation,
+	// not something a repeated provisioning call should do quietly.
+	CodeSettlementWalletSet: {http.StatusConflict, "This account already has a settlement wallet."},
 }
 
 // APIError is what handlers return; the HTTP layer renders it to the

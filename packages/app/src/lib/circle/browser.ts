@@ -90,6 +90,13 @@ export interface CircleWallet {
   id: string;
   address: string;
   blockchain: string;
+  /**
+   * Echoed back from the metadata a wallet was created with. Present only on
+   * wallets that carried it, and a lookup hint rather than an identity — the
+   * server re-reads the wallet by id before recording anything about it.
+   */
+  refId?: string;
+  name?: string;
 }
 
 export interface CircleSessionState {
@@ -375,6 +382,56 @@ async function loadWallet(token: string): Promise<{ wallet: CircleWallet; wallet
       throw new Error(
         `Circle returned no wallets after 60s. The create-wallet challenge succeeded, ` +
           `so this is provisioning or a chain Circle did not accept (asked for ${blockchain}).`
+      );
+    }
+    await new Promise((r) => setTimeout(r, 2000));
+  }
+}
+
+/**
+ * Create a SECOND Arc wallet for the signed-in user, and return its id.
+ *
+ * This is how a business gets an address of its own. The wallet the user signs
+ * in with is theirs personally; a business needs one that is not, and Circle
+ * will happily hold more than one wallet per chain for a user (proved in
+ * docs/circle-wallet-capability.md — three on Arc for one user).
+ *
+ * Two round trips through Circle's UI, and that is not avoidable: /user/initialize
+ * is one-shot and refuses a user who already has wallets, so first login and
+ * this are separate challenges by Circle's design, not by ours.
+ *
+ * Finding the new wallet afterwards is done by refId, which the create call
+ * attaches and ListWallets echoes back. The alternative — "whichever Arc wallet
+ * is not the sign-in one" — breaks the moment a user has three, and a wrong
+ * answer here is a merchant's income pointed at the wrong address.
+ */
+export async function createSettlementWallet(refId: string, name: string): Promise<CircleWallet> {
+  const current = session;
+  if (!current) throw new Error("no Circle session — sign in first");
+  const token = current.userToken;
+
+  const res = await api("/v1/auth/circle/wallets", {
+    method: "POST",
+    token,
+    body: JSON.stringify({ ref_id: refId, name }),
+  });
+  if (res.challenge_id) {
+    note("creating your settlement wallet…");
+    await executeChallenge(res.challenge_id);
+  }
+
+  // A completed challenge means Circle ACCEPTED the creation, not that the
+  // wallet exists yet — the same asynchrony loadWallet already deals with on
+  // the login path, and an empty first read is normal rather than a failure.
+  const deadline = Date.now() + 60_000;
+  for (;;) {
+    const list = ((await api("/v1/auth/circle/wallets", { token })).data ?? []) as CircleWallet[];
+    const found = list.find((w) => w.refId === refId);
+    if (found?.address) return found;
+    if (Date.now() > deadline) {
+      throw new Error(
+        "Circle accepted the new wallet but it has not appeared after 60s. " +
+          "Nothing is lost — retrying will find it."
       );
     }
     await new Promise((r) => setTimeout(r, 2000));

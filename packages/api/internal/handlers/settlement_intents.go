@@ -100,6 +100,14 @@ type intentResponse struct {
 func (h *SettlementIntents) Create(w http.ResponseWriter, r *http.Request) {
 	principal, _ := auth.FromContext(r.Context())
 
+	// Before anything is validated: does this account have somewhere of its own
+	// to be paid? A business that would settle to its owner's sign-in wallet is
+	// refused here rather than quietly issued an intent pointing at it.
+	if e := settlementWalletReady(r.Context(), h.Pool, principal.AccountID); e != nil {
+		writeErr(w, e)
+		return
+	}
+
 	var req createIntentRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, apierrors.E(apierrors.CodeInvalidRequest, "body"))

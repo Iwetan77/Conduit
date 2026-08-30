@@ -207,6 +207,45 @@ func (h *CircleAuth) Initialize(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"challenge_id": challengeID})
 }
 
+// CreateWallet is POST /v1/auth/circle/wallets — an ADDITIONAL wallet for a
+// user who already has one, returned as a challenge for the browser to execute.
+//
+// Separate from Initialize because Circle makes it separate: /user/initialize
+// answers 409 for a user who already has wallets, so first login and every
+// wallet after it are genuinely different calls. A new merchant therefore runs
+// two challenges, which is not a design choice available to us.
+//
+// Only Arc, and not because a settlement wallet on another chain would be
+// unusable in principle -- because Conduit settles on Arc, so an address
+// anywhere else is one no payment can reach.
+func (h *CircleAuth) CreateWallet(w http.ResponseWriter, r *http.Request) {
+	if !h.available(w) {
+		return
+	}
+	token := userToken(r)
+	if token == "" {
+		writeErr(w, apierrors.E(apierrors.CodeUnauthorized, "X-Circle-User-Token"))
+		return
+	}
+	var req struct {
+		// Carried back on the wallet in ListWallets so the browser can find the
+		// one it just made. A hint for lookup, never an identity -- the server
+		// re-reads the wallet by id before recording anything.
+		RefID string `json:"ref_id"`
+		Name  string `json:"name"`
+	}
+	// A body is optional here; an absent one just means no metadata.
+	_ = json.NewDecoder(r.Body).Decode(&req)
+
+	challengeID, err := h.Client.CreateWallet(r.Context(), token,
+		h.FallbackBlockchains, strings.TrimSpace(req.Name), strings.TrimSpace(req.RefID))
+	if err != nil {
+		h.upstream(w, "create wallet", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"challenge_id": challengeID})
+}
+
 // Wallets is GET /v1/auth/circle/wallets — the signed-in user's wallets.
 func (h *CircleAuth) Wallets(w http.ResponseWriter, r *http.Request) {
 	if !h.available(w) {

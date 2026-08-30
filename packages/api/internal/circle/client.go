@@ -263,6 +263,38 @@ func (c *Client) InitializeUser(ctx context.Context, userToken string, blockchai
 	return out.ChallengeID, nil
 }
 
+// CreateWallet asks for an ADDITIONAL wallet on an already-initialized user,
+// returning a challenge the browser must execute.
+//
+// Separate from InitializeUser rather than a variation of it, because Circle
+// treats them as different things: /user/initialize is one-shot and answers 409
+// (code 155106) for a user who already has wallets, so a second wallet can only
+// come from here. That also settles the question of whether first login could
+// ask for both at once -- it cannot, and a new merchant runs two challenges.
+//
+// refID is carried back on the wallet in ListWallets, which is what lets the
+// browser find the wallet it just created without guessing. It is a hint, not
+// an identity: the server still records the wallet id it verified.
+//
+// One request per wallet: passing the same blockchain twice is rejected
+// outright (code 156017).
+func (c *Client) CreateWallet(ctx context.Context, userToken string, blockchains []string, name, refID string) (string, error) {
+	body := map[string]any{
+		"idempotencyKey": uuid.NewString(),
+		"blockchains":    blockchains,
+	}
+	if name != "" || refID != "" {
+		body["metadata"] = []map[string]string{{"name": name, "refId": refID}}
+	}
+	var out struct {
+		ChallengeID string `json:"challengeId"`
+	}
+	if err := c.doUser(ctx, http.MethodPost, "/v1/w3s/user/wallets", userToken, body, &out); err != nil {
+		return "", err
+	}
+	return out.ChallengeID, nil
+}
+
 // Wallet is one of a user's wallets.
 type Wallet struct {
 	ID          string `json:"id"`
@@ -270,6 +302,12 @@ type Wallet struct {
 	Blockchain  string `json:"blockchain"`
 	State       string `json:"state"`
 	AccountType string `json:"accountType"`
+	// Echoed back from the metadata given at creation. Present only on wallets
+	// created with it, so both are optional -- and neither is trustworthy as an
+	// identity, since a client chooses them. Useful for FINDING a wallet, never
+	// for deciding what it is.
+	Name  string `json:"name,omitempty"`
+	RefID string `json:"refId,omitempty"`
 }
 
 // VerifyUserToken resolves a Circle session token to the user it belongs to.

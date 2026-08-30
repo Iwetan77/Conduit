@@ -186,6 +186,19 @@ export interface Account {
    * same thing -- hence always present rather than optional.
    */
   payout_confirmed: boolean;
+  /**
+   * Whether this account has a settlement wallet of its own yet.
+   *
+   * The dashboard decides whether to run provisioning from exactly this, so
+   * absent and false have to mean the same thing — always present on the wire.
+   */
+  settlement_wallet_ready: boolean;
+  /**
+   * How settle_address was arrived at: a wallet provisioned for this account,
+   * the wallet used to sign in, or an address its owner supplied. Null on rows
+   * written before the API set it, which is a real state rather than an error.
+   */
+  settle_address_source: "provisioned" | "login_wallet" | "external" | null;
   livemode: boolean;
 }
 
@@ -353,6 +366,34 @@ export function updateAccount(id: string, body: { name?: string; logo_url?: stri
 export function confirmPayoutAddress() {
   return request<{ payout_confirmed: boolean }>("/v1/accounts/me/payout/confirm", {
     method: "POST",
+  });
+}
+
+/**
+ * Bind the settlement wallet the browser just created to this account.
+ *
+ * Sends the wallet ID and nothing else, deliberately. The server reads the
+ * address back from Circle with the caller's own user token and stores THAT —
+ * an address sent from here would be an address nobody verified, which is the
+ * hole this whole flow exists to close. Sending one would not help anyway; it
+ * is ignored.
+ */
+export function provisionSettlementWallet(walletId: string, circleToken: string) {
+  return request<{
+    settle_address: string;
+    settle_wallet_id: string;
+    settle_address_source: string;
+    settlement_wallet_ready: boolean;
+  }>("/v1/accounts/me/settlement_wallet", {
+    method: "POST",
+    body: { wallet_id: walletId },
+    // Passed explicitly, unlike every other call here. The server needs the
+    // caller's own Circle session to ask Circle which wallets they own — that
+    // lookup is the entire safety property, and it cannot be made with anything
+    // the server holds: Circle refuses to mint a token for a Google user from an
+    // API key. This is a once-per-account call, so the round trip it costs is
+    // paid once rather than on every request.
+    circleToken,
   });
 }
 

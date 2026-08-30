@@ -40,7 +40,18 @@ type accountResponse struct {
 	// response rather than omitted when unset -- absent and false have to mean
 	// the same thing to a client, and only one of them does if it is omitted.
 	PayoutConfirmed bool `json:"payout_confirmed"`
-	Livemode        bool `json:"livemode"`
+	// Whether this account has a settlement wallet of its own yet.
+	//
+	// Present on every response rather than omitted when false, for the same
+	// reason as PayoutConfirmed above: the dashboard decides whether to run
+	// provisioning from exactly this field, and an absent one has to mean the
+	// same thing as false to a client.
+	SettlementWalletReady bool `json:"settlement_wallet_ready"`
+	// How settle_address was arrived at. Null on rows written before the
+	// writers set it -- which is a real state, not an error, so it is nullable
+	// rather than defaulted to something that would be a claim.
+	SettleAddressSource *string `json:"settle_address_source"`
+	Livemode            bool    `json:"livemode"`
 	// APIKey is only ever present in the create response, exactly once.
 	APIKey *createdKey `json:"api_key,omitempty"`
 }
@@ -260,11 +271,20 @@ func (h *Accounts) Me(w http.ResponseWriter, r *http.Request) {
 	var resp accountResponse
 	err := h.Pool.QueryRow(r.Context(),
 		`SELECT id, name, logo_url, username, settle_currency, settle_address,
-		        payout_confirmed_at IS NOT NULL, livemode
+		        payout_confirmed_at IS NOT NULL,
+		        -- Ready means BOTH halves are there. The constraint added with
+		        -- the column already guarantees they move together, so this is
+		        -- belt and braces -- but this is the field the dashboard gates
+		        -- provisioning on, and a half-written row reading as ready
+		        -- would silently stop anyone from ever finishing.
+		        (settle_wallet_id IS NOT NULL AND settle_address_source = 'provisioned'),
+		        settle_address_source,
+		        livemode
 		   FROM accounts WHERE id = $1`,
 		principal.AccountID,
 	).Scan(&resp.ID, &resp.Name, &resp.LogoURL, &resp.Username,
-		&resp.SettleCurrency, &resp.SettleAddress, &resp.PayoutConfirmed, &resp.Livemode)
+		&resp.SettleCurrency, &resp.SettleAddress, &resp.PayoutConfirmed,
+		&resp.SettlementWalletReady, &resp.SettleAddressSource, &resp.Livemode)
 	if err != nil {
 		writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
 		return

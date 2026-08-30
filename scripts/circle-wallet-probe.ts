@@ -74,6 +74,30 @@ interface Call {
 
 const calls: Call[] = [];
 
+// Fields that are credentials, wherever they appear in a response.
+//
+// The call log is written verbatim into a COMMITTED document, which is the
+// point of it — a claim you cannot check against the response is not evidence.
+// But `POST /v1/w3s/users/token` answers with a userToken and an encryptionKey,
+// and those are keys to a user's wallets, not evidence of anything. They went
+// into the report once before this existed.
+//
+// Redacted at capture rather than at write time, so nothing downstream of here
+// can print them either.
+const SECRET_FIELDS = new Set(["userToken", "encryptionKey", "deviceToken", "deviceEncryptionKey"]);
+
+function redact(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(redact);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([k, v]) =>
+        SECRET_FIELDS.has(k) ? [k, "<redacted>"] : [k, redact(v)],
+      ),
+    );
+  }
+  return value;
+}
+
 // One request, recorded. Failures are data here, not exceptions: "Circle
 // refuses this" is exactly the kind of answer the probe exists to collect, so a
 // 400 must end up in the log rather than ending the run. Connection failures
@@ -114,7 +138,9 @@ async function call(
         data: raw?.data,
         raw,
       };
-      calls.push(entry);
+      // The caller gets the real response — it needs the user token to carry on.
+      // The LOG gets a redacted copy, because the log is what gets committed.
+      calls.push({ ...entry, requestBody: redact(opts.body), data: redact(raw?.data), raw: redact(raw) });
       const ok = res.status < 400 && !raw?.code;
       console.log(
         `  ${ok ? "ok  " : "FAIL"}  ${method} ${path}  [${label}]  http=${res.status}` +

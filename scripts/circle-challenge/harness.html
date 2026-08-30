@@ -1,0 +1,56 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Circle challenge harness</title>
+  </head>
+  <body style="font-family: monospace; background: #050505; color: #e8eae0; padding: 12px">
+    <!--
+      A page whose only job is to run one Circle challenge.
+
+      Creating a user-controlled wallet cannot be finished on a server: the
+      challenge derives key material on the user's own device, so Circle's API
+      hands back a challengeId and stops. That is the point of the product — the
+      merchant owns the key, not us — and it means anything that needs a real
+      wallet (the capability probe, and later the settlement and payout e2e
+      runs) needs a browser in the loop.
+
+      This is that browser. It loads Circle's Web SDK, executes the challenge id
+      it is given, and parks the outcome on window.__done for the driver to
+      read. No app code, no React, nothing that could make a failure ambiguous.
+    -->
+    <pre id="log">loading…</pre>
+    <script src="/w3s.js"></script>
+    <script>
+      const q = new URLSearchParams(location.search);
+      const log = (m) => {
+        document.getElementById("log").textContent += "\n" + m;
+      };
+      // The driver polls this. null = still running.
+      window.__done = null;
+      try {
+        const Ctor = W3S.W3SSdk || W3S.default || W3S;
+        const sdk = new Ctor({ appSettings: { appId: q.get("appId") } });
+        sdk.setAuthentication({
+          userToken: q.get("userToken"),
+          encryptionKey: q.get("encryptionKey"),
+        });
+        log("executing " + q.get("challengeId"));
+        sdk.execute(q.get("challengeId"), (error, result) => {
+          // The SDK reports a transient "Network error" (155706) while its
+          // hosted UI is still coming up, and then carries on to render it. So
+          // an error here is NOT terminal; the driver waits for a result and
+          // treats the error as terminal only once the UI has given up.
+          window.__done = {
+            error: error ? { code: error.code, message: error.message } : null,
+            result: result ?? null,
+          };
+          log("callback: " + JSON.stringify(window.__done));
+        });
+      } catch (e) {
+        window.__done = { error: { message: String((e && e.message) || e) }, result: null };
+        log("threw: " + String(e));
+      }
+    </script>
+  </body>
+</html>

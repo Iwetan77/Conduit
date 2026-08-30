@@ -20,9 +20,10 @@
     "sdk:build": "pnpm --filter @conduit/sdk build"
   },
   "devDependencies": {
+    "esbuild": "^0.28.2",
+    "tsx": "^4.19.0",
     "turbo": "^2.0.0",
-    "typescript": "^5.4.0",
-    "tsx": "^4.19.0"
+    "typescript": "^5.4.0"
   },
   "license": "SEE LICENSE IN LICENSE"
 }

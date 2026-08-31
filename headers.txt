@@ -1,0 +1,25 @@
+HTTP/2 200 
+accept-ranges: bytes
+access-control-allow-origin: *
+age: 1985
+cache-control: public, max-age=0, must-revalidate
+content-disposition: inline
+content-security-policy: frame-ancestors 'none'
+content-security-policy-report-only: default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' https://conduit-z56x.onrender.com https://*.circle.com https://*.arc.network https://*.solana.com https://*.walletconnect.com https://*.walletconnect.org https://api.web3modal.org https://*.web3modal.org wss://*.walletconnect.com wss://*.walletconnect.org wss://*.solana.com; frame-src 'self' https://*.circle.com; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'
+content-type: text/html; charset=utf-8
+date: Mon, 31 Aug 2026 21:24:17 GMT
+etag: "7024210f668b803380e682880869b23a"
+permissions-policy: camera=(self), microphone=(), geolocation=(), payment=()
+referrer-policy: strict-origin-when-cross-origin
+server: Vercel
+strict-transport-security: max-age=63072000
+vary: rsc, next-router-state-tree, next-router-prefetch, next-router-segment-prefetch
+x-content-type-options: nosniff
+x-frame-options: DENY
+x-matched-path: /dashboard/settlements
+x-nextjs-prerender: 1
+x-nextjs-stale-time: 300
+x-vercel-cache: HIT
+x-vercel-id: cpt1::ljmdk-1788211457039-bf52f6fbf701
+content-length: 13810
+

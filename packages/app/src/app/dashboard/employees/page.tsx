@@ -22,6 +22,7 @@ import { SettleCurrencySelect } from "@/components/Shared/SettleCurrencySelect";
 import { TokenIcon } from "@/components/Shared/TokenBadge";
 import { shortenAddress, formatMinorUnits } from "@/lib/format";
 import { PageHeader } from "@/components/Dashboard/PageHeader";
+import { UserMark } from "@/components/Shared/UserMark";
 import { currencyDecimals, type Currency } from "@conduit/sdk/lite";
 
 const qkEmployees = ["employees"] as const;
@@ -270,13 +271,40 @@ function AddEmployee({ onAdded }: { onAdded: () => void }) {
         />
       </div>
 
-      {/* Username first, address as the alternative. A typed address is the
-          thing this product spent its whole design removing, so it is offered
-          second and with the warning it deserves. */}
+      {/* How this person is identified. Username first, address as the
+          alternative -- a typed address is the thing this product spent its
+          whole design removing, so it is offered second and with the warning it
+          deserves.
+
+          The switch between them is a segmented control, the same one this form
+          already uses for Pay. It used to be a line of dim grey text under the
+          field, at the size of a footnote, in a colour meant for captions --
+          the only route to the second half of this form and you could barely
+          see it. A control that changes what the form asks for is not a
+          footnote. */}
       <div>
-        <label className="text-scale-1 font-mono text-ink-dim uppercase tracking-wider block mb-1">
-          {byAddress ? "Address" : "Username"}
-        </label>
+        <div className="flex items-center justify-between mb-1">
+          <label className="text-scale-1 font-mono text-ink-dim uppercase tracking-wider">
+            Identify by
+          </label>
+        </div>
+        <div className="flex gap-2 mb-2">
+          {([false, true] as const).map((v) => (
+            <button
+              type="button"
+              key={String(v)}
+              onClick={() => setByAddress(v)}
+              aria-pressed={byAddress === v}
+              className={`flex-1 text-xs px-2 py-2 border transition-colors ${
+                byAddress === v
+                  ? "border-signal text-signal bg-signal/5"
+                  : "border-border text-ink-dim hover:text-ink hover:border-ink-dim"
+              }`}
+            >
+              {v ? "Wallet address" : "Conduit username"}
+            </button>
+          ))}
+        </div>
         {byAddress ? (
           <>
             <input
@@ -293,22 +321,42 @@ function AddEmployee({ onAdded }: { onAdded: () => void }) {
             </p>
           </>
         ) : (
-          <input
-            className="w-full bg-bg border border-border px-3 py-2 text-sm font-mono focus:border-signal focus:outline-none"
-            placeholder="@name"
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            spellCheck={false}
-            required
-          />
+          <>
+            {/* The namespace is furniture, not text -- the same field the
+                person on the other end claimed their name in
+                (Shared/UsernamePrompt), so it reads the same way on both sides
+                of the transaction.
+
+                Every Conduit handle ends identically, so asking the merchant to
+                type it is asking them to retype a constant on every employee,
+                into the one field that decides who gets paid. It sits inside
+                the border and outside the input, so it can never be typed,
+                selected, or submitted as part of the name, and it is
+                aria-hidden because a screen reader announcing a decoration on
+                every keystroke is worse than silence.
+
+                A leading @ is stripped on the way in, so somebody who types the
+                handle out of habit is not told they are wrong. */}
+            <div className="w-full bg-bg border border-border flex items-center px-3 py-2 transition-colors focus-within:border-signal">
+              <UserMark username={username.trim() || null} size="sm" />
+              <input
+                className="flex-1 min-w-0 ml-2.5 bg-transparent text-sm font-mono text-ink outline-none placeholder:text-ink-dim/50"
+                placeholder="theirname"
+                value={username}
+                onChange={(e) => setUsername(e.target.value.replace(/^@/, ""))}
+                maxLength={20}
+                spellCheck={false}
+                autoComplete="off"
+                autoCapitalize="none"
+                aria-label="Their Conduit username"
+                required
+              />
+              <span aria-hidden className="shrink-0 text-sm font-mono text-ink-dim/60 select-none">
+                @ conduit
+              </span>
+            </div>
+          </>
         )}
-        <button
-          type="button"
-          onClick={() => setByAddress((v) => !v)}
-          className="text-ink-dim text-xs font-mono hover:text-ink mt-1"
-        >
-          {byAddress ? "← Use a username instead" : "They have no Conduit username"}
-        </button>
       </div>
 
       <div className="flex gap-2">

@@ -450,44 +450,86 @@ export function restoreSession(): Promise<CircleSessionState | null> {
   if (session) return Promise.resolve(session);
   if (restoring) return restoring;
 
-  // A stored session takes priority over a redirect stash: if both exist we
-  // are already signed in and there is nothing to complete.
-  const stored = readPersisted();
-  if (stored) {
-    restoring = (async () => {
-      const cfg = requireConfig();
-      // The SDK must exist and be authenticated before any challenge can run.
-      // Restoring the token without this gives a session that looks connected
-      // and then fails on the first PIN prompt.
-      await ensureSdk({ appSettings: { appId: cfg.appId } }, () => {});
-      sdk!.setAuthentication({
-        userToken: stored.userToken,
-        encryptionKey: stored.encryptionKey,
-      });
-
-      // Prove the token is still good rather than trusting the clock. Circle
-      // can invalidate a session early, and a stale token that only fails at
-      // the first payment is far worse than one caught at page load.
-      try {
-        await api("/v1/auth/circle/wallets", { token: stored.userToken });
-      } catch {
-        note("stored session expired — sign in again");
-        clearCircleSession();
-        return null;
-      }
-      session = stored;
-      emit();
-      return session;
-    })();
+  // A login IN FLIGHT beats a stored session. This order is the whole fix.
+  //
+  // It used to be the other way round, on the reasoning that "if both exist we
+  // are already signed in and there is nothing to complete". Both DO exist on
+  // the one page load where that reasoning is worst: the merchant whose stored
+  // session has gone bad is exactly the merchant who was just shown a sign-in
+  // screen and pressed it, and they come back from Google with a callback hash
+  // AND the dead session still sitting in localStorage under its 55-minute
+  // clock. readPersisted() only checks that clock, so it hands back a session
+  // Circle has already invalidated.
+  //
+  // Taking the stored branch there was self-perpetuating, because three things
+  // went wrong in one pass:
+  //
+  //   1. The stored branch constructs the SDK WITHOUT loginConfigs, and it is
+  //      constructing it with them that consumes the callback hash. So the hash
+  //      stayed in the URL and the login was never completed -- the callback
+  //      page just sat there.
+  //   2. RESUME_AT_LOAD is read and deleted from sessionStorage at module
+  //      scope, so the device token for that login was spent whether or not
+  //      anything used it. Nothing could complete it afterwards.
+  //   3. The stored token then failed its own validation, so the branch called
+  //      clearCircleSession() and returned null.
+  //
+  // Signed out, with the redirect spent and the hash unusable. Press sign in
+  // again and it repeats, forever, which is what "it asks me to sign in again"
+  // was. Completing the redirect first cannot lose anything: a fresh login is
+  // strictly better than a cached one, and it is what the person just asked
+  // for.
+  if (RESUME_AT_LOAD) {
+    restoring = completeRedirectLogin();
     restoring.catch(() => {
       restoring = null;
     });
     return restoring;
   }
 
-  if (!RESUME_AT_LOAD) return Promise.resolve(null);
+  const stored = readPersisted();
+  if (!stored) return Promise.resolve(null);
 
   restoring = (async () => {
+    const cfg = requireConfig();
+    // The SDK must exist and be authenticated before any challenge can run.
+    // Restoring the token without this gives a session that looks connected
+    // and then fails on the first PIN prompt.
+    await ensureSdk({ appSettings: { appId: cfg.appId } }, () => {});
+    sdk!.setAuthentication({
+      userToken: stored.userToken,
+      encryptionKey: stored.encryptionKey,
+    });
+
+    // Prove the token is still good rather than trusting the clock. Circle
+    // can invalidate a session early, and a stale token that only fails at
+    // the first payment is far worse than one caught at page load.
+    try {
+      await api("/v1/auth/circle/wallets", { token: stored.userToken });
+    } catch {
+      note("stored session expired — sign in again");
+      clearCircleSession();
+      return null;
+    }
+    session = stored;
+    emit();
+    return session;
+  })();
+  restoring.catch(() => {
+    restoring = null;
+  });
+  return restoring;
+}
+
+/**
+ * Finish the login that redirected to Google, using the device token stashed
+ * before the page was discarded.
+ *
+ * Split out of restoreSession so the in-flight case can be taken FIRST without
+ * nesting; see the note there for why that order is load-bearing.
+ */
+function completeRedirectLogin(): Promise<CircleSessionState | null> {
+  return (async () => {
     const cfg = requireConfig();
     note("completing sign-in…");
     const verified = await new Promise<{ userToken: string; encryptionKey: string }>(
@@ -600,13 +642,6 @@ export function restoreSession(): Promise<CircleSessionState | null> {
     if (back) window.location.replace(back);
     return session;
   })();
-
-  // A failed restore must not be cached as a permanent "no": the user can
-  // press sign in again, and that has to start clean.
-  restoring.catch(() => {
-    restoring = null;
-  });
-  return restoring;
 }
 
 /**

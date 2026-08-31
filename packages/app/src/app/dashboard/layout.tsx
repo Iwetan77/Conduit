@@ -288,21 +288,27 @@ function CircleLoginGate() {
   const { connect, connectors, isPending } = useConnect();
   const [error, setError] = useState("");
   const circle = connectors.find((c) => c.id === CIRCLE_CONNECTOR_ID);
-  // Where they were going. Somebody who clicked a payroll link and landed on a
-  // sign-in screen saying only "Sign in to continue" has lost the thread of
-  // what they were doing; naming the destination keeps it.
-  const pathname = usePathname();
-  const destination = NAV.find((n) => pathname?.startsWith(n.href))?.label;
+
+  // One sign-in, for the dashboard. Not one per page.
+  //
+  // This used to title itself after whichever nav item you were heading to --
+  // "Settlements", "Sign in to see Settlements." -- on the theory that naming
+  // the destination kept the thread. What it actually produced was a product
+  // that appeared to have a separate login for Settlements, another for
+  // Employees, another for Payroll. The merchant signs in to Conduit, and the
+  // dashboard is what opens. One account, one door, and this screen says so.
+  //
+  // The destination is still remembered, just not shouted: sign-in stashes the
+  // path and returns to it (returnPathAfterLogin in lib/circle/browser), so
+  // somebody who followed a payroll link still lands back on payroll.
 
   return (
     <div className="min-h-screen text-ink flex items-center justify-center p-6">
       <div className="w-full max-w-md space-y-8 text-center">
         <div>
-          <h1 className="font-display text-3xl font-bold">
-            {destination ?? "Conduit Dashboard"}
-          </h1>
+          <h1 className="font-display text-3xl font-bold">Conduit</h1>
           <p className="text-ink-dim text-sm mt-1">
-            {destination ? `Sign in to see ${destination}.` : "Sign in to continue."}
+            Sign in to open your dashboard.
           </p>
         </div>
         <button

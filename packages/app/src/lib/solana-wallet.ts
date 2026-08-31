@@ -278,7 +278,22 @@ export async function eagerConnectSolanaWallet(): Promise<string | null> {
   if (!remembered) return null;
 
   const wallets = listSolanaWallets();
-  const match = wallets.find((w) => w.label === remembered) ?? wallets[0];
+  // ONLY the wallet they actually chose. No fallback.
+  //
+  // This was `?? wallets[0]`, which turned "reconnect the wallet the payer
+  // picked" into "connect whatever Solana extension is installed first". So
+  // anyone who had ever touched the Solana path on this origin got an unlock
+  // prompt from a wallet they never selected, on every page load -- and this
+  // runs from usePayerIdentity, which UsernameGate mounts app-wide, so every
+  // page meant EVERY page: the dashboard, the sign-in screen, the OAuth
+  // callback in the middle of completing a Google login.
+  //
+  // onlyIfTrusted is not the guard it looks like either. It suppresses the
+  // approval dialog, not the wallet's own unlock screen, so a locked Solflare
+  // opens its window regardless and the promise hangs there until somebody
+  // deals with it. The only reliable way not to interrupt a payer is not to
+  // reach for a wallet they did not name.
+  const match = wallets.find((w) => w.label === remembered);
   if (!match) return null;
 
   try {

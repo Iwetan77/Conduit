@@ -28,8 +28,12 @@ export const CIRCLE_CALLBACK_PATH = "/auth/circle/callback";
 export const wagmiConfigParams = {
   chains: [arcTestnet],
   connectors: [
-    injected(),
-    ...(wcProjectId ? [walletConnect({ projectId: wcProjectId })] : []),
+    // Circle FIRST, and the order matters. wagmi's reconnect() runs on every
+    // page load, authorises every connector that answers, and makes the first
+    // one to answer `current` -- ties broken by this array's order. With
+    // injected() ahead of it, a wallet extension that had ever been authorised
+    // on this origin took the slot ahead of the merchant's own session.
+    //
     // Google sign-in via a Circle user-controlled wallet. Added only when
     // configured, on the same opt-in pattern as WalletConnect: a deployment
     // without Circle credentials behaves exactly as it did before.
@@ -47,6 +51,8 @@ export const wagmiConfigParams = {
           }),
         ]
       : []),
+    injected(),
+    ...(wcProjectId ? [walletConnect({ projectId: wcProjectId })] : []),
   ],
   transports: {
     [arcTestnet.id]: http(ARC_RPC_URL),

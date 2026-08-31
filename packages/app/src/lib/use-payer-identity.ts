@@ -21,7 +21,7 @@
 
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { useAccount } from "wagmi";
-import { CIRCLE_CONNECTOR_ID } from "@/lib/circle/connector";
+import { useCircleAccount } from "@/lib/circle/connection";
 import {
   connectSolanaWallet,
   eagerConnectSolanaWallet,
@@ -107,7 +107,14 @@ export interface UsePayerIdentity {
 }
 
 export function usePayerIdentity(): UsePayerIdentity {
-  const { address: evmAddress, isConnected: evmConnected, chainId, connector } = useAccount();
+  const { address: evmAddress, isConnected: evmConnected, chainId } = useAccount();
+  // Signed in with Google is a fact about the SESSION, not about which
+  // connector wagmi currently prefers -- a browser extension reattaching
+  // itself at load takes that slot and does not sign anybody out. Reading the
+  // pointer instead of the connection is what let a merchant's own nav show a
+  // Phantom address beside their account's settlements. See
+  // lib/circle/connection.
+  const { connected: signedInWithGoogle } = useCircleAccount();
 
   // Shared across every instance, so the nav and the page cannot disagree.
   const solanaAddress = useSyncExternalStore(subscribe, snapshot, () => null);
@@ -202,7 +209,6 @@ export function usePayerIdentity(): UsePayerIdentity {
   // own nav showing somebody else's address, beside their own account's
   // settlements. Solana answers only when nothing else does, or when the payer
   // explicitly picked it in this session and no Circle session is in play.
-  const signedInWithGoogle = evmConnected && connector?.id === CIRCLE_CONNECTOR_ID;
   let identity: PayerIdentity | null = null;
   if (evmConnected && evmAddress && (signedInWithGoogle || !pickedSolana)) {
     identity = {

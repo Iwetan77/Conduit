@@ -30,11 +30,23 @@ const withBundleAnalyzer = bundleAnalyzer({ enabled: process.env.ANALYZE === "tr
 // reports are quiet. It is written strictly here so those reports are useful.
 const CONNECT_SRC = [
   "'self'",
+  // The Conduit API is a DIFFERENT origin from the app, so 'self' never
+  // covered it. Every reported violation in production was this: /v1/accounts/me
+  // and every other call the app makes. Report-only meant it worked anyway,
+  // which is exactly how a policy gets promoted to enforced and takes the
+  // product down with it.
+  ...(process.env.NEXT_PUBLIC_CONDUIT_API_URL
+    ? [new URL(process.env.NEXT_PUBLIC_CONDUIT_API_URL).origin]
+    : []),
   "https://*.circle.com", // Circle Wallets, Gateway, StableFX
   "https://*.arc.network", // Arc RPC
   "https://*.solana.com", // Solana RPC
   "https://*.walletconnect.com",
   "https://*.walletconnect.org",
+  // WalletConnect's modal fetches its own config from here before it can show
+  // a single wallet. Same story as the API origin: reported on every load.
+  "https://api.web3modal.org",
+  "https://*.web3modal.org",
   "wss://*.walletconnect.com",
   "wss://*.walletconnect.org",
   "wss://*.solana.com",

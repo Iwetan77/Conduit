@@ -15,8 +15,9 @@
 // editing all of them, which is exactly the cost this migration is avoiding.
 
 import { useContext, useEffect, useMemo, useState } from "react";
-import { useAccount, useConnect } from "wagmi";
+import { useConnect } from "wagmi";
 import { CIRCLE_CONNECTOR_ID } from "@/lib/circle/connector";
+import { circleConnection, preferCircleConnection, useCircleAccount } from "@/lib/circle/connection";
 import { useQueryClient } from "@tanstack/react-query";
 import { signOutCompletely } from "@/lib/sign-out";
 import { SESSION_CHANGED_EVENT } from "@/lib/conduit-api";
@@ -35,7 +36,11 @@ import {
 
 export default function CircleStack() {
   const { connectors, connectAsync } = useConnect();
-  const { address, connector } = useAccount();
+  // The CIRCLE connection specifically. Everything below asks "is this person
+  // signed in with Google", and useAccount() answers a different question --
+  // "is Google the wallet wagmi currently prefers" -- which a reattached
+  // browser extension can win at page load. See lib/circle/connection.
+  const { address, connected: onCircle } = useCircleAccount();
   // CircleStack sits inside QueryClientProvider (see providers.tsx), so the
   // sign-out handler can empty the cache -- which is half of what makes a
   // sign-out actually a sign-out.
@@ -64,7 +69,7 @@ export default function CircleStack() {
         );
         return;
       }
-      if (connector?.id === CIRCLE_CONNECTOR_ID) {
+      if (onCircle) {
         fire(GOOGLE_LOGIN_ALREADY);
         return;
       }
@@ -85,7 +90,7 @@ export default function CircleStack() {
         await connectAsync({ connector: circle });
       } catch (err) {
         // A session restored under us mid-click is not a failure.
-        if (connector?.id === CIRCLE_CONNECTOR_ID) return;
+        if (circleConnection()) return;
         console.error("circle: sign-in failed", err);
         fail(err instanceof Error ? err.message : String(err));
       }
@@ -105,7 +110,7 @@ export default function CircleStack() {
       window.removeEventListener(GOOGLE_LOGIN_EVENT, onLogin);
       window.removeEventListener(SIGN_OUT_EVENT, onSignOut);
     };
-  }, [connectors, connectAsync, connector, queryClient]);
+  }, [connectors, connectAsync, onCircle, queryClient]);
 
   // A different account signed in: drop everything read as the previous one.
   //
@@ -135,10 +140,16 @@ export default function CircleStack() {
     let cancelled = false;
     const adopt = async () => {
       if (cancelled) return;
-      if (connector?.id === CIRCLE_CONNECTOR_ID) return;
       if (!currentSession()) return;
       const circle = connectors.find((c) => c.id === CIRCLE_CONNECTOR_ID);
       if (!circle) return;
+      // Already attached -- but possibly not as wagmi's CURRENT connector,
+      // which is the state a reattached extension leaves behind and the state
+      // that made every dashboard page render the sign-in screen. Promote it
+      // rather than connecting again: the connection exists, it is only the
+      // pointer that is wrong. Once per load, so a payer who later picks a
+      // browser wallet keeps it. See lib/circle/connection.
+      if (preferCircleConnection()) return;
       try {
         await connectAsync({ connector: circle });
       } catch (err) {
@@ -152,7 +163,7 @@ export default function CircleStack() {
       cancelled = true;
       unsubscribe();
     };
-  }, [connector, connectors, connectAsync]);
+  }, [onCircle, connectors, connectAsync]);
 
   // A Conduit session on EVERY signed-in page, not just the dashboard.
   //
@@ -169,7 +180,7 @@ export default function CircleStack() {
   // settle currency that a payer has not given). That rejection is expected,
   // not an error worth surfacing.
   useEffect(() => {
-    if (!address || connector?.id !== CIRCLE_CONNECTOR_ID) return;
+    if (!address || !onCircle) return;
     if (getSessionToken()) return;
     const s = currentSession();
     if (!s) return;
@@ -185,7 +196,7 @@ export default function CircleStack() {
     return () => {
       cancelled = true;
     };
-  }, [address, connector]);
+  }, [address, onCircle]);
 
   // Clear any stale intent flag on mount.
   //

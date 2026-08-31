@@ -47,7 +47,7 @@ export async function disconnectEveryWallet(): Promise<void> {
   // terminating one.
   for (let pass = 0; pass < 10; pass++) {
     const connections = [...wagmiConfig.state.connections.values()];
-    if (connections.length === 0) return;
+    if (connections.length === 0) break;
     for (const c of connections) {
       try {
         await disconnectConnector(wagmiConfig, { connector: c.connector });
@@ -56,6 +56,26 @@ export async function disconnectEveryWallet(): Promise<void> {
         // the other connectors, so each is attempted independently.
       }
     }
+  }
+
+  // Forget which connector was last preferred.
+  //
+  // wagmi's disconnect writes `recentConnectorId` for whatever connection it
+  // PROMOTED on the way out, and never clears it when the last one goes. So
+  // disconnecting everything left that key pointing at a browser extension --
+  // and reconnect() on the next page load sorts by exactly that key, giving
+  // the extension the current slot ahead of a Circle session that was about
+  // to be restored. Every dashboard page then read "current is not Circle" and
+  // showed the sign-in screen to somebody who was signed in.
+  //
+  // The gates no longer read `current` (see lib/circle/connection), so this is
+  // no longer load-bearing for that bug -- but leaving a stale preference
+  // behind after "disconnect everything" is wrong on its own terms.
+  try {
+    await wagmiConfig.storage?.removeItem("recentConnectorId");
+  } catch {
+    // Storage unavailable. The preference is a hint, not state worth failing
+    // a sign-out over.
   }
 }
 

@@ -18,8 +18,7 @@
 // the server -- and providers.tsx imports it statically. CircleStack, which does
 // touch the SDK, stays dynamic(ssr:false); it renders null and gates nothing.
 import { useContext, useEffect, useMemo, useState } from "react";
-import { useAccount } from "wagmi";
-import { CIRCLE_CONNECTOR_ID } from "@/lib/circle/connector";
+import { useCircleAccount } from "@/lib/circle/connection";
 import {
   currentSession,
   hasPendingResume,
@@ -38,7 +37,12 @@ import { WalletGateContext } from "@/lib/wallet-gate";
  */
 export function CircleWalletGate({ children }: { children: React.ReactNode }) {
   const outer = useContext(WalletGateContext);
-  const { connector } = useAccount();
+  // The Circle CONNECTION, not wagmi's current connector. An extension that
+  // reattached itself at load holds `current` without saying anything about
+  // whether the Circle session arrived, and gating on it left this stuck at
+  // "not settled" for the whole visit -- which blanks every surface that
+  // displays an address. See lib/circle/connection.
+  const { connected: circleConnected } = useCircleAccount();
 
   // Every one of these starts false, on the server AND on the first client
   // render, and moves only in an effect.
@@ -82,7 +86,7 @@ export function CircleWalletGate({ children }: { children: React.ReactNode }) {
   // paint behind a hydration check of their own.
   const settled =
     hydrated &&
-    (!pendingAtLoad || connector?.id === CIRCLE_CONNECTOR_ID || !sessionExpected);
+    (!pendingAtLoad || circleConnected || !sessionExpected);
 
   const value = useMemo(() => ({ ...outer, walletSettled: settled }), [outer, settled]);
   return <WalletGateContext.Provider value={value}>{children}</WalletGateContext.Provider>;

@@ -5,7 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAccount, useDisconnect, useChainId, useSwitchChain } from "wagmi";
 import { useWalletGate, requestSignOut } from "@/lib/wallet-gate";
-import { CIRCLE_CONNECTOR_ID } from "@/lib/circle/connector";
+import { useCircleAccount } from "@/lib/circle/connection";
 import { useEffect, useRef, useState } from "react";
 import { CURRENCIES, type Currency } from "@conduit/sdk/lite";
 import { Logo } from "./Logo";
@@ -44,8 +44,12 @@ function WalletMenu({ address }: { address: `0x${string}` }) {
   const [copied, setCopied] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const { disconnect } = useDisconnect();
-  const { connector } = useAccount();
-  const isCircleSession = connector?.id === CIRCLE_CONNECTOR_ID;
+  // Is there a Circle session, not "is Circle the connector wagmi prefers".
+  // A browser extension reattaching itself at page load takes the current
+  // slot without ending anybody's session, and this branch decides whether
+  // Sign out clears that session or merely drops a wallet. See
+  // lib/circle/connection.
+  const isCircleSession = useCircleAccount().connected;
   // Sign-out goes through the event, not a bare wagmi disconnect: that would
   // leave the Circle session in localStorage, so isAuthorized() still says yes
   // and the next page load signs the user straight back in. CircleStack does

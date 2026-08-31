@@ -7,7 +7,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
-import { useAccount, useConnect } from "wagmi";
+import { useConnect } from "wagmi";
 import {
   clearSessionToken,
   createAccountFromCircle,
@@ -15,6 +15,7 @@ import {
   setSessionToken,
 } from "@/lib/conduit-api";
 import { CIRCLE_CONNECTOR_ID } from "@/lib/circle/connector";
+import { useCircleAccount } from "@/lib/circle/connection";
 import {
   clearCircleSession,
   currentSession,
@@ -334,11 +335,17 @@ function CircleLoginGate() {
 // to keep refreshing and no embedded wallet to wait on. The wallet address IS
 // the connected account.
 function CircleDashboard({ children }: { children: React.ReactNode }) {
-  const { address, isConnected, connector } = useAccount();
+  // The CIRCLE connection, not wagmi's "current" one.
+  //
+  // This gate used to read useAccount(), which answers for whichever connector
+  // is current — so a merchant who also had a wallet extension installed was
+  // shown the sign-in screen on every dashboard page, over a live session,
+  // because the extension had reattached itself first at page load and taken
+  // the current slot. lib/circle/connection has the full mechanism.
+  const { address, connected: onCircle } = useCircleAccount();
   const queryClient = useQueryClient();
   const [accountReady, setAccountReady] = useState(false);
   const [needsOnboarding, setNeedsOnboarding] = useState(false);
-  const onCircle = isConnected && connector?.id === CIRCLE_CONNECTOR_ID;
   // Declared with the other hooks, above every early return below.
   //
   // Not moved down next to the gate it feeds, however tempting that reads: a

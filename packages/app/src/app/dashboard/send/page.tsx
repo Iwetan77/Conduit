@@ -10,6 +10,8 @@ import { useHydrated } from "@/lib/use-hydrated";
 import { useState, useEffect } from "react";
 import { useAccount } from "wagmi";
 import { isAddress } from "viem";
+import { useMyAccount } from "@/lib/queries";
+import { shortenAddress } from "@/lib/format";
 import { AddressInput } from "@/components/SendFlow/AddressInput";
 import { AmountInput } from "@/components/SendFlow/AmountInput";
 import { RoutePreview } from "@/components/SendFlow/RoutePreview";
@@ -24,16 +26,40 @@ type Step = "input" | "confirm";
 
 export default function SendPage() {
   const mounted = useHydrated();
-  const { isConnected } = useAccount();
+  const { address: connected, isConnected } = useAccount();
   const [step, setStep] = useState<Step>("input");
 
+  // The BUSINESS's money, not its owner's.
+  //
+  // This screen read the connected wallet, which for a merchant signed in with
+  // Google is the wallet they signed in WITH -- their own, personally. So the
+  // merchant Send page listed the owner's personal holdings and would have spent
+  // them, under a heading that says the business is paying. Those are two
+  // different addresses since businesses were given settlement wallets of their
+  // own, and this is the company's screen, so it reads the company's address.
+  const { data: account } = useMyAccount();
+  const treasury = account?.settle_address;
+
+  // Can the connected wallet actually sign for that address?
+  //
+  // Only when they are the same address. A Circle wallet's key material is on
+  // the owner's device and the session is bound to the wallet they signed in
+  // with, so being signed in as the business does NOT confer the ability to
+  // move the business wallet's money -- that is a separate capability and it is
+  // not built yet.
+  //
+  // Stated rather than assumed, because the failure it prevents is silent: the
+  // page would have shown one wallet's balance and spent another's.
+  const canSignForTreasury =
+    !!treasury && !!connected && treasury.toLowerCase() === connected.toLowerCase();
 
   const [recipient, setRecipient] = useState("");
   const [amount, setAmount] = useState("");
   const [recipientCurrency, setRecipientCurrency] = useState<Currency>("USDC");
   const [payerCurrency, setPayerCurrency] = useState<Currency>("USDC");
 
-  const canProceed = isAddress(recipient) && parseFloat(amount) > 0 && isConnected;
+  const canProceed =
+    isAddress(recipient) && parseFloat(amount) > 0 && isConnected && canSignForTreasury;
 
   return (
     <div className="max-w-lg mx-auto">
@@ -53,8 +79,22 @@ export default function SendPage() {
             />
 
             {/* Balance-aware: shows only currencies this treasury wallet
-                actually holds, never a static list. */}
-            <PayerCurrencyPicker value={payerCurrency} onChange={setPayerCurrency} />
+                actually holds, never a static list. The BUSINESS's wallet —
+                see the note on `treasury` above. */}
+            <PayerCurrencyPicker
+              value={payerCurrency}
+              onChange={setPayerCurrency}
+              address={treasury}
+            />
+
+            {/* Which account the money leaves. Named, always, because there are
+                now two wallets in play and the difference between them is the
+                difference between company money and the owner's own. */}
+            {treasury && (
+              <p className="text-ink-dim text-xs font-mono">
+                Paying from {shortenAddress(treasury, 5)} · your settlement wallet
+              </p>
+            )}
 
             {amount && recipient && (
               <RoutePreview
@@ -69,21 +109,37 @@ export default function SendPage() {
           {!mounted || !isConnected ? (
             <div className="space-y-3">
               <p className="text-ink-dim text-sm">
-                Connect the wallet you want to send from. This is your on-chain
-                treasury wallet — separate from your dashboard login.
+                Connect the wallet that holds your settlement address. This
+                screen spends the business&apos;s money, not your own.
               </p>
               <WalletConnect />
             </div>
           ) : (
-            <button
-              onClick={() => setStep("confirm")}
-              disabled={!canProceed}
-              className="w-full py-3 bg-signal text-signal-ink
-                         font-mono text-sm hover:bg-signal/90 transition-colors
-                         disabled:opacity-30 disabled:cursor-not-allowed"
-            >
-              Review payment →
-            </button>
+            <div className="space-y-3">
+              {/* Refused rather than redirected.
+                  The connected wallet cannot sign for the settlement address,
+                  so the only two things this button could do are pay from the
+                  wrong account or fail at the signature. Saying so here is the
+                  only version that does not cost somebody money or time. */}
+              {!canSignForTreasury && treasury && (
+                <p className="text-danger text-xs">
+                  You are signed in with {shortenAddress(connected ?? "", 5)}, which
+                  cannot sign for your settlement wallet{" "}
+                  {shortenAddress(treasury, 5)}. Sending the business&apos;s money
+                  needs that wallet connected — otherwise this would spend your
+                  personal balance instead.
+                </p>
+              )}
+              <button
+                onClick={() => setStep("confirm")}
+                disabled={!canProceed}
+                className="w-full py-3 bg-signal text-signal-ink
+                           font-mono text-sm hover:bg-signal/90 transition-colors
+                           disabled:opacity-30 disabled:cursor-not-allowed"
+              >
+                Review payment →
+              </button>
+            </div>
           )}
         </div>
       )}

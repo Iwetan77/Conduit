@@ -15,7 +15,7 @@
 // editing all of them, which is exactly the cost this migration is avoiding.
 
 import { useContext, useEffect, useMemo, useState } from "react";
-import { useAccount, useConnect, useDisconnect } from "wagmi";
+import { useAccount, useConnect } from "wagmi";
 import { CIRCLE_CONNECTOR_ID } from "@/lib/circle/connector";
 import { useQueryClient } from "@tanstack/react-query";
 import { signOutCompletely } from "@/lib/sign-out";
@@ -35,7 +35,6 @@ import {
 
 export default function CircleStack() {
   const { connectors, connectAsync } = useConnect();
-  const { disconnectAsync } = useDisconnect();
   const { address, connector } = useAccount();
   // CircleStack sits inside QueryClientProvider (see providers.tsx), so the
   // sign-out handler can empty the cache -- which is half of what makes a
@@ -97,7 +96,7 @@ export default function CircleStack() {
       // the Circle session only, leaving Conduit's own cs_ token in
       // localStorage -- so the next person to sign in on this device was handed
       // the previous account. See lib/sign-out.
-      await signOutCompletely({ disconnect: disconnectAsync, queryClient });
+      await signOutCompletely({ queryClient });
     };
 
     window.addEventListener(GOOGLE_LOGIN_EVENT, onLogin);
@@ -106,7 +105,7 @@ export default function CircleStack() {
       window.removeEventListener(GOOGLE_LOGIN_EVENT, onLogin);
       window.removeEventListener(SIGN_OUT_EVENT, onSignOut);
     };
-  }, [connectors, connectAsync, disconnectAsync, connector, queryClient]);
+  }, [connectors, connectAsync, connector, queryClient]);
 
   // A different account signed in: drop everything read as the previous one.
   //

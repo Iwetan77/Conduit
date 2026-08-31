@@ -20,7 +20,7 @@
 // offers it an Arc route is offering a button that cannot work.
 
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
-import { useAccount, useDisconnect } from "wagmi";
+import { useAccount } from "wagmi";
 import { CIRCLE_CONNECTOR_ID } from "@/lib/circle/connector";
 import {
   connectSolanaWallet,
@@ -108,7 +108,6 @@ export interface UsePayerIdentity {
 
 export function usePayerIdentity(): UsePayerIdentity {
   const { address: evmAddress, isConnected: evmConnected, chainId, connector } = useAccount();
-  const { disconnectAsync } = useDisconnect();
 
   // Shared across every instance, so the nav and the page cannot disagree.
   const solanaAddress = useSyncExternalStore(subscribe, snapshot, () => null);
@@ -179,21 +178,21 @@ export function usePayerIdentity(): UsePayerIdentity {
   }, []);
 
   const disconnect = useCallback(async () => {
-    // Both, unconditionally. Someone who has connected each at some point
-    // expects "disconnect" to mean disconnected, not to leave the other family
-    // quietly attached and paying.
+    // Both families, unconditionally. Someone who has connected each at some
+    // point expects "disconnect" to mean disconnected, not to leave the other
+    // family quietly attached and paying.
     if (solanaAddress) {
       await disconnectSolanaWallet();
       setSolanaAddr(null, false);
     }
-    if (evmConnected) {
-      try {
-        await disconnectAsync();
-      } catch {
-        // A connector that refuses to disconnect must not strand the payer.
-      }
-    }
-  }, [solanaAddress, evmConnected, disconnectAsync]);
+    // Every EVM connection, not just the active one. wagmi's disconnect() takes
+    // the current connector and then PROMOTES another open connection in its
+    // place, so with two attached this swapped the payer's wallet rather than
+    // releasing it -- and the one left behind was never marked disconnected, so
+    // it reconnected by itself on the next visit. See lib/sign-out.
+    const { disconnectEveryWallet } = await import("@/lib/sign-out");
+    await disconnectEveryWallet();
+  }, [solanaAddress]);
 
   // EVM is the default identity. Solana is never preferred.
   //

@@ -7,7 +7,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
-import { useAccount, useConnect, useDisconnect } from "wagmi";
+import { useAccount, useConnect } from "wagmi";
 import {
   clearSessionToken,
   createAccountFromCircle,
@@ -335,7 +335,6 @@ function CircleLoginGate() {
 // the connected account.
 function CircleDashboard({ children }: { children: React.ReactNode }) {
   const { address, isConnected, connector } = useAccount();
-  const { disconnectAsync } = useDisconnect();
   const queryClient = useQueryClient();
   const [accountReady, setAccountReady] = useState(false);
   const [needsOnboarding, setNeedsOnboarding] = useState(false);
@@ -410,7 +409,7 @@ function CircleDashboard({ children }: { children: React.ReactNode }) {
   // that drifted: this one did the whole job, the other cleared only half, and
   // the half it skipped left the previous account's session in the browser for
   // whoever signed in next. See lib/sign-out.
-  const signOut = () => signOutCompletely({ disconnect: disconnectAsync, queryClient });
+  const signOut = () => signOutCompletely({ queryClient });
 
   // Nothing rather than the sign-in screen while the answer is still unknown.
   // The dashboard's own null-until-ready below already renders as a blank

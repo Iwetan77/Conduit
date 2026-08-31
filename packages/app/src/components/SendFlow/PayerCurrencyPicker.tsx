@@ -36,6 +36,16 @@ interface PayerCurrencyPickerProps {
    * correctly Arc-only.
    */
   usdcSpendableMinor?: bigint;
+  /**
+   * Whose balances to show. Defaults to the connected wallet.
+   *
+   * Overridden by the merchant's own Send screen, where the money being spent
+   * belongs to the BUSINESS and sits at its settlement address — a different
+   * address from the one its owner signed in with. Reading the connected wallet
+   * there listed the owner's personal holdings under a merchant surface, which
+   * is the wrong account's money offered to spend.
+   */
+  address?: string;
 }
 
 export function PayerCurrencyPicker({
@@ -43,15 +53,19 @@ export function PayerCurrencyPicker({
   onChange,
   onBalancesChange,
   usdcSpendableMinor,
+  address: addressOverride,
 }: PayerCurrencyPickerProps) {
-  const { address, isConnected } = useAccount();
+  const { address: connected, isConnected } = useAccount();
+  const address = addressOverride ?? connected;
 
   // Hydration guard: wagmi's connection state differs between the server
   // render (never connected) and the first client render (wallet
   // auto-reconnects), which threw a hydration mismatch here.
   const mounted = useHydrated();
 
-  const { balances, settled } = useBalances(address, isConnected);
+  // An explicit address is a fact about an account, not about the wallet
+  // session, so it is read whether or not a wallet is connected.
+  const { balances, settled } = useBalances(address, isConnected || !!addressOverride);
 
   // What each currency is actually worth to this payment.
   //

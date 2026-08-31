@@ -18,14 +18,50 @@
 // Two sign-out paths that have to stay in step is a thing that will drift
 // again. There is one now, and both callers use it.
 import type { QueryClient } from "@tanstack/react-query";
+import { disconnect as disconnectConnector } from "wagmi/actions";
+import { wagmiConfig } from "@/lib/wagmi";
 import { clearSessionToken, logout } from "@/lib/conduit-api";
 import { clearCircleSession } from "@/lib/circle/browser";
 
+/**
+ * Disconnects EVERY connected wallet, not just the active one.
+ *
+ * wagmi's disconnect() takes the current connector only, and then — this is the
+ * part that caused the bug — if any other connection is still open it makes
+ * that one current (see its disconnect action, "switch over to another
+ * connection"). Its reconnect() meanwhile authorises every connector it can,
+ * not the first that answers, so having two live at once is the ordinary state
+ * for anyone who has ever connected a browser wallet AND signed in with Google.
+ *
+ * So pressing Disconnect handed the person a different wallet instead of none,
+ * and because the second connector never had its "disconnected" marker written,
+ * every later visit reconnected it on its own — connected again without anyone
+ * touching Connect Wallet.
+ *
+ * Reads the config's live state rather than a React snapshot: a connection that
+ * lands while this is running still has to go.
+ */
+export async function disconnectEveryWallet(): Promise<void> {
+  // Bounded, because each disconnect mutates the map this reads. Ten is far
+  // beyond any real number of connectors and turns a hypothetical loop into a
+  // terminating one.
+  for (let pass = 0; pass < 10; pass++) {
+    const connections = [...wagmiConfig.state.connections.values()];
+    if (connections.length === 0) return;
+    for (const c of connections) {
+      try {
+        await disconnectConnector(wagmiConfig, { connector: c.connector });
+      } catch {
+        // A connector that refuses to disconnect must not strand the person on
+        // the other connectors, so each is attempted independently.
+      }
+    }
+  }
+}
+
 export async function signOutCompletely({
-  disconnect,
   queryClient,
 }: {
-  disconnect: () => Promise<unknown>;
   queryClient?: QueryClient;
 }): Promise<void> {
   // Revoke server-side FIRST, while the token is still there to authenticate
@@ -60,8 +96,12 @@ export async function signOutCompletely({
   // Both halves, in this order. wagmi's disconnect alone leaves the Circle
   // session in localStorage, so the connector's isAuthorized() still says yes
   // and the next page load silently signs the user back in.
+  //
+  // Every wallet, not the current one -- see disconnectEveryWallet. A sign-out
+  // that leaves one connector attached is not a sign-out, and the one it leaves
+  // comes back by itself on the next visit.
   try {
-    await disconnect();
+    await disconnectEveryWallet();
   } finally {
     clearCircleSession();
   }

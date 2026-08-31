@@ -44,6 +44,10 @@ const (
 	CodeSettlementWalletInvalid  Code = "settlement_wallet_invalid"
 	CodeSettlementWalletSet      Code = "settlement_wallet_already_set"
 	CodeSettleAddressDerived     Code = "settle_address_derived"
+
+	CodePayoutChallengeRequired Code = "payout_challenge_required"
+	CodePayoutChallengeExpired  Code = "payout_challenge_expired"
+	CodePayoutUnverified        Code = "payout_destination_unverified"
 )
 
 type entry struct {
@@ -107,6 +111,15 @@ var registry = map[Code]entry{
 	// address and keeps getting 201 back would be paid somewhere other than it
 	// asked for, with nothing anywhere reporting a problem.
 	CodeSettleAddressDerived: {http.StatusBadRequest, "settle_address is derived from the account and can no longer be set on this request. Remove it."},
+
+	CodePayoutChallengeRequired: {http.StatusConflict, "Request a challenge for this destination before verifying it."},
+	// A fresh challenge rather than a retry: the nonce is single-use, so an
+	// expired one cannot simply be signed again.
+	CodePayoutChallengeExpired: {http.StatusConflict, "That verification challenge is no longer valid. Request a new one."},
+	// The whole point of the destination model. A withdrawal is on-chain and
+	// final, and an address nobody has proven control of is indistinguishable
+	// from a typo until the money has gone.
+	CodePayoutUnverified: {http.StatusConflict, "This payout destination has not been verified. Prove control of it before withdrawing to it."},
 }
 
 // APIError is what handlers return; the HTTP layer renders it to the

@@ -75,6 +75,17 @@ func walletHistoryMessage(wallet string, timestamp int64) string {
 // verifyPersonalSign recovers the signer of a personal_sign (EIP-191,
 // "\x19Ethereum Signed Message:\n<len><message>") signature and reports
 // whether it matches wallet.
+// personalSignHash is the digest a wallet actually signs for personal_sign:
+// keccak256 over the EIP-191 prefix, the length, and the message.
+//
+// Shared by both verification paths on purpose. An ECDSA recovery and an
+// EIP-1271 call that disagreed about what was signed would let a signature pass
+// one and fail the other, and the difference would be invisible.
+func personalSignHash(message string) []byte {
+	prefixed := []byte(fmt.Sprintf("\x19Ethereum Signed Message:\n%d%s", len(message), message))
+	return crypto.Keccak256(prefixed)
+}
+
 func verifyPersonalSign(wallet, message, signatureHex string) bool {
 	sig, err := decodeHexSignature(signatureHex)
 	if err != nil || len(sig) != 65 {
@@ -85,9 +96,7 @@ func verifyPersonalSign(wallet, message, signatureHex string) bool {
 	if sig[64] >= 27 {
 		sig[64] -= 27
 	}
-	prefixed := []byte(fmt.Sprintf("\x19Ethereum Signed Message:\n%d%s", len(message), message))
-	hash := crypto.Keccak256(prefixed)
-	pub, err := crypto.SigToPub(hash, sig)
+	pub, err := crypto.SigToPub(personalSignHash(message), sig)
 	if err != nil {
 		return false
 	}

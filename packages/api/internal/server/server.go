@@ -155,6 +155,9 @@ func New(cfg Config) http.Handler {
 	settlementsH := &handlers.Settlements{Pool: cfg.Pool}
 	walletHistoryH := &handlers.WalletHistory{Pool: cfg.Pool}
 	usernamesH := &handlers.Usernames{Pool: cfg.Pool}
+	// Arc RPC is needed here for contract wallets: a multisig treasury holds no
+	// key of its own and can only answer for a signature through EIP-1271.
+	payoutDestinationsH := &handlers.PayoutDestinations{Pool: cfg.Pool, ArcRPC: arcRPCForBalances}
 	paymentLinksH := &handlers.PaymentLinks{Pool: cfg.Pool, AppBaseURL: cfg.AppBaseURL}
 	bridgeH, err := newBridgeHandler(cfg, stableFX, dispatcher)
 	if err != nil {
@@ -475,6 +478,14 @@ func New(cfg Config) http.Handler {
 			// requires the caller's Circle user token -- the address is read
 			// back from Circle with it rather than taken from the request.
 			r.Post("/accounts/me/settlement_wallet", settlementWalletH.Provision)
+			// Addresses a business withdraws TO, which is not where its income
+			// routes. Added unverified and unpayable until its owner proves
+			// control of it.
+			r.Get("/payout_destinations", payoutDestinationsH.List)
+			r.Post("/payout_destinations", payoutDestinationsH.Create)
+			r.Post("/payout_destinations/{id}/challenge", payoutDestinationsH.Challenge)
+			r.Post("/payout_destinations/{id}/verify", payoutDestinationsH.Verify)
+			r.Delete("/payout_destinations/{id}", payoutDestinationsH.Delete)
 			// Ends every session for the account. Authenticated because it acts
 			// on the caller's own account, and only meaningful to a session
 			// caller -- see Accounts.Logout.

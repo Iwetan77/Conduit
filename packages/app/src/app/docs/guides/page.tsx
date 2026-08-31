@@ -11,6 +11,7 @@ const GUIDES: { slug: string; title: string; description: string }[] = [
   { slug: "state-diagrams", title: "State diagrams", description: "The settlement intent lifecycle and the nested FX trade lifecycle." },
   { slug: "payment-links", title: "Payment links", description: "Amount modes, expiry, single vs multi-use, void — and cross-chain funding status." },
   { slug: "point-of-sale", title: "Point of sale", description: "A QR per bill, printed by the till — wiring a restaurant POS to a storefront." },
+  { slug: "settlement-addresses", title: "Settlement addresses", description: "Where your money lands, where you can withdraw it, and why those are different questions." },
 ];
 
 export default function GuidesIndexPage() {

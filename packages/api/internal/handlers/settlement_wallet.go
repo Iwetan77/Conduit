@@ -261,12 +261,6 @@ func (h *SettlementWallet) Provision(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// The address comes from `found`, which came from Circle. Never from req.
-	//
-	// Provisioning also answers the payout question, so it records that too.
-	// The one-time "where should this business be paid?" prompt exists because
-	// settle_address defaulted to the sign-in wallet with nobody choosing it --
-	// which is no longer true of this account. Leaving it unanswered would ask a
-	// merchant to pick an address seconds after being given one.
 	const q = `UPDATE accounts
 	              SET settle_wallet_id = $1,
 	                  settle_address = $2,
@@ -274,8 +268,7 @@ func (h *SettlementWallet) Provision(w http.ResponseWriter, r *http.Request) {
 	                  -- pointed elsewhere later. This is the address to come
 	                  -- back to, and the server cannot ask Circle for it again.
 	                  provisioned_address = $2,
-	                  settle_address_source = 'provisioned',
-	                  payout_confirmed_at = COALESCE(payout_confirmed_at, now())
+	                  settle_address_source = 'provisioned'
 	            WHERE id = $3 AND settle_wallet_id IS NULL`
 	tag, err := h.Pool.Exec(r.Context(), q, found.ID, found.Address, principal.AccountID)
 	if err != nil {

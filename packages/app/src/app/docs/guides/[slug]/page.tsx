@@ -8,7 +8,7 @@ import { renderMarkdown } from "@/lib/markdown";
 // verified in the repo.
 const DOCS_DIR = join(process.cwd(), "..", "..", "docs");
 
-const SLUGS = ["quickstart", "payment-gateway", "errors", "webhooks", "currencies", "fx-timing", "fx-capability", "state-diagrams", "payment-links", "point-of-sale"];
+const SLUGS = ["quickstart", "payment-gateway", "errors", "webhooks", "currencies", "fx-timing", "fx-capability", "state-diagrams", "payment-links", "point-of-sale", "settlement-addresses"];
 
 export function generateStaticParams() {
   return SLUGS.map((slug) => ({ slug }));

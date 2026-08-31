@@ -474,7 +474,6 @@ func New(cfg Config) http.Handler {
 			// "Keep sending it where it already goes." The other answer --
 			// naming a different address -- confirms itself through the account
 			// update, which validates the address.
-			r.Post("/accounts/me/payout/confirm", accountsH.ConfirmPayoutAddress)
 			// Binds the settlement wallet the browser just created to this
 			// account. Behind session auth like the rest, and additionally
 			// requires the caller's Circle user token -- the address is read

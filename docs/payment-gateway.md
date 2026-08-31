@@ -68,7 +68,6 @@ The response carries what the browser needs:
   "qr_payload": "si_…",
   "amount": "7000000",
   "settle_currency": "USD",
-  "settle_address": "0xYourMerchantWallet"
 }
 ```
 
@@ -192,7 +191,7 @@ route so you don't have to:
   [CCTP integration](./cctp-integration.md). The buyer needs no Arc wallet.
 
 In every case you receive exactly `amount` in `settle_currency` at
-`settle_address`, and get one `settlement.succeeded` webhook.
+the address the account settles to, and get one `settlement.succeeded` webhook.
 
 ## Integration checklist
 

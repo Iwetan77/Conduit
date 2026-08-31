@@ -1,0 +1,15 @@
+-- The question this column answered is no longer asked.
+--
+-- payout_confirmed_at (0020) recorded whether a merchant had explicitly chosen
+-- where business income should land. It existed because settle_address defaulted
+-- to the wallet used to sign in and nothing ever asked -- so the column told a
+-- decision apart from an accident, and a one-time prompt gated on it.
+--
+-- Accounts are now GIVEN an address of their own, so there is nothing to ask.
+-- The prompt is gone, nothing reads this, and a column nobody reads is a column
+-- that will be read by mistake.
+--
+-- Dropped only now, deliberately, rather than alongside the behaviour change:
+-- doing both at once would have made that rollback lossy, taking every answer
+-- merchants had already given with it.
+ALTER TABLE accounts DROP COLUMN IF EXISTS payout_confirmed_at;

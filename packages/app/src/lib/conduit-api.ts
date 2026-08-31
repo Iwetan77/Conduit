@@ -197,12 +197,6 @@ export interface Account {
   settle_currency: string;
   settle_address: string;
   /**
-   * False until the owner has explicitly said where business income should
-   * land. The dashboard blocks on this once, so absent and false must mean the
-   * same thing -- hence always present rather than optional.
-   */
-  payout_confirmed: boolean;
-  /**
    * Whether this account has a settlement wallet of its own yet.
    *
    * The dashboard decides whether to run provisioning from exactly this, so
@@ -389,20 +383,6 @@ export function logout() {
  */
 export function updateAccount(id: string, body: { name?: string; logo_url?: string; settle_currency?: string }) {
   return request<Account>(`/v1/accounts/${id}`, { method: "PATCH", body });
-}
-
-/**
- * Record that the owner is happy for income to keep landing where it does.
- *
- * The other answer -- naming a different address -- goes through updateAccount,
- * which validates it and counts as confirming implicitly. This endpoint takes
- * no address on purpose: one validated path to the field that decides where
- * money goes is enough.
- */
-export function confirmPayoutAddress() {
-  return request<{ payout_confirmed: boolean }>("/v1/accounts/me/payout/confirm", {
-    method: "POST",
-  });
 }
 
 /**

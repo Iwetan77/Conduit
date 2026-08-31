@@ -66,14 +66,14 @@ echo "=== [3/9] Create settlement_intent with Idempotency-Key ==="
 IDEM_KEY="e2e-$(date +%s)"
 INTENT_JSON=$(curl -sf -X POST "$API_URL/v1/settlement_intents" \
   -H "Authorization: Bearer $SK_KEY" -H "Idempotency-Key: $IDEM_KEY" -H 'content-type: application/json' \
-  -d '{"amount":2000000,"settle_currency":"'"$SETTLE_ISO"'","settle_address":"'"$PAYER_ADDR"'","reference":"E2E-TEST"}')
+  -d '{"amount":2000000,"settle_currency":"'"$SETTLE_ISO"'","reference":"E2E-TEST"}')
 INTENT_ID=$(echo "$INTENT_JSON" | python3 -c 'import json,sys;print(json.load(sys.stdin)["id"])')
 echo "intent created: $INTENT_ID"
 
 echo "=== [4/9] Replay same Idempotency-Key -> byte-identical, no new row ==="
 REPLAY_JSON=$(curl -sf -X POST "$API_URL/v1/settlement_intents" \
   -H "Authorization: Bearer $SK_KEY" -H "Idempotency-Key: $IDEM_KEY" -H 'content-type: application/json' \
-  -d '{"amount":2000000,"settle_currency":"'"$SETTLE_ISO"'","settle_address":"'"$PAYER_ADDR"'","reference":"E2E-TEST"}')
+  -d '{"amount":2000000,"settle_currency":"'"$SETTLE_ISO"'","reference":"E2E-TEST"}')
 [[ "$INTENT_JSON" == "$REPLAY_JSON" ]] || { echo "FAIL: idempotent replay not byte-identical"; echo "$INTENT_JSON"; echo "$REPLAY_JSON"; exit 1; }
 echo "replay byte-identical: OK"
 

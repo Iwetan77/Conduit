@@ -74,7 +74,7 @@ draft → active → viewed → paid → settled
 The payer flow is unauthenticated end to end:
 
 1. `GET /v1/payment_links/:id/public` — link policy plus the merchant's identity
-   (`display_name`, `logo_url`, `settle_address`), so the payer sees a business name,
+   (`display_name`, `logo_url`, and the address it settles to), so the payer sees a business name,
    not a bare hex address.
 2. `POST /v1/payment_links/:id/pay` — body `{ "amount": "...", "payer_reference": "..." }`
    (empty body is valid for `fixed` links). All policy is enforced here with typed errors.

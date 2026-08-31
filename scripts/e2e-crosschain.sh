@@ -95,7 +95,7 @@ echo "webhook listener up, pid=$LISTENER_PID, secret prefix: ${WEBHOOK_SECRET:0:
 echo "=== [3/8] Create settlement_intent with source_chain=solana, settle_currency=$SETTLE_ISO ==="
 INTENT_JSON=$(curl -sf -X POST "$API_URL/v1/settlement_intents" \
   -H "Authorization: Bearer $SK_KEY" -H 'content-type: application/json' \
-  -d '{"amount":2000000,"settle_currency":"'"$SETTLE_ISO"'","settle_address":"'"$RECIPIENT_ADDR"'","reference":"E2E-CROSSCHAIN","source_chain":"solana"}')
+  -d '{"amount":2000000,"settle_currency":"'"$SETTLE_ISO"'","reference":"E2E-CROSSCHAIN","source_chain":"solana"}')
 INTENT_ID=$(echo "$INTENT_JSON" | python3 -c 'import json,sys;print(json.load(sys.stdin)["id"])')
 echo "$INTENT_JSON" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["source_chain"]=="solana", d' \
   || { echo "FAIL: intent source_chain not persisted as solana"; echo "$INTENT_JSON"; exit 1; }

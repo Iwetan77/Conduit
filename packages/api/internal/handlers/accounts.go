@@ -34,17 +34,12 @@ type accountResponse struct {
 	Username       *string `json:"username"`
 	SettleCurrency string  `json:"settle_currency"`
 	SettleAddress  string  `json:"settle_address"`
-	// False until the owner has explicitly said where business income should
-	// land. The dashboard gates on this, so it must be present on every
-	// response rather than omitted when unset -- absent and false have to mean
-	// the same thing to a client, and only one of them does if it is omitted.
-	PayoutConfirmed bool `json:"payout_confirmed"`
 	// Whether this account has a settlement wallet of its own yet.
 	//
 	// Present on every response rather than omitted when false, for the same
-	// reason as PayoutConfirmed above: the dashboard decides whether to run
-	// provisioning from exactly this field, and an absent one has to mean the
-	// same thing as false to a client.
+	// Present on every response rather than omitted when false: the dashboard
+	// decides whether to run provisioning from exactly this field, and an
+	// absent one has to mean the same thing as false to a client.
 	SettlementWalletReady bool `json:"settlement_wallet_ready"`
 	// How settle_address was arrived at. Null on rows written before the
 	// writers set it -- which is a real state, not an error, so it is nullable
@@ -310,7 +305,6 @@ func (h *Accounts) Me(w http.ResponseWriter, r *http.Request) {
 	var resp accountResponse
 	err := h.Pool.QueryRow(r.Context(),
 		`SELECT id, name, logo_url, username, settle_currency, settle_address,
-		        payout_confirmed_at IS NOT NULL,
 		        -- Ready means BOTH halves are there. The constraint added with
 		        -- the column already guarantees they move together, so this is
 		        -- belt and braces -- but this is the field the dashboard gates
@@ -323,7 +317,7 @@ func (h *Accounts) Me(w http.ResponseWriter, r *http.Request) {
 		   FROM accounts WHERE id = $1`,
 		principal.AccountID,
 	).Scan(&resp.ID, &resp.Name, &resp.LogoURL, &resp.Username,
-		&resp.SettleCurrency, &resp.SettleAddress, &resp.PayoutConfirmed,
+		&resp.SettleCurrency, &resp.SettleAddress,
 		&resp.SettlementWalletReady, &resp.SettleAddressSource, &resp.LoginWallet, &resp.Livemode)
 	if err != nil {
 		writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
@@ -347,34 +341,6 @@ func (h *Accounts) Me(w http.ResponseWriter, r *http.Request) {
 // Restricted to session callers. An sk_ key has no session to end, and letting
 // a leaked key sign the merchant's dashboard out would hand an attacker a
 // denial of service against the account's own owner.
-// ConfirmPayoutAddress records that the owner has decided where business
-// income lands, WITHOUT changing the address.
-//
-// The other half of the payout gate. Setting a new address confirms it
-// implicitly (see Update), but "keep sending it to the wallet I sign in with"
-// is an equally valid answer and needs somewhere to be recorded -- otherwise a
-// one-person business is asked the same question at every sign-in forever, and
-// a prompt that cannot be answered is one people learn to dismiss unread.
-//
-// Deliberately does not take an address. A caller that wants to CHANGE the
-// address uses Update, which validates it; letting this endpoint set one too
-// would be a second, unvalidated path to the field that decides where money
-// goes.
-func (h *Accounts) ConfirmPayoutAddress(w http.ResponseWriter, r *http.Request) {
-	principal, ok := auth.FromContext(r.Context())
-	if !ok {
-		writeErr(w, apierrors.E(apierrors.CodeUnauthorized, ""))
-		return
-	}
-	if _, err := h.Pool.Exec(r.Context(),
-		`UPDATE accounts SET payout_confirmed_at = now() WHERE id = $1`,
-		principal.AccountID,
-	); err != nil {
-		writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"payout_confirmed": true})
-}
 
 func (h *Accounts) Logout(w http.ResponseWriter, r *http.Request) {
 	principal, _ := auth.FromContext(r.Context())

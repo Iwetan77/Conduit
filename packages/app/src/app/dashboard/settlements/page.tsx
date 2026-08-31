@@ -192,8 +192,16 @@ export default function SettlementsPage() {
                       {s.payer_address ? shortenAddress(s.payer_address) : <span className="text-ink-dim">—</span>}
                     </td>
                     {showDestination && (
+                      // This column only appears once takings have landed in
+                      // more than one place, and then the question it has to
+                      // answer is "which of these is mine?". A bare hex string
+                      // cannot answer it; the label does.
                       <td className="px-4 py-3 font-mono text-xs">
                         {shortenAddress(s.settle_address)}
+                        {account?.settle_address &&
+                          s.settle_address.toLowerCase() === account.settle_address.toLowerCase() && (
+                            <span className="text-ink-dim ml-1.5">your wallet</span>
+                          )}
                       </td>
                     )}
                     <td className="px-4 py-3 whitespace-nowrap font-mono text-right">{formatMinorUnits(s.pay_amount, s.pay_currency)}</td>

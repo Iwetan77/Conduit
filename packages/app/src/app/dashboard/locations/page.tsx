@@ -1,7 +1,7 @@
 "use client";
 
 import { useQueryClient } from "@tanstack/react-query";
-import { useSubAccounts, qk } from "@/lib/queries";
+import { useSubAccounts, useMyAccount, qk } from "@/lib/queries";
 import { useEffect, useRef, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import {
@@ -13,7 +13,7 @@ import {
   ConduitApiError,
 } from "@/lib/conduit-api";
 import { SettleCurrencySelect } from "@/components/Shared/SettleCurrencySelect";
-import { tokenLabel } from "@/lib/format";
+import { tokenLabel, shortenAddress } from "@/lib/format";
 import { useCopy } from "@/lib/use-copy";
 import { PageHeader } from "@/components/Dashboard/PageHeader";
 
@@ -184,6 +184,9 @@ export default function LocationsPage() {
 
   const qc = useQueryClient();
   const { data: accounts } = useSubAccounts();
+  // The parent, so the create form can show what a new storefront will inherit
+  // rather than describing it in the abstract.
+  const { data: parent } = useMyAccount();
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -234,10 +237,21 @@ export default function LocationsPage() {
           {/* No address field. A storefront is a place the same business
               takes money, not a different business -- it inherits the parent's
               address, and a per-till text box was one more chance to point a
-              location's takings somewhere unrecoverable. */}
-          <p className="text-ink-dim text-xs">
-            Takings settle to this business&apos;s own address, attributed to this storefront.
-          </p>
+              location's takings somewhere unrecoverable.
+              Shown HERE rather than on the storefront card, deliberately: this
+              is where the merchant is deciding, whereas the card is what a
+              cashier has open at a till, and an address on that screen is
+              something a customer can photograph and pay directly -- bypassing
+              conversion, attribution and Conduit entirely. */}
+          <div className="border border-border bg-bg px-3 py-2">
+            <p className="text-ink-dim text-xs">Takings settle to this business&apos;s address</p>
+            <p className="text-ink text-xs font-mono mt-0.5 break-all">
+              {parent?.settle_address ? shortenAddress(parent.settle_address) : "—"}
+            </p>
+            <p className="text-ink-dim text-xs mt-1">
+              Attributed to this storefront, so each location&apos;s takings stay separable.
+            </p>
+          </div>
           {error && <p className="text-danger text-xs">{error}</p>}
           <button
             type="submit"

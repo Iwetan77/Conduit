@@ -9,6 +9,9 @@ import { CURRENCIES } from "@conduit/sdk/lite";
 import { updateAccount, type Account, ConduitApiError } from "@/lib/conduit-api";
 import { SettleCurrencySelect } from "@/components/Shared/SettleCurrencySelect";
 import { PageHeader } from "@/components/Dashboard/PageHeader";
+import { useCopy } from "@/lib/use-copy";
+
+const EXPLORER = process.env.NEXT_PUBLIC_EXPLORER ?? "https://testnet.arcscan.app";
 
 // Phase 4: recipient identity. What a payer sees instead of a bare hex
 // address on every payment link/QR/`/pay` page -- edited here.
@@ -17,7 +20,6 @@ function BusinessIdentity() {
   const [name, setName] = useState("");
   const [logoUrl, setLogoUrl] = useState("");
   const [settleCurrency, setSettleCurrency] = useState("EUR");
-  const [settleAddress, setSettleAddress] = useState("");
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
@@ -36,7 +38,6 @@ function BusinessIdentity() {
     setName(fetchedAccount.name);
     setLogoUrl(fetchedAccount.logo_url ?? "");
     setSettleCurrency(fetchedAccount.settle_currency);
-    setSettleAddress(fetchedAccount.settle_address);
   }, [fetchedAccount]);
   useEffect(() => {
     if (accountError) setError("Failed to load account");
@@ -110,21 +111,14 @@ function BusinessIdentity() {
               accepts an address on another chain, an exchange deposit address
               that will never credit an Arc token, and any typo that happens to
               look right. Settlement is final, so none of those were
-              recoverable. This account owns the address below; payments land
-              there. */}
-          <div>
-            <label className="text-scale-1 font-mono text-ink-dim uppercase tracking-wider block mb-1">
-              Settlement address
-            </label>
-            <p className="w-full bg-bg border border-border px-3 py-2 text-sm font-mono text-ink-dim break-all">
-              {settleAddress || "—"}
-            </p>
-            <p className="text-ink-dim text-xs mt-1">
-              {account.settle_address_source === "provisioned"
-                ? "This business's own wallet. Payments to you land here."
-                : "Payments to you land here."}
-            </p>
-          </div>
+              recoverable. */}
+          {/* Read straight from the account rather than mirrored into form
+              state: draft state exists for fields somebody types into, and this
+              is not one of them any more. */}
+          <SettlementAddress
+            address={account.settle_address}
+            source={account.settle_address_source}
+          />
           <button
             type="submit"
             disabled={busy}
@@ -137,6 +131,65 @@ function BusinessIdentity() {
 
       {status && <p className="text-signal text-xs">{status}</p>}
       {error && <p className="text-danger text-xs">{error}</p>}
+    </div>
+  );
+}
+
+// Where this business is paid.
+//
+// A shortened hex string with no label is the least useful thing a payments
+// dashboard can show: it is not memorable, not checkable, and says nothing
+// about whose address it is. So the full address is copyable, linked to the
+// explorer so it can be verified against the chain, and captioned with where it
+// came from -- which is the difference between "we made this for you" and "you
+// told us to send money here".
+function SettlementAddress({
+  address,
+  source,
+}: {
+  address: string;
+  source: Account["settle_address_source"];
+}) {
+  const { copied, copy } = useCopy();
+  if (!address) return null;
+
+  const caption =
+    source === "provisioned"
+      ? "This business's own wallet, created for this account. Payments to you land here."
+      : source === "login_wallet"
+        ? "The wallet you sign in with. Payments to you land here — which means business income and your own money arrive in the same place."
+        : "An address you gave us. Payments to you land here.";
+
+  return (
+    <div>
+      <label className="text-scale-1 font-mono text-ink-dim uppercase tracking-wider block mb-1">
+        Settlement address
+      </label>
+      <div className="flex items-stretch gap-2">
+        <p className="flex-1 min-w-0 bg-bg border border-border px-3 py-2 text-sm font-mono text-ink break-all">
+          {address}
+        </p>
+        <button
+          type="button"
+          onClick={() => copy(address, "settle")}
+          className={`shrink-0 border px-3 text-xs font-mono transition-colors ${
+            copied === "settle"
+              ? "border-signal text-signal"
+              : "border-border text-ink-dim hover:text-ink hover:border-ink-dim"
+          }`}
+        >
+          {copied === "settle" ? "Copied" : "Copy"}
+        </button>
+      </div>
+      <p className="text-ink-dim text-xs mt-1.5">{caption}</p>
+      <a
+        href={`${EXPLORER}/address/${address}`}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-signal text-xs font-mono hover:underline"
+      >
+        View on explorer →
+      </a>
     </div>
   );
 }

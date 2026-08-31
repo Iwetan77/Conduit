@@ -11,6 +11,7 @@ import { useState, useEffect } from "react";
 import { useAccount } from "wagmi";
 import { isAddress } from "viem";
 import { useMyAccount } from "@/lib/queries";
+import { useCircleAccount } from "@/lib/circle/connection";
 import { shortenAddress } from "@/lib/format";
 import { AddressInput } from "@/components/SendFlow/AddressInput";
 import { AmountInput } from "@/components/SendFlow/AmountInput";
@@ -42,16 +43,27 @@ export default function SendPage() {
 
   // Can the connected wallet actually sign for that address?
   //
-  // Only when they are the same address. A Circle wallet's key material is on
-  // the owner's device and the session is bound to the wallet they signed in
-  // with, so being signed in as the business does NOT confer the ability to
-  // move the business wallet's money -- that is a separate capability and it is
-  // not built yet.
+  // Yes, for a Google sign-in, and this used to say no. The old rule was
+  // "only when they are the same address", on the reasoning that a Circle
+  // wallet's key material is bound to the wallet the session signed in with.
+  // It is bound to the USER. One Circle user holds both wallets -- the
+  // personal one and the business's settlement wallet -- the same user token
+  // authorises both, and Circle's transfer API simply takes a wallet_id. The
+  // settlement wallet is already sitting in session.wallets.
   //
-  // Stated rather than assumed, because the failure it prevents is silent: the
-  // page would have shown one wallet's balance and spent another's.
+  // So a merchant signed in with Google can spend the business's money, which
+  // is what this screen has always said it does. lib/settlement-signer pins
+  // the provider to the settle address, and refuses loudly if that address is
+  // not one this session owns -- the silent failure being guarded against is
+  // showing one wallet's balance and spending another's.
+  //
+  // An injected wallet is the other case, and there the old rule still holds:
+  // MetaMask signs for the address it is connected as and no other.
+  const isCircleSession = useCircleAccount().connected;
   const canSignForTreasury =
-    !!treasury && !!connected && treasury.toLowerCase() === connected.toLowerCase();
+    !!treasury &&
+    (isCircleSession ||
+      (!!connected && treasury.toLowerCase() === connected.toLowerCase()));
 
   const [recipient, setRecipient] = useState("");
   const [amount, setAmount] = useState("");
@@ -147,6 +159,8 @@ export default function SendPage() {
       {step === "confirm" && (
         <div className="bg-surface border border-border p-6">
           <SendConfirm
+            // The business pays, so the business's wallet signs.
+            spendFrom={treasury}
             recipient={recipient}
             amount={amount}
             recipientCurrency={recipientCurrency}

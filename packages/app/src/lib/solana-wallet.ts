@@ -296,17 +296,34 @@ export async function eagerConnectSolanaWallet(): Promise<string | null> {
   const match = wallets.find((w) => w.label === remembered);
   if (!match) return null;
 
-  try {
-    await match.provider.connect({ onlyIfTrusted: true });
+  // READ the wallet, never call connect().
+  //
+  // This used to call connect({ onlyIfTrusted: true }) and treat that as
+  // silent. It is not. onlyIfTrusted suppresses the APPROVAL dialog for a site
+  // the wallet already trusts -- it does nothing about the wallet being LOCKED,
+  // and a locked Solflare answers by opening its own "Unlock your wallet"
+  // window and leaving the promise hanging there. So every visit to any page,
+  // in the browser where the payer had once connected, opened a password
+  // prompt nobody asked for. On a browser where they never connected there was
+  // nothing remembered, which is exactly why it only happened on the one.
+  //
+  // Nothing is lost by not calling it. An unlocked wallet that already trusts
+  // this origin populates provider.publicKey by itself; reading it restores
+  // the session for free. A locked one has no address to give until the person
+  // deals with their wallet, and the honest way to ask for that is the Connect
+  // Wallet button they press on purpose.
+  //
+  // Injection and auto-connect are both async, so this looks a few times over
+  // about a second and a half rather than deciding on the first frame.
+  for (let i = 0; i < 6; i++) {
     const pk = match.provider.publicKey;
-    if (!pk) return null;
-    selected = match.provider;
-    return pk.toString();
-  } catch {
-    // Not trusted any more, or the wallet does not support the flag. Either
-    // way this must stay silent: the payer can still connect deliberately.
-    return null;
+    if (pk) {
+      selected = match.provider;
+      return pk.toString();
+    }
+    await new Promise((r) => setTimeout(r, 250));
   }
+  return null;
 }
 
 export async function connectSolanaWallet(choice?: SolanaProvider): Promise<string> {

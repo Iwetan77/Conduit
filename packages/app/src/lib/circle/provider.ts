@@ -105,8 +105,34 @@ export function createCircleProvider(config: CircleProviderConfig) {
     chainByCircleId(active.blockchain) ??
     ({ circle: "ARC-TESTNET", id: arcTestnet.id, rpc: ARC_RPC_URL, label: arcTestnet.name } as CircleChain);
 
+  // Which wallet the CALLER asked to sign with, when it asked for one.
+  //
+  // Circle holds more than one wallet per chain for a single user -- that is
+  // exactly how a business gets an address of its own (createSettlementWallet
+  // in lib/circle/browser). Both are this user's, both are reachable with this
+  // user token, and Circle's transfer API keys on wallet_id. So "signed in
+  // personally" and "spending the business's money" were never in conflict;
+  // the provider just had no way to be told which one to use, and defaulted to
+  // the sign-in wallet.
+  //
+  // Kept separate from `active` because a chain switch must not forget it: a
+  // cross-chain deposit moves `active` to Base and back, and picking the Arc
+  // wallet by blockchain alone lands on whichever is listed first, which for a
+  // merchant is their personal one.
+  let pinned: string | null = null;
+
   const address = () => active.address;
   const walletId = () => active.id;
+
+  /** The wallet on `chain` that honours the pin, falling back to the first. */
+  const walletFor = (circleChain: string) => {
+    const onChain = wallets.filter((w) => w.blockchain === circleChain);
+    if (pinned) {
+      const match = onChain.find((w) => w.address.toLowerCase() === pinned);
+      if (match) return match;
+    }
+    return onChain[0];
+  };
 
   const api = async (path: string, init?: RequestInit) => {
     const res = await fetch(`${apiBase}${path}`, {
@@ -378,6 +404,34 @@ export function createCircleProvider(config: CircleProviderConfig) {
 
   const request = async ({ method, params = [] }: { method: string; params?: unknown[] }) => {
     switch (method) {
+      // Sign as one of this user's OTHER wallets. Conduit-specific, hence the
+      // prefix -- there is no EIP for "the same user holds several wallets on
+      // one chain", which is precisely the shape Circle gives us.
+      //
+      // This is what lets a merchant spend the business's money. They signed in
+      // with their personal wallet, but the settlement wallet is theirs too and
+      // the same user token authorises it, so the only thing ever missing was
+      // a way to say which one. Callers pass the settle address; anything not
+      // in this session's wallet list is refused rather than silently ignored,
+      // because falling back to the personal wallet is the exact mistake this
+      // exists to prevent.
+      case "conduit_useWallet": {
+        const wanted = String(params[0] ?? "").toLowerCase();
+        const match = wallets.find((w) => w.address.toLowerCase() === wanted);
+        if (!match) {
+          throw new ProviderRpcError(
+            -32602,
+            `${params[0]} is not one of this sign-in's wallets. ` +
+              `Available: ${wallets.map((w) => w.address).join(", ")}`
+          );
+        }
+        pinned = wanted;
+        active = match;
+        activeChain =
+          chainByCircleId(match.blockchain) ??
+          ({ circle: "ARC-TESTNET", id: arcTestnet.id, rpc: ARC_RPC_URL, label: arcTestnet.name } as CircleChain);
+        return match.address;
+      }
       case "eth_accounts":
       case "eth_requestAccounts":
         return [address()];
@@ -421,7 +475,11 @@ export function createCircleProvider(config: CircleProviderConfig) {
           if (wanted === activeChain.id) return null;
 
           const chain = chainByEvmId(wanted);
-          const wallet = chain && wallets.find((w) => w.blockchain === chain.circle);
+          // walletFor, not a bare find: with two wallets on the same chain
+          // (personal + settlement) the first match is not necessarily the one
+          // the caller pinned, and switching away and back would silently
+          // hand a merchant their personal wallet again.
+          const wallet = chain && walletFor(chain.circle);
           if (!chain || !wallet) {
             // 4902 is the code every wallet library reads as "this chain is
             // not available here", which is exactly true: Circle either does

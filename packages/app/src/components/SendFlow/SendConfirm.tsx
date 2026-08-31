@@ -20,6 +20,16 @@ interface SendConfirmProps {
   payerCurrency: Currency;
   onBack: () => void;
   onReset: () => void;
+  /**
+   * Spend from THIS address rather than the connected one.
+   *
+   * Set by the merchant dashboard, where the money belongs to the business and
+   * lives in its settlement wallet -- a different Circle wallet from the one
+   * the owner signed in with, though the same Circle user owns both. Absent on
+   * the payer's own /send, where the connected wallet is the right and only
+   * answer. See lib/settlement-signer.
+   */
+  spendFrom?: string;
 }
 
 export function SendConfirm({
@@ -29,6 +39,7 @@ export function SendConfirm({
   payerCurrency,
   onBack,
   onReset,
+  spendFrom,
 }: SendConfirmProps) {
   const { address, connector, chainId } = useAccount();
   const { switchChainAsync } = useSwitchChain();
@@ -102,12 +113,16 @@ export function SendConfirm({
       // Dynamic import to avoid SSR issues
       const { ConduitClient } = await import("@conduit/sdk");
       const { ethers } = await import("ethers");
-      const { getWalletProvider } = await import("@/lib/wallet-provider");
-
       // The connected wallet, via wagmi's connector — NOT window.ethereum,
-      // which is absent for Privy embedded wallets and ambiguous when more
-      // than one extension is installed.
-      const browserProvider = new ethers.BrowserProvider(await getWalletProvider(connector));
+      // which is ambiguous when more than one extension is installed. Pinned to
+      // the business's wallet when this screen is spending the business's money.
+      const wallet = spendFrom
+        ? await (await import("@/lib/settlement-signer")).getSettlementProvider(
+            connector,
+            spendFrom,
+          )
+        : await (await import("@/lib/wallet-provider")).getWalletProvider(connector);
+      const browserProvider = new ethers.BrowserProvider(wallet);
       const client = ConduitClient.fromBrowserProvider(browserProvider, "", undefined, ARC_RPC_URL);
 
       const result = await client.pay({

@@ -40,10 +40,20 @@ export async function payPayrollLeg(
   spender: string,
   leg: PayrollLeg,
   connector: Connector | undefined,
+  settleAddress: string,
 ): Promise<string> {
   const { ethers } = await import("ethers");
-  const { getWalletProvider } = await import("@/lib/wallet-provider");
-  const provider = new ethers.BrowserProvider(await getWalletProvider(connector));
+  // The BUSINESS's wallet, not the person's.
+  //
+  // Salaries come out of the settlement wallet, which for a Google merchant is
+  // a different Circle wallet from the one they signed in with -- same user,
+  // same token, different wallet_id. Asking for the plain connected provider
+  // signed as the owner personally, which is the wrong account's money for a
+  // screen that says the business is paying. See lib/settlement-signer.
+  const { getSettlementProvider } = await import("@/lib/settlement-signer");
+  const provider = new ethers.BrowserProvider(
+    await getSettlementProvider(connector, settleAddress),
+  );
   const signer = await provider.getSigner();
 
   // Exactly the total, not an unlimited allowance. A leftover approval on a

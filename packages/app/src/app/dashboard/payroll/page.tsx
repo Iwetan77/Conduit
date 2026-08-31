@@ -12,6 +12,7 @@
 // separate screen rather than a checkbox on the preview.
 import { useState } from "react";
 import { useAccount } from "wagmi";
+import { useMyAccount } from "@/lib/queries";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   createPayrollRun,
@@ -43,6 +44,10 @@ export default function PayrollPage() {
   // Signing reached for window.ethereum when this was missing, which for a
   // Google merchant is the wrong wallet entirely — see lib/payroll-sign.
   const { connector } = useAccount();
+  // The business's address. Salaries leave from here, not from the wallet the
+  // owner signed in with -- see lib/settlement-signer.
+  const { data: account } = useMyAccount();
+  const treasury = account?.settle_address ?? "";
   const [stage, setStage] = useState<Stage>("idle");
   const [run, setRun] = useState<PayrollRun | null>(null);
   const [legs, setLegs] = useState<PayrollLeg[]>([]);
@@ -87,7 +92,10 @@ export default function PayrollPage() {
         setProgress((p) => ({ ...p, [leg.currency]: "waiting for you to approve…" }));
         try {
           const { payPayrollLeg } = await import("@/lib/payroll-sign");
-          const txHash = await payPayrollLeg(res.spender, leg, connector);
+          // The settlement address the run itself was built against, so the
+          // wallet that signs is the wallet the draft costed and checked the
+          // balance of. Reading it from anywhere else risks the two disagreeing.
+          const txHash = await payPayrollLeg(res.spender, leg, connector, treasury);
           await recordPayrollLeg(run.id, { currency: leg.currency, tx_hash: txHash });
           setProgress((p) => ({ ...p, [leg.currency]: "paid" }));
         } catch (err) {

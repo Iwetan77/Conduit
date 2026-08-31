@@ -13,6 +13,13 @@ Names are for reading and addresses are for paying — if the name were resolved
 pay time instead, a name that changed hands between hiring somebody and paying
 them would send their salary to whoever holds it now.
 
+A username names a **person**, and resolves to that person's own address. It is
+never a business's: somebody who runs a company holds their handle on their own
+account, and the company is addressed by its name and its settlement address.
+`@ivan` is Ivan; "Ivan and Sons" is the company; they are different things with
+different addresses. So paying an employee by username pays the employee, even
+when that employee is also somebody's boss.
+
 Two arrangements:
 
 - **Fixed** — the same amount every run. It must have an amount.
@@ -42,6 +49,20 @@ The draft carries the whole preview: every line, totals per currency, which
 currencies need converting, the estimated gas, and your wallet balance against
 it. "You cannot afford this" belongs here, not at the signature.
 
+A draft you do not run is **discarded**, not kept. Building one to read the
+number is a question, not an event in the business's history, so it does not
+appear in past runs and backing out of the preview throws it away.
+
+**A run you cannot afford is refused, not warned about.** If the settlement
+wallet holds less than the total plus gas, execution is rejected
+(`payroll_insufficient_balance`) before anything is signed. This was a red
+paragraph beside a working button, which is the wrong shape for it: there is no
+amount of willingness that makes the wallet cover the run, and starting one short
+pays the first currency group, empties the wallet, and leaves the rest unpaid.
+The check reads the chain, so if the balance cannot be read at all the run is
+allowed — a flaky node must not become an outage for the one operation with a
+deadline attached.
+
 **Confirm.** A separate screen listing every recipient by name. It is the last
 point at which a wrong line can be caught by a person, which is why it shows
 resolved names rather than hex.
@@ -55,6 +76,12 @@ wallet signs each: one approve for the group's total, then one `disperse`.
 
 Arc charges gas in USDC rather than a separate native token, so your treasury
 needs USDC on top of what you are paying out. The preview says how much.
+
+## Which wallet signs
+
+The **business's settlement wallet** — the one its income lands in, not the
+wallet its owner signed in with. Those are two different addresses, and the
+signature has to come from the one that holds the money.
 
 ## What "atomic" means here, and what it does not
 

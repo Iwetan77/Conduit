@@ -12,6 +12,7 @@
 //
 // Loaded on demand from the payroll page: ethers is large and only needed at
 // the moment somebody actually pays.
+import type { Connector } from "wagmi";
 import type { PayrollLeg } from "@/lib/conduit-api";
 
 const ERC20_ABI = ["function approve(address spender, uint256 amount) returns (bool)"];
@@ -22,14 +23,27 @@ const PAYROLL_ABI = [
 /**
  * Pays one leg and returns the disperse transaction hash.
  *
+ * `connector` is wagmi's, and it is not optional in practice even though the
+ * type allows undefined. This asked for the provider with no connector at all,
+ * which falls back to `window.ethereum` — so a merchant signed in with Google
+ * had their payroll routed to whichever extension was installed rather than to
+ * their Circle wallet. Two things went wrong at once there: an extension window
+ * opened that nobody asked for, and had it been approved, everybody's salary
+ * would have come out of the owner's personal wallet instead of the business's
+ * settlement wallet.
+ *
  * Throws with whatever the wallet said if either step is refused — the caller
  * records that as the group's failure reason, and a person reading it needs the
  * real cause rather than "something went wrong".
  */
-export async function payPayrollLeg(spender: string, leg: PayrollLeg): Promise<string> {
+export async function payPayrollLeg(
+  spender: string,
+  leg: PayrollLeg,
+  connector: Connector | undefined,
+): Promise<string> {
   const { ethers } = await import("ethers");
   const { getWalletProvider } = await import("@/lib/wallet-provider");
-  const provider = new ethers.BrowserProvider(await getWalletProvider());
+  const provider = new ethers.BrowserProvider(await getWalletProvider(connector));
   const signer = await provider.getSigner();
 
   // Exactly the total, not an unlimited allowance. A leftover approval on a

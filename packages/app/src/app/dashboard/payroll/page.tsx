@@ -11,9 +11,11 @@
 // human, which is why it shows resolved names rather than hex and why it is a
 // separate screen rather than a checkbox on the preview.
 import { useState } from "react";
+import { useAccount } from "wagmi";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   createPayrollRun,
+  discardPayrollRun,
   executePayrollRun,
   listPayrollRuns,
   recordPayrollLeg,
@@ -37,6 +39,10 @@ type Stage = "idle" | "preview" | "confirm" | "running" | "done";
 
 export default function PayrollPage() {
   const qc = useQueryClient();
+  // The wallet actually signed in, not whichever extension is installed.
+  // Signing reached for window.ethereum when this was missing, which for a
+  // Google merchant is the wrong wallet entirely — see lib/payroll-sign.
+  const { connector } = useAccount();
   const [stage, setStage] = useState<Stage>("idle");
   const [run, setRun] = useState<PayrollRun | null>(null);
   const [legs, setLegs] = useState<PayrollLeg[]>([]);
@@ -81,7 +87,7 @@ export default function PayrollPage() {
         setProgress((p) => ({ ...p, [leg.currency]: "waiting for you to approve…" }));
         try {
           const { payPayrollLeg } = await import("@/lib/payroll-sign");
-          const txHash = await payPayrollLeg(res.spender, leg);
+          const txHash = await payPayrollLeg(res.spender, leg, connector);
           await recordPayrollLeg(run.id, { currency: leg.currency, tx_hash: txHash });
           setProgress((p) => ({ ...p, [leg.currency]: "paid" }));
         } catch (err) {
@@ -141,7 +147,26 @@ export default function PayrollPage() {
           stage={stage}
           busy={busy}
           error={error}
-          onBack={() => setStage(stage === "confirm" ? "preview" : "idle")}
+          onBack={() => {
+            if (stage === "confirm") {
+              setStage("preview");
+              return;
+            }
+            // Backing out of the preview throws the draft away. Building one to
+            // read it is not an event in this business's history, and every
+            // abandoned preview used to leave a row behind that Past runs then
+            // listed as "draft" forever.
+            //
+            // Fire-and-forget, and the UI does not wait on it: the person has
+            // already decided to leave this screen, and a failed cleanup is not
+            // their problem to sit through. The server excludes drafts from the
+            // list either way, so the worst case is a tidy-up that did not
+            // happen rather than something they can see.
+            const id = run.id;
+            setStage("idle");
+            setRun(null);
+            void discardPayrollRun(id).catch(() => {});
+          }}
           onContinue={() => setStage("confirm")}
           onConfirm={() => void execute()}
         />
@@ -260,8 +285,10 @@ function Preview({
 
         {shortfall && (
           <p className="text-danger text-xs">
-            This is more than the wallet holds. Top it up before running, or the
-            payroll will fail partway.
+            This is more than the wallet holds, so it cannot be run yet. Top up{" "}
+            {isoToToken(run.treasury_currency)} in your settlement wallet and
+            come back — a payroll that starts short pays the first group, empties
+            the wallet, and leaves the rest unpaid.
           </p>
         )}
       </div>
@@ -276,17 +303,26 @@ function Preview({
         >
           Back
         </button>
+        {/* Refused, not warned about.
+            The shortfall used to sit beside a working button, so the only thing
+            standing between a business and a half-paid payroll was reading a
+            red paragraph. It is not a judgement call the person clicking should
+            have to make: there is no amount of willingness that makes the
+            wallet cover it, and the run cannot succeed. The server refuses this
+            too — this button is the courtesy, that is the rule. */}
         <button
           type="button"
           onClick={confirming ? onConfirm : onContinue}
-          disabled={busy}
+          disabled={busy || shortfall}
           className="flex-1 bg-signal text-signal-ink font-medium py-2 text-sm disabled:opacity-50"
         >
           {busy
             ? "Paying…"
-            : confirming
-              ? `Pay ${run.items.length} people`
-              : "Review and confirm"}
+            : shortfall
+              ? "Not enough to run this"
+              : confirming
+                ? `Pay ${run.items.length} people`
+                : "Review and confirm"}
         </button>
       </div>
     </div>

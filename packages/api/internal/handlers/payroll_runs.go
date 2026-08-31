@@ -250,6 +250,51 @@ func (h *PayrollRuns) Create(w http.ResponseWriter, r *http.Request) {
 	h.writeRun(w, r, runID, principal.AccountID, true)
 }
 
+// Discard is DELETE /v1/payroll_runs/{id} — throws away a draft nobody ran.
+//
+// Drafts are cheap to make and somebody deciding not to run one is the normal
+// case, not an error: they open the preview to see the number and close it.
+// Without this, every one of those left a row behind forever.
+//
+// Only a draft, and the status guard sits in the WHERE clause rather than in a
+// read followed by a delete — an executed run is a financial record, and a
+// check in Go would let this route race an execute that claimed the run
+// between the two statements. The items go with it through the run_id foreign
+// key's ON DELETE CASCADE (migration 0028).
+func (h *PayrollRuns) Discard(w http.ResponseWriter, r *http.Request) {
+	principal, ok := auth.FromContext(r.Context())
+	if !ok {
+		writeErr(w, apierrors.E(apierrors.CodeUnauthorized, ""))
+		return
+	}
+	runID := pathParam(r, "id")
+	ctx := r.Context()
+
+	tag, err := h.Pool.Exec(ctx,
+		`DELETE FROM payroll_runs
+		  WHERE id = $1 AND account_id = $2 AND status = 'draft'`,
+		runID, principal.AccountID)
+	if err != nil {
+		writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
+		return
+	}
+	if tag.RowsAffected() == 0 {
+		// Either it never existed, it belongs to somebody else, or it has been
+		// run. Distinguishing the last is worth it: a client discarding a run
+		// it already executed has a bug worth naming.
+		var status string
+		if e := h.Pool.QueryRow(ctx,
+			`SELECT status FROM payroll_runs WHERE id = $1 AND account_id = $2`,
+			runID, principal.AccountID).Scan(&status); e == nil {
+			writeErr(w, apierrors.E(apierrors.CodePayrollNotDraft, ""))
+			return
+		}
+		writeErr(w, apierrors.E(apierrors.CodeNotFound, "id"))
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // Get is GET /v1/payroll_runs/{id}.
 func (h *PayrollRuns) Get(w http.ResponseWriter, r *http.Request) {
 	principal, ok := auth.FromContext(r.Context())
@@ -267,9 +312,20 @@ func (h *PayrollRuns) List(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, apierrors.E(apierrors.CodeUnauthorized, ""))
 		return
 	}
+	// Drafts are excluded. A draft is a question — "here is what running
+	// payroll would do" — and building one to look at it is not an event in
+	// this business's history. Listing them put a row reading "draft" into Past
+	// runs for every preview anybody ever opened and backed out of, which is
+	// both noise and a lie about what happened.
+	//
+	// Filtered here rather than only hidden in the dashboard, because the same
+	// list is what an API client reads, and "past runs" has to mean the same
+	// thing to both.
 	rows, err := h.Pool.Query(r.Context(),
 		`SELECT id, status, treasury_currency, created_at, executed_at
-		   FROM payroll_runs WHERE account_id = $1 ORDER BY created_at DESC`,
+		   FROM payroll_runs
+		  WHERE account_id = $1 AND status <> 'draft'
+		  ORDER BY created_at DESC`,
 		principal.AccountID)
 	if err != nil {
 		writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
@@ -383,28 +439,71 @@ func (h *PayrollRuns) writeRun(w http.ResponseWriter, r *http.Request, runID, ac
 		p.SettleAddress = settleAddress
 		p.ContractAddress = h.PayrollContract
 
-		gas := estimateGasCost(len(p.Items), len(p.Groups), h.gasPrice(r.Context()))
-		gasStr := gas.String()
+		a := h.affordability(r.Context(), p, settleAddress)
+		gasStr := a.gas.String()
 		p.EstimatedGas = &gasStr
-
 		// The balance, so "you cannot afford this" is said HERE rather than at
 		// the challenge — where it arrives as a failed transaction with
 		// everybody's payment already in motion.
-		if bal, err := h.treasuryBalance(r.Context(), settleAddress, p.TreasuryCurrency); err == nil {
-			balStr := bal.String()
+		if a.balanceKnown {
+			balStr := a.have.String()
 			p.WalletBalance = &balStr
-			need := new(big.Int).Set(gas)
-			for _, g := range p.Groups {
-				if g.Currency == p.TreasuryCurrency {
-					t, _ := new(big.Int).SetString(g.Total, 10)
-					need.Add(need, t)
-				}
-			}
-			covers := bal.Cmp(need) >= 0
+			covers := a.covers()
 			p.BalanceCovers = &covers
 		}
 	}
 	writeJSON(w, http.StatusOK, p)
+}
+
+// affordability is the one answer to "can this wallet run this payroll".
+//
+// One function because there are two callers who must never disagree: the
+// preview that reports it and the execute guard that refuses on it. Two copies
+// of this arithmetic would eventually differ, and the way that surfaces is a
+// preview saying the run is covered and the execute call refusing it — which
+// reads as a broken product rather than an empty wallet.
+type payrollAffordability struct {
+	// need is the treasury-currency total plus gas. Groups in OTHER currencies
+	// are excluded deliberately: they are not spendable from this balance and
+	// have to be converted first, so counting them here would refuse runs that
+	// are perfectly affordable.
+	need *big.Int
+	have *big.Int
+	gas  *big.Int
+	// False when the balance could not be read at all. Callers decide what to
+	// do with that; neither of them may treat it as zero.
+	balanceKnown bool
+}
+
+func (a payrollAffordability) covers() bool {
+	return a.balanceKnown && a.have.Cmp(a.need) >= 0
+}
+
+// short returns how much is missing, or nil when nothing is.
+func (a payrollAffordability) short() *big.Int {
+	if a.covers() || !a.balanceKnown {
+		return nil
+	}
+	return new(big.Int).Sub(a.need, a.have)
+}
+
+func (h *PayrollRuns) affordability(ctx context.Context, p *payrollRunResponse, settleAddress string) payrollAffordability {
+	a := payrollAffordability{
+		gas:  estimateGasCost(len(p.Items), len(p.Groups), h.gasPrice(ctx)),
+		have: new(big.Int),
+	}
+	a.need = new(big.Int).Set(a.gas)
+	for _, g := range p.Groups {
+		if g.Currency == p.TreasuryCurrency {
+			t, _ := new(big.Int).SetString(g.Total, 10)
+			a.need.Add(a.need, t)
+		}
+	}
+	if bal, err := h.treasuryBalance(ctx, settleAddress, p.TreasuryCurrency); err == nil {
+		a.have = bal
+		a.balanceKnown = true
+	}
+	return a
 }
 
 func (h *PayrollRuns) treasuryBalance(ctx context.Context, address, iso string) (*big.Int, error) {

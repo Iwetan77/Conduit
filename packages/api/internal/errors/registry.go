@@ -57,6 +57,8 @@ const (
 	CodePayrollKeyReused        Code = "payroll_run_key_reused"
 	CodePayrollNotConfigured    Code = "payroll_not_configured"
 	CodePayrollNotOnChain       Code = "payroll_leg_not_found_on_chain"
+	CodePayrollShortBalance     Code = "payroll_insufficient_balance"
+	CodeUsernameNeedsPerson     Code = "username_needs_a_person"
 )
 
 type entry struct {
@@ -153,6 +155,18 @@ var registry = map[Code]entry{
 	// Recording a payment that did not happen would tell everybody in that
 	// group they had been paid. The transaction has to contain the run.
 	CodePayrollNotOnChain: {http.StatusUnprocessableEntity, "That transaction does not contain this payroll group's payment."},
+	// Refused, not warned about. The preview showed the shortfall and the
+	// dashboard let the run start anyway -- and a payroll that starts short
+	// does not fail cleanly: the early groups pay, the wallet empties, and the
+	// last one reverts, so some people are paid and some are not for no reason
+	// anybody could have chosen. Stopping before the first signature is the
+	// only point at which nobody is affected.
+	CodePayrollShortBalance: {http.StatusUnprocessableEntity, "This payroll costs more than the settlement wallet holds. Top it up and run it again."},
+	// A username names a person, and this caller is a company with no person
+	// behind it -- an API key rather than somebody who signed in. Binding a
+	// personal handle to a business address is exactly what usernames stopped
+	// doing, so there is nothing sensible to fall back to.
+	CodeUsernameNeedsPerson: {http.StatusUnprocessableEntity, "A username belongs to a person. Sign in with the wallet or account that should hold it."},
 }
 
 // APIError is what handlers return; the HTTP layer renders it to the

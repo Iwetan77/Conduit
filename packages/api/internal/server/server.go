@@ -63,6 +63,15 @@ type Config struct {
 // ever reach.
 const arcBlockchain = "ARC-TESTNET"
 
+// The ConduitPayroll deployment this build targets, used when
+// CONDUIT_PAYROLL_ADDRESS says nothing.
+//
+// Kept beside arcBlockchain because it is the same kind of fact: a property of
+// the one chain this API talks to, wrong only if that changes. Mirrors
+// deployments/arc-testnet.json, which the API cannot read — its Docker context
+// is packages/api alone.
+const defaultPayrollContract = "0xcC4b99a2B74DA98695d4136FB7F20988621BeB11"
+
 // statusRecorder captures the status code so the request log can report it.
 type statusRecorder struct {
 	http.ResponseWriter
@@ -161,12 +170,24 @@ func New(cfg Config) http.Handler {
 	payoutsH := &handlers.Payouts{Pool: cfg.Pool, ArcRPC: arcRPCForBalances}
 	externalSettlementH := &handlers.ExternalSettlement{Pool: cfg.Pool}
 	employeesH := &handlers.Employees{Pool: cfg.Pool}
-	// The deployed ConduitPayroll. Unset, runs can be drafted and read but not
-	// executed -- the same opt-in shape the bridge uses, so a deployment
-	// without it degrades visibly rather than panicking.
+	// The deployed ConduitPayroll.
+	//
+	// Defaulted rather than left empty, and the reason is what actually
+	// happened: the variable was never set on the deployment, so every attempt
+	// to run a payroll came back "Payroll is not configured on this
+	// deployment." The feature shipped, the contract was deployed and verified,
+	// and the only thing between the two was a console field nobody had filled
+	// in. A build that carries a working default cannot fail that way.
+	//
+	// Safe to hardcode for the same reason the Arc RPC above is: this API talks
+	// to exactly one chain, and on that chain this is the address. It is a
+	// public contract address, not a secret, and the environment variable still
+	// wins — so a second deployment, or a redeploy of the contract, is one
+	// variable away and needs no code change.
 	payrollContract := strings.TrimSpace(os.Getenv("CONDUIT_PAYROLL_ADDRESS"))
 	if payrollContract == "" {
-		log.Printf("config: CONDUIT_PAYROLL_ADDRESS is not set — payroll runs can be drafted but not executed.")
+		payrollContract = defaultPayrollContract
+		log.Printf("config: CONDUIT_PAYROLL_ADDRESS is not set — using the built-in Arc testnet address %s.", payrollContract)
 	}
 	payrollRunsH := &handlers.PayrollRuns{
 		Pool: cfg.Pool, Webhooks: dispatcher,
@@ -520,6 +541,9 @@ func New(cfg Config) http.Handler {
 			r.Get("/payroll_runs", payrollRunsH.List)
 			r.Post("/payroll_runs", payrollRunsH.Create)
 			r.Get("/payroll_runs/{id}", payrollRunsH.Get)
+			// Throws away a draft nobody ran. Refuses anything else -- an
+			// executed run is a record.
+			r.Delete("/payroll_runs/{id}", payrollRunsH.Discard)
 			r.Post("/payroll_runs/{id}/execute", payrollRunsH.Execute)
 			r.Post("/payroll_runs/{id}/legs", payrollRunsH.RecordLeg)
 			// Ends every session for the account. Authenticated because it acts

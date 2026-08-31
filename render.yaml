@@ -50,6 +50,14 @@ services:
       - key: CONDUIT_ROUTER_ADDRESS
         value: "0x80f996e86C003AF309635B67A53dC6e63e623318"
 
+      # The batch payroll contract. Also a public address, and also pinned
+      # here rather than left to the dashboard -- it was left to the dashboard,
+      # nobody filled it in, and every payroll run answered "not configured".
+      # The API now carries this same address as a built-in default, so this
+      # entry is the override rather than the only copy.
+      - key: CONDUIT_PAYROLL_ADDRESS
+        value: "0xcC4b99a2B74DA98695d4136FB7F20988621BeB11"
+
       # ── Merchant login: Circle Wallets ─────────────────────────────────
       # The API key is a server-side secret and never reaches the browser;
       # the app calls /v1/auth/circle/* to mint device and user tokens.

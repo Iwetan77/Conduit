@@ -83,6 +83,40 @@ func (h *PayrollRuns) Execute(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 
+	// Can this wallet actually pay for it?
+	//
+	// Checked BEFORE the claim, so a refusal leaves the run a draft that can be
+	// executed again once the wallet is topped up — nothing to release, no key
+	// burned. And checked here rather than only in the browser, because the
+	// browser's copy is a disabled button and a disabled button is a
+	// suggestion: this route is reachable with an API key.
+	//
+	// The shortfall used to be a warning next to a working button. A payroll
+	// that starts short does not fail cleanly — the first group pays, the
+	// wallet empties, and a later group reverts — so the outcome is some people
+	// paid and some not, chosen by whatever order the currencies sorted in.
+	if p, err := h.load(ctx, runID, principal.AccountID); err == nil && p.Status == "draft" {
+		var settleAddress string
+		_ = h.Pool.QueryRow(ctx,
+			`SELECT settle_address FROM accounts WHERE id = $1`, principal.AccountID).Scan(&settleAddress)
+		a := h.affordability(ctx, p, settleAddress)
+		// Only on a balance we actually read. An unreachable RPC must not stop
+		// payroll — that would turn a flaky node into an outage for the one
+		// operation with a deadline attached — and the on-chain transaction is
+		// still the real check either way.
+		if short := a.short(); short != nil {
+			e := apierrors.E(apierrors.CodePayrollShortBalance, "")
+			writeJSON(w, e.Status, map[string]any{
+				"error":    e,
+				"balance":  a.have.String(),
+				"required": a.need.String(),
+				"short_by": short.String(),
+				"currency": p.TreasuryCurrency,
+			})
+			return
+		}
+	}
+
 	// Claim it. One statement, so two requests arriving together cannot both
 	// pass: the unique index on (account_id, run_key) rejects the loser, and
 	// the status guard rejects a run somebody already executed.

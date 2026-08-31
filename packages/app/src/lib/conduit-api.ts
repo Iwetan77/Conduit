@@ -617,8 +617,20 @@ export function getPayrollRun(id: string) {
   return request<PayrollRun>(`/v1/payroll_runs/${id}`);
 }
 
+/** Past runs. Drafts are excluded by the server — a preview is not history. */
 export function listPayrollRuns() {
   return request<{ data: PayrollRun[] }>("/v1/payroll_runs");
+}
+
+/**
+ * Throws away a draft nobody ran.
+ *
+ * Called when somebody backs out of the preview, so looking at what a payroll
+ * would cost does not leave a row behind. Refused on anything already
+ * executed — that is a record.
+ */
+export function discardPayrollRun(id: string) {
+  return request<void>(`/v1/payroll_runs/${id}`, { method: "DELETE" });
 }
 
 /**

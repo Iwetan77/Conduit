@@ -22,8 +22,20 @@ import type { Connector } from "wagmi";
 // wagmi's connector is the single source of truth for "the connected wallet",
 // so ask it. `window.ethereum` stays as a last resort for the plain injected
 // case where no connector is available yet.
+//
+// The parameter is REQUIRED even though it accepts undefined, and that is the
+// whole point: `getWalletProvider()` compiled fine and silently meant "use
+// whatever extension is installed". Payroll signing called it that way. For a
+// merchant signed in with Google that skipped their Circle wallet entirely and
+// went to MetaMask — which opens the extension nobody asked to open, and, if
+// approved, would have paid everybody's salary out of the owner's personal
+// wallet instead of the business's settlement wallet.
+//
+// Making it required does not stop a caller passing undefined; it stops a
+// caller passing NOTHING BY ACCIDENT. `undefined` here is now a sentence
+// somebody wrote on purpose, and tsc names every site that has to write it.
 export async function getWalletProvider(
-  connector?: Connector
+  connector: Connector | undefined
 ): Promise<Eip1193Provider> {
   if (connector?.getProvider) {
     const provider = (await connector.getProvider()) as Eip1193Provider | undefined;

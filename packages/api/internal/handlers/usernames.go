@@ -23,11 +23,63 @@ import (
 // Usernames lets an account be paid by name instead of by address.
 //
 // The name belongs to the ACCOUNT, not to the wallet -- see migration 0019 for
-// why. Everything here follows from that: resolution answers with the
-// account's settle_address, so the day a merchant gets an address of its own,
-// the same name starts pointing at it with nothing to migrate.
+// why. Resolution answers with that account's settle_address.
+//
+// WHICH account is the part that changed. A username names a PERSON, and it is
+// claimed against their personal account, never against a business they happen
+// to run. That distinction did not exist while a merchant's settle_address was
+// just the wallet they signed in with -- the two accounts pointed at the same
+// address, so it made no difference which held the name. Provisioned
+// settlement wallets ended that: a business now has an address that is not its
+// owner's, and a name claimed from the dashboard silently became the way to pay
+// the COMPANY.
+//
+// So "@ivan" is Ivan, at Ivan's address, and "Ivan and Sons" is the business,
+// at the business's address. One is a person you pay; the other is a company
+// you pay. They are separate things and they now have separate addresses, so
+// they get separate handles.
 type Usernames struct {
 	Pool *pgxpool.Pool
+}
+
+// usernameAccountFor picks the account a name may be claimed against.
+//
+// For a personal account: itself. For a business: its owner's personal account,
+// created if this is the first time they have needed one -- which is the normal
+// case, since somebody who only ever signed in with Google has never had a
+// reason to have one.
+//
+// A business with no login wallet has no owner to bind to. That is an API-key
+// account rather than a person, and the honest answer is to refuse: the
+// alternative is putting a person's handle on a company's address, which is the
+// thing this function exists to prevent.
+func usernameAccountFor(ctx context.Context, pool *pgxpool.Pool, accountID string) (string, *apierrors.APIError) {
+	var loginWallet *string
+	var settleCurrency string
+	var personal bool
+	err := pool.QueryRow(ctx,
+		`SELECT login_wallet, settle_currency,
+		        (privy_user_id IS NULL AND auth_subject IS NULL) AS personal
+		   FROM accounts WHERE id = $1`,
+		accountID,
+	).Scan(&loginWallet, &settleCurrency, &personal)
+	if err != nil {
+		return "", apierrors.E(apierrors.CodeNotFound, "account")
+	}
+	if personal {
+		return accountID, nil
+	}
+	if loginWallet == nil || strings.TrimSpace(*loginWallet) == "" {
+		return "", apierrors.E(apierrors.CodeUsernameNeedsPerson, "")
+	}
+	// USDC by default, matching what a direct send would have chosen. This is
+	// the person's own account, not the business's, so the business's settle
+	// currency is not the right default to inherit.
+	personalID, err := personalAccountForWallet(ctx, pool, *loginWallet, "USDC")
+	if err != nil {
+		return "", apierrors.E(apierrors.CodeInternal, "")
+	}
+	return personalID, nil
 }
 
 // usernamePattern mirrors the CHECK constraint in migration 0019 exactly.
@@ -171,13 +223,17 @@ type claimUsernameRequest struct {
 	Username string `json:"username"`
 }
 
-// Claim sets the calling account's username, once.
+// Claim sets the caller's username, once.
 //
 // Once is the point. A username is what other people save and send money to,
 // so letting it be reassigned means a payment addressed from memory can land
 // with a stranger who picked up the abandoned name. Changing one is a support
 // action with a redirect behind it, not a settings field, and until that
 // exists the honest behaviour is to refuse.
+//
+// The name goes on the caller's PERSONAL account even when they are signed in
+// as a business -- see usernameAccountFor. A merchant claiming "ivan" from the
+// dashboard means "I am Ivan", not "pay my company here".
 func (h *Usernames) Claim(w http.ResponseWriter, r *http.Request) {
 	principal, ok := auth.FromContext(r.Context())
 	if !ok {
@@ -196,7 +252,15 @@ func (h *Usernames) Claim(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	switch err := claimUsername(r.Context(), h.Pool, principal.AccountID, name); {
+	// The person behind the session, which is not the same row as the business
+	// when they are signed in as one.
+	target, apiErr := usernameAccountFor(r.Context(), h.Pool, principal.AccountID)
+	if apiErr != nil {
+		writeErr(w, apiErr)
+		return
+	}
+
+	switch err := claimUsername(r.Context(), h.Pool, target, name); {
 	case errors.Is(err, errUsernameTaken):
 		writeErr(w, apierrors.E(apierrors.CodeUsernameTaken, ""))
 		return

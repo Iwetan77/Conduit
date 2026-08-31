@@ -277,3 +277,82 @@ func TestUsernameShapeIsEnforcedByTheDatabase(t *testing.T) {
 		t.Fatal("the database accepted an underscore username written directly")
 	}
 }
+
+// A merchant's own name belongs to the merchant, not to their company.
+//
+// This is the case provisioned settlement wallets created. While a business
+// settled to the wallet its owner signed in with, a name on either row resolved
+// to the same address and nothing distinguished them. Now they are different
+// addresses, and claiming "ivan" from the dashboard used to mean "pay my
+// company" -- the person's own handle pointing at the business's money.
+//
+// The assertion that matters is the last one: @ivan resolves to IVAN'S address,
+// and the business's settlement address is not it.
+func TestMerchantsNameBindsToThePersonNotTheBusiness(t *testing.T) {
+	srv, pool := newSettlementTestServer(t, 15541, "")
+	ctx := context.Background()
+
+	const owner = "0x00000000000000000000000000000000000000a1"
+	const businessAddr = "0x00000000000000000000000000000000000000b2"
+	session := seedMerchant(t, pool, "acct_biz", owner, "")
+
+	// Give the business an address of its own, which is what makes the two
+	// distinguishable at all. Written directly: provisioning goes through
+	// Circle, and this test is about the username, not about that.
+	if _, err := pool.Exec(ctx,
+		`UPDATE accounts
+		    SET settle_address = $2, provisioned_address = $2,
+		        settle_wallet_id = 'wal_test', settle_address_source = 'provisioned'
+		  WHERE id = $1`,
+		"acct_biz", businessAddr,
+	); err != nil {
+		t.Fatalf("give the business its own address: %v", err)
+	}
+
+	if resp := doJSON(t, srv.URL, "POST", "/v1/accounts/me/username", session,
+		`{"username":"Ivan"}`, ""); resp.status != http.StatusOK {
+		t.Fatalf("claim: status=%d body=%s", resp.status, resp.body)
+	}
+
+	// The business row must not be holding it.
+	var businessName *string
+	if err := pool.QueryRow(ctx,
+		`SELECT username FROM accounts WHERE id = 'acct_biz'`).Scan(&businessName); err != nil {
+		t.Fatalf("read business: %v", err)
+	}
+	if businessName != nil {
+		t.Fatalf("the name landed on the business account (%q) -- paying @Ivan would pay the company", *businessName)
+	}
+
+	// The owner's personal account is holding it, and it settles to the owner's
+	// own wallet.
+	var personalAddr string
+	if err := pool.QueryRow(ctx,
+		`SELECT settle_address FROM accounts
+		  WHERE lower(username) = 'ivan'
+		    AND privy_user_id IS NULL AND auth_subject IS NULL`,
+	).Scan(&personalAddr); err != nil {
+		t.Fatalf("no personal account holds the name: %v", err)
+	}
+	if !strings.EqualFold(personalAddr, owner) {
+		t.Fatalf("personal account settles to %s, want the owner's wallet %s", personalAddr, owner)
+	}
+
+	// And that is what a payer typing the name is told to pay.
+	resp := doJSON(t, srv.URL, "GET", "/v1/usernames/Ivan", "", "", "")
+	if resp.status != http.StatusOK {
+		t.Fatalf("resolve: status=%d body=%s", resp.status, resp.body)
+	}
+	var res struct {
+		SettleAddress string `json:"settle_address"`
+	}
+	if err := json.Unmarshal([]byte(resp.body), &res); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if strings.EqualFold(res.SettleAddress, businessAddr) {
+		t.Fatal("@Ivan resolves to the BUSINESS address -- a personal handle paying the company")
+	}
+	if !strings.EqualFold(res.SettleAddress, owner) {
+		t.Fatalf("@Ivan resolves to %s, want the person's own address %s", res.SettleAddress, owner)
+	}
+}

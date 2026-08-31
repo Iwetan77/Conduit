@@ -52,6 +52,10 @@ const (
 	CodeUpstreamUnavailable     Code = "upstream_unavailable"
 	CodeConfirmationMismatch    Code = "confirmation_mismatch"
 	CodeEmployeeExists          Code = "employee_already_exists"
+	CodePayrollNoEmployees      Code = "payroll_no_employees"
+	CodePayrollNotDraft         Code = "payroll_run_not_draft"
+	CodePayrollKeyReused        Code = "payroll_run_key_reused"
+	CodePayrollNotConfigured    Code = "payroll_not_configured"
 )
 
 type entry struct {
@@ -137,7 +141,14 @@ var registry = map[Code]entry{
 	CodeConfirmationMismatch: {http.StatusBadRequest, "That does not match the account name. Type it exactly to confirm."},
 	// 409: the request is fine, that person is simply already on the payroll.
 	// Two rows for one address is how somebody gets paid twice in a run.
-	CodeEmployeeExists: {http.StatusConflict, "Somebody on this payroll is already paid at that address."},
+	CodeEmployeeExists:     {http.StatusConflict, "Somebody on this payroll is already paid at that address."},
+	CodePayrollNoEmployees: {http.StatusUnprocessableEntity, "There is nobody active to pay."},
+	CodePayrollNotDraft:    {http.StatusConflict, "This payroll run has already been executed."},
+	// The one that matters. A double-clicked button, a retried request and a
+	// restored tab all produce a second execute; refusing it here is what makes
+	// paying twice impossible rather than unlikely.
+	CodePayrollKeyReused:     {http.StatusConflict, "That run key has already been used. Nobody was paid twice."},
+	CodePayrollNotConfigured: {http.StatusServiceUnavailable, "Payroll is not configured on this deployment."},
 }
 
 // APIError is what handlers return; the HTTP layer renders it to the

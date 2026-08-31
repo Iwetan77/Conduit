@@ -161,6 +161,17 @@ func New(cfg Config) http.Handler {
 	payoutsH := &handlers.Payouts{Pool: cfg.Pool, ArcRPC: arcRPCForBalances}
 	externalSettlementH := &handlers.ExternalSettlement{Pool: cfg.Pool}
 	employeesH := &handlers.Employees{Pool: cfg.Pool}
+	// The deployed ConduitPayroll. Unset, runs can be drafted and read but not
+	// executed -- the same opt-in shape the bridge uses, so a deployment
+	// without it degrades visibly rather than panicking.
+	payrollContract := strings.TrimSpace(os.Getenv("CONDUIT_PAYROLL_ADDRESS"))
+	if payrollContract == "" {
+		log.Printf("config: CONDUIT_PAYROLL_ADDRESS is not set — payroll runs can be drafted but not executed.")
+	}
+	payrollRunsH := &handlers.PayrollRuns{
+		Pool: cfg.Pool, Webhooks: dispatcher,
+		ArcRPC: arcRPCForBalances, PayrollContract: payrollContract,
+	}
 	paymentLinksH := &handlers.PaymentLinks{Pool: cfg.Pool, AppBaseURL: cfg.AppBaseURL}
 	bridgeH, err := newBridgeHandler(cfg, stableFX, dispatcher)
 	if err != nil {
@@ -504,6 +515,13 @@ func New(cfg Config) http.Handler {
 			r.Post("/employees", employeesH.Create)
 			r.Patch("/employees/{id}", employeesH.Update)
 			r.Post("/employees/{id}/archive", employeesH.Archive)
+			// Payroll: draft, read, execute, then report each currency group's
+			// outcome as it lands. Partial is an outcome, not an error.
+			r.Get("/payroll_runs", payrollRunsH.List)
+			r.Post("/payroll_runs", payrollRunsH.Create)
+			r.Get("/payroll_runs/{id}", payrollRunsH.Get)
+			r.Post("/payroll_runs/{id}/execute", payrollRunsH.Execute)
+			r.Post("/payroll_runs/{id}/legs", payrollRunsH.RecordLeg)
 			// Ends every session for the account. Authenticated because it acts
 			// on the caller's own account, and only meaningful to a session
 			// caller -- see Accounts.Logout.

@@ -1,0 +1,301 @@
+package server
+
+// Payroll runs.
+//
+// The property everything else serves: nobody is paid twice. A double-clicked
+// button, a retried request and a restored tab all produce a second execute,
+// and none of them can be prevented in a UI — so the refusal has to be here,
+// and it has to hold when two arrive at once.
+//
+// After that: what a run says it owed cannot move when somebody edits a salary,
+// and a run where one currency paid and another did not has to say so rather
+// than pretending to be one or the other.
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"sync"
+	"testing"
+)
+
+type payrollRun struct {
+	ID               string `json:"id"`
+	Status           string `json:"status"`
+	TreasuryCurrency string `json:"treasury_currency"`
+	Items            []struct {
+		ID       string  `json:"id"`
+		Name     string  `json:"name"`
+		Currency string  `json:"currency"`
+		Amount   string  `json:"amount"`
+		Status   string  `json:"status"`
+		TxHash   *string `json:"tx_hash"`
+	} `json:"items"`
+	Groups []struct {
+		Currency        string `json:"currency"`
+		Total           string `json:"total"`
+		Recipients      int    `json:"recipients"`
+		NeedsConversion bool   `json:"needs_conversion"`
+		Status          string `json:"status"`
+	} `json:"groups"`
+	WalletBalance *string `json:"wallet_balance"`
+	EstimatedGas  *string `json:"estimated_gas"`
+	BalanceCovers *bool   `json:"balance_covers"`
+}
+
+// hireThree puts three people on the payroll across two currencies, which is
+// the shape that makes "partial" possible at all.
+func hireThree(t *testing.T, srvURL, key string) {
+	t.Helper()
+	for _, spec := range []struct{ name, cur, amount string }{
+		{"Ada", "USD", "5000000"},
+		{"Grace", "USD", "3000000"},
+		{"Katherine", "EUR", "4000000"},
+	} {
+		_, addr := newSigner(t)
+		resp, _ := addEmployee(t, srvURL, key, fmt.Sprintf(
+			`{"name":%q,"address":%q,"pay_currency":%q,"pay_type":"fixed","amount":%q}`,
+			spec.name, addr, spec.cur, spec.amount))
+		if resp.status != http.StatusCreated {
+			t.Fatalf("hire %s: status=%d body=%s", spec.name, resp.status, resp.body)
+		}
+	}
+}
+
+func draftRun(t *testing.T, srvURL, key, body string) (jsonResp, payrollRun) {
+	t.Helper()
+	resp := doJSON(t, srvURL, "POST", "/v1/payroll_runs", key, body, "")
+	var run payrollRun
+	_ = json.Unmarshal([]byte(resp.body), &run)
+	return resp, run
+}
+
+// A draft is for reading before anybody is paid. It has to say what each person
+// gets, what each currency totals, which need converting, and whether the wallet
+// covers it — "you cannot afford this" belongs here, not at the signature.
+func TestPayrollDraftShowsTheWholePicture(t *testing.T) {
+	srv, key, _ := newLinkTestServer(t, 15611)
+	hireThree(t, srv.URL, key)
+
+	resp, run := draftRun(t, srv.URL, key, `{}`)
+	if resp.status != http.StatusOK {
+		t.Fatalf("draft: status=%d body=%s", resp.status, resp.body)
+	}
+	if run.Status != "draft" {
+		t.Errorf("status=%q; nothing has been paid, so it must be a draft", run.Status)
+	}
+	if len(run.Items) != 3 {
+		t.Fatalf("%d lines, want 3", len(run.Items))
+	}
+	if len(run.Groups) != 2 {
+		t.Fatalf("%d currency groups, want 2 — a run executes one disperse per currency", len(run.Groups))
+	}
+	for _, g := range run.Groups {
+		switch g.Currency {
+		case "USD":
+			if g.Total != "8000000" || g.Recipients != 2 {
+				t.Errorf("USD group = %s across %d, want 8000000 across 2", g.Total, g.Recipients)
+			}
+			if g.NeedsConversion {
+				t.Error("USD is the treasury currency and must not need converting")
+			}
+		case "EUR":
+			if !g.NeedsConversion {
+				t.Error("EUR is not the treasury currency, so it needs converting")
+			}
+		}
+	}
+	if run.EstimatedGas == nil {
+		t.Error("no gas estimate: Arc charges gas in USDC, so a business needs to know before it commits")
+	}
+}
+
+// The one that matters. Two executes with one key pay one payroll.
+func TestPayrollASecondExecuteWithTheSameKeyPaysNobodyTwice(t *testing.T) {
+	// Before the server is built: New() reads this once, at construction.
+	t.Setenv("CONDUIT_PAYROLL_ADDRESS", "0xcC4b99a2B74DA98695d4136FB7F20988621BeB11")
+	srv, key, p := newLinkTestServer(t, 15612)
+	hireThree(t, srv.URL, key)
+	_, run := draftRun(t, srv.URL, key, `{}`)
+
+	first := doJSON(t, srv.URL, "POST", "/v1/payroll_runs/"+run.ID+"/execute", key,
+		`{"run_key":"payroll-2026-08"}`, "")
+	if first.status != http.StatusOK {
+		t.Fatalf("first execute: status=%d body=%s", first.status, first.body)
+	}
+
+	// A second draft, so this is genuinely a re-use of the key rather than a
+	// re-execution of the same run -- which is the shape a double-click on a
+	// freshly reloaded page actually produces.
+	_, second := draftRun(t, srv.URL, key, `{}`)
+	dup := doJSON(t, srv.URL, "POST", "/v1/payroll_runs/"+second.ID+"/execute", key,
+		`{"run_key":"payroll-2026-08"}`, "")
+	if dup.status != http.StatusConflict {
+		t.Fatalf("re-used key: status=%d, want 409; body=%s", dup.status, dup.body)
+	}
+	if got := errCode(t, dup.body); got != "payroll_run_key_reused" {
+		t.Errorf("code=%s, want payroll_run_key_reused", got)
+	}
+
+	// The second run was never started, so nothing in it can be paid.
+	var status string
+	_ = p.QueryRow(context.Background(),
+		`SELECT status FROM payroll_runs WHERE id = $1`, second.ID).Scan(&status)
+	if status != "draft" {
+		t.Fatalf("the refused run moved to %q; it must be untouched", status)
+	}
+}
+
+// And it must hold when two arrive together, which a check in Go would not.
+func TestPayrollConcurrentExecutesLeaveExactlyOneWinner(t *testing.T) {
+	t.Setenv("CONDUIT_PAYROLL_ADDRESS", "0xcC4b99a2B74DA98695d4136FB7F20988621BeB11")
+	srv, key, _ := newLinkTestServer(t, 15613)
+	hireThree(t, srv.URL, key)
+
+	const attempts = 6
+	runs := make([]string, attempts)
+	for i := range runs {
+		_, r := draftRun(t, srv.URL, key, `{}`)
+		runs[i] = r.ID
+	}
+
+	var wg sync.WaitGroup
+	results := make([]int, attempts)
+	for i := 0; i < attempts; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			resp := doJSON(t, srv.URL, "POST", "/v1/payroll_runs/"+runs[i]+"/execute", key,
+				`{"run_key":"one-key-many-clicks"}`, "")
+			results[i] = resp.status
+		}(i)
+	}
+	wg.Wait()
+
+	winners := 0
+	for _, s := range results {
+		if s == http.StatusOK {
+			winners++
+		}
+	}
+	if winners != 1 {
+		t.Fatalf("%d of %d concurrent executes succeeded; exactly one may", winners, attempts)
+	}
+}
+
+// What a run says it owed cannot move afterwards. Editing a salary must never
+// change what a past run says it paid — the same rule as an intent's address.
+func TestARunsAmountsDoNotFollowAnEmployeesSalary(t *testing.T) {
+	srv, key, p := newLinkTestServer(t, 15614)
+	ctx := context.Background()
+	hireThree(t, srv.URL, key)
+	_, run := draftRun(t, srv.URL, key, `{}`)
+
+	var employeeID, before string
+	if err := p.QueryRow(ctx,
+		`SELECT employee_id, amount::text FROM payroll_run_items WHERE run_id = $1 ORDER BY amount LIMIT 1`,
+		run.ID).Scan(&employeeID, &before); err != nil {
+		t.Fatalf("read item: %v", err)
+	}
+
+	raise := doJSON(t, srv.URL, "PATCH", "/v1/employees/"+employeeID, key,
+		`{"pay_type":"fixed","amount":"99000000"}`, "")
+	if raise.status != http.StatusOK {
+		t.Fatalf("raise: status=%d body=%s", raise.status, raise.body)
+	}
+
+	var after string
+	_ = p.QueryRow(ctx,
+		`SELECT amount::text FROM payroll_run_items WHERE run_id = $1 AND employee_id = $2`,
+		run.ID, employeeID).Scan(&after)
+	if after != before {
+		t.Fatalf("the run followed the raise: %s -> %s", before, after)
+	}
+}
+
+// One currency paid and another failed is neither "completed" nor "failed". The
+// run has to say exactly who was paid, or the people who were not cannot be told
+// anything true.
+func TestPayrollOneCurrencyPaidAndOneFailedIsPartial(t *testing.T) {
+	t.Setenv("CONDUIT_PAYROLL_ADDRESS", "0xcC4b99a2B74DA98695d4136FB7F20988621BeB11")
+	srv, key, p := newLinkTestServer(t, 15615)
+	ctx := context.Background()
+	hireThree(t, srv.URL, key)
+	_, run := draftRun(t, srv.URL, key, `{}`)
+
+	if resp := doJSON(t, srv.URL, "POST", "/v1/payroll_runs/"+run.ID+"/execute", key,
+		`{"run_key":"partial-run"}`, ""); resp.status != http.StatusOK {
+		t.Fatalf("execute: status=%d body=%s", resp.status, resp.body)
+	}
+
+	paid := doJSON(t, srv.URL, "POST", "/v1/payroll_runs/"+run.ID+"/legs", key,
+		`{"currency":"USD","tx_hash":"0xaaaa"}`, "")
+	if paid.status != http.StatusOK {
+		t.Fatalf("record USD: status=%d body=%s", paid.status, paid.body)
+	}
+	failed := doJSON(t, srv.URL, "POST", "/v1/payroll_runs/"+run.ID+"/legs", key,
+		`{"currency":"EUR","failed":true,"error":"conversion quote expired"}`, "")
+	if failed.status != http.StatusOK {
+		t.Fatalf("record EUR: status=%d body=%s", failed.status, failed.body)
+	}
+
+	var status string
+	_ = p.QueryRow(ctx, `SELECT status FROM payroll_runs WHERE id = $1`, run.ID).Scan(&status)
+	if status != "partial" {
+		t.Fatalf("status=%q; one group paid and one did not, which is partial", status)
+	}
+
+	var final payrollRun
+	got := doJSON(t, srv.URL, "GET", "/v1/payroll_runs/"+run.ID, key, "", "")
+	_ = json.Unmarshal([]byte(got.body), &final)
+	var paidCount, failedCount int
+	for _, it := range final.Items {
+		switch it.Status {
+		case "paid":
+			paidCount++
+			if it.TxHash == nil {
+				t.Error("a paid line with no transaction is a payment nobody can find")
+			}
+		case "failed":
+			failedCount++
+		}
+	}
+	if paidCount != 2 || failedCount != 1 {
+		t.Fatalf("paid=%d failed=%d, want 2 and 1 — the run must say exactly who was paid", paidCount, failedCount)
+	}
+}
+
+// One business's payroll is not another's to draft against, read or execute.
+func TestPayrollRunsAreScopedToTheirAccount(t *testing.T) {
+	srv, keyA, _ := newLinkTestServer(t, 15616)
+	hireThree(t, srv.URL, keyA)
+	_, run := draftRun(t, srv.URL, keyA, `{}`)
+
+	resp := doJSON(t, srv.URL, "POST", "/v1/accounts", "",
+		`{"name":"Other Co","settle_currency":"USD","settle_address":"0x00000000000000000000000000000000000000f7"}`, "")
+	var other struct {
+		APIKey struct {
+			Key string `json:"key"`
+		} `json:"api_key"`
+	}
+	_ = json.Unmarshal([]byte(resp.body), &other)
+
+	if got := doJSON(t, srv.URL, "GET", "/v1/payroll_runs/"+run.ID, other.APIKey.Key, "", ""); got.status != http.StatusNotFound {
+		t.Errorf("another account read the run: status=%d", got.status)
+	}
+	if got := doJSON(t, srv.URL, "POST", "/v1/payroll_runs/"+run.ID+"/execute", other.APIKey.Key,
+		`{"run_key":"hijack"}`, ""); got.status == http.StatusOK {
+		t.Error("another account executed the run")
+	}
+}
+
+// A payroll with nobody on it is refused rather than silently producing an empty
+// run somebody then tries to execute.
+func TestAPayrollWithNobodyActiveIsRefused(t *testing.T) {
+	srv, key, _ := newLinkTestServer(t, 15617)
+	resp, _ := draftRun(t, srv.URL, key, `{}`)
+	if resp.status != http.StatusUnprocessableEntity {
+		t.Fatalf("status=%d, want 422; body=%s", resp.status, resp.body)
+	}
+}

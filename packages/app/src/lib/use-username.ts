@@ -94,8 +94,26 @@ export function useUsername(): UsernameState {
   const eligible = session || isEvm;
 
   if (session) {
-    // Session account first, then the wallet's own. See the note on the query.
-    const username = account.data?.username ?? walletLookup.data ?? null;
+    // The signed-in account is authoritative for ITSELF, and the wallet answer
+    // is only allowed to fill in for it when the wallet is demonstrably the
+    // same person's.
+    //
+    // It used to fall back unconditionally, to cover a real case: someone
+    // signed in with Google whose name was claimed against their own wallet's
+    // personal account saw /accounts/me return null and kept the anonymous dot.
+    // But "a wallet is connected" is not "this wallet is mine" -- an external
+    // wallet stays connected across sign-ins, and a stale address survives a
+    // switch for a moment. So the name claimed on one person's wallet appeared
+    // on every account signed into afterwards on that device. Somebody else's
+    // name on your account is worse than no name on your own.
+    //
+    // Matching login_wallet is exactly the condition the original fix meant:
+    // the wallet the signed-in account signs in WITH.
+    const ownsWallet =
+      !!walletAddress &&
+      !!account.data?.login_wallet &&
+      account.data.login_wallet.toLowerCase() === walletAddress.toLowerCase();
+    const username = account.data?.username ?? (ownsWallet ? walletLookup.data ?? null : null);
     const settled = !account.isLoading && (!walletAddress || !walletLookup.isLoading);
     return {
       username,

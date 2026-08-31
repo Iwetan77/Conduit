@@ -36,7 +36,18 @@ type Usernames struct {
 // stating: the database's copy exists to make an invalid row impossible from
 // ANY path, and this copy exists so a person typing a name gets told why it was
 // refused instead of a generic failure. If one changes, the other must.
-var usernamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_]{1,18}[A-Za-z0-9]$`)
+// Letters and digits only, starting with a letter. 3-20 characters.
+//
+// Underscores are gone. A name is what somebody types from memory into a send
+// box, or reads off a receipt, and an underscore is the character people most
+// reliably drop, double, or turn into a hyphen -- every one of which is a
+// payment addressed to nobody, or worse, to somebody else who took the
+// lookalike.
+//
+// Starting with a letter also means a username can never be all digits, so a
+// name can never be mistaken for an id or an amount by anything that has to
+// display the two together.
+var usernamePattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9]{2,19}$`)
 
 // Names nobody may claim.
 //
@@ -68,7 +79,7 @@ func ValidateUsername(name string) error {
 	case len(name) > 20:
 		return errors.New("username must be at most 20 characters")
 	case !usernamePattern.MatchString(name):
-		return errors.New("username may use only letters, numbers and underscores, and must start and end with a letter or number")
+		return errors.New("username may use only letters and numbers, and must start with a letter")
 	case reservedUsernames[strings.ToLower(name)]:
 		return errors.New("that username is reserved")
 	}

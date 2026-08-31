@@ -199,6 +199,13 @@ export interface Account {
    * written before the API set it, which is a real state rather than an error.
    */
   settle_address_source: "provisioned" | "login_wallet" | "external" | null;
+  /**
+   * The wallet this account signs in with, or null for an API-key account.
+   *
+   * Used to tell "this connected wallet is mine" from "this wallet happens to
+   * be connected" — a distinction the username lookup gets wrong without it.
+   */
+  login_wallet: string | null;
   livemode: boolean;
 }
 

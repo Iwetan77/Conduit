@@ -50,7 +50,14 @@ type accountResponse struct {
 	// writers set it -- which is a real state, not an error, so it is nullable
 	// rather than defaulted to something that would be a claim.
 	SettleAddressSource *string `json:"settle_address_source"`
-	Livemode            bool    `json:"livemode"`
+	// The wallet this account signs in with.
+	//
+	// Present so a client can tell whether a connected wallet actually belongs
+	// to the signed-in account. Without it the app had no way to distinguish
+	// "this wallet is mine" from "this wallet happens to be connected", and
+	// used a name bound to the second as though it were the first.
+	LoginWallet *string `json:"login_wallet"`
+	Livemode    bool    `json:"livemode"`
 	// APIKey is only ever present in the create response, exactly once.
 	APIKey *createdKey `json:"api_key,omitempty"`
 }
@@ -311,12 +318,13 @@ func (h *Accounts) Me(w http.ResponseWriter, r *http.Request) {
 		        -- would silently stop anyone from ever finishing.
 		        (settle_wallet_id IS NOT NULL AND settle_address_source = 'provisioned'),
 		        settle_address_source,
+		        login_wallet,
 		        livemode
 		   FROM accounts WHERE id = $1`,
 		principal.AccountID,
 	).Scan(&resp.ID, &resp.Name, &resp.LogoURL, &resp.Username,
 		&resp.SettleCurrency, &resp.SettleAddress, &resp.PayoutConfirmed,
-		&resp.SettlementWalletReady, &resp.SettleAddressSource, &resp.Livemode)
+		&resp.SettlementWalletReady, &resp.SettleAddressSource, &resp.LoginWallet, &resp.Livemode)
 	if err != nil {
 		writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
 		return

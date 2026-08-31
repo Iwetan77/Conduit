@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -220,5 +221,59 @@ func TestUnknownUsernameIsNotFound(t *testing.T) {
 	resp := doJSON(t, srv.URL, "GET", "/v1/usernames/nobodyhasthis", "", "", "")
 	if resp.status != http.StatusNotFound {
 		t.Fatalf("status=%d body=%s, want 404", resp.status, resp.body)
+	}
+}
+
+// A username is typed from memory into a send box and read off receipts. The
+// characters people drop, double or mistype are the ones that turn a payment
+// into one addressed to nobody -- or, once somebody registers the lookalike, to
+// the wrong person.
+func TestUsernameCharactersAreLettersAndDigitsOnly(t *testing.T) {
+	srv, key, _ := newLinkTestServer(t, 15561)
+
+	refused := []struct{ name, why string }{
+		{"iv_an", "underscore: the character most reliably mistyped as a hyphen or dropped"},
+		{"_ivan", "leading underscore"},
+		{"ivan_", "trailing underscore"},
+		{"iv-an", "hyphen"},
+		{"iv.an", "a dot reads as a domain and splits differently in every client"},
+		{"iv an", "a space cannot survive being read aloud or pasted"},
+		{"123456", "all digits: indistinguishable from an id or an amount beside one"},
+		{"1van", "leading digit, same reason"},
+		{"iv", "too short"},
+		{"ivanivanivanivanivani", "21 characters, too long"},
+	}
+	for _, c := range refused {
+		body, _ := json.Marshal(map[string]string{"username": c.name})
+		resp := doJSON(t, srv.URL, "POST", "/v1/accounts/me/username", key, string(body), "")
+		if resp.status == http.StatusOK {
+			t.Errorf("accepted %q (%s)", c.name, c.why)
+		}
+	}
+
+	// And the shape that IS allowed still works.
+	body, _ := json.Marshal(map[string]string{"username": "Ivan2"})
+	resp := doJSON(t, srv.URL, "POST", "/v1/accounts/me/username", key, string(body), "")
+	if resp.status != http.StatusOK {
+		t.Fatalf("refused a valid name: status=%d body=%s", resp.status, resp.body)
+	}
+}
+
+// The database refuses it too, not only the handler.
+//
+// Validation in Go is where a rejection can explain itself, but it is one code
+// path; the constraint holds for anything that reaches the table by any route.
+func TestUsernameShapeIsEnforcedByTheDatabase(t *testing.T) {
+	srv, _, pool := newLinkTestServer(t, 15562)
+	_ = srv
+	var id string
+	if err := pool.QueryRow(context.Background(),
+		`SELECT id FROM accounts LIMIT 1`).Scan(&id); err != nil {
+		t.Fatalf("read account: %v", err)
+	}
+	if _, err := pool.Exec(context.Background(),
+		`UPDATE accounts SET username = 'iv_an' WHERE id = $1`, id,
+	); err == nil {
+		t.Fatal("the database accepted an underscore username written directly")
 	}
 }

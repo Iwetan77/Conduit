@@ -94,21 +94,21 @@ export function useUsername(): UsernameState {
   const eligible = session || isEvm;
 
   if (session) {
-    // The signed-in account is authoritative for ITSELF, and the wallet answer
-    // is only allowed to fill in for it when the wallet is demonstrably the
-    // same person's.
+    // Fall back to the wallet's name only when the wallet is this account's own.
     //
-    // It used to fall back unconditionally, to cover a real case: someone
-    // signed in with Google whose name was claimed against their own wallet's
-    // personal account saw /accounts/me return null and kept the anonymous dot.
-    // But "a wallet is connected" is not "this wallet is mine" -- an external
-    // wallet stays connected across sign-ins, and a stale address survives a
-    // switch for a moment. So the name claimed on one person's wallet appeared
-    // on every account signed into afterwards on that device. Somebody else's
-    // name on your account is worse than no name on your own.
+    // The fallback exists for a real case: someone signed in with Google whose
+    // name was claimed against their own wallet's personal account, whose
+    // /accounts/me answers null. Matching login_wallet states that condition
+    // exactly, instead of accepting any connected wallet's answer.
     //
-    // Matching login_wallet is exactly the condition the original fix meant:
-    // the wallet the signed-in account signs in WITH.
+    // Honest scope: this is not what caused one account's name to appear on
+    // another. That was a session leak -- sign-out left the previous cs_ token
+    // in the browser, so /accounts/me was genuinely answering as the previous
+    // account (see lib/sign-out). I changed this first on a theory about a
+    // lingering external wallet, and then checked: wagmi holds ONE active
+    // connector, and signing in with Circle replaces it, so that path is not
+    // reachable. The guard stays because "my own wallet" is the condition the
+    // fallback always meant, not because it fixed anything.
     const ownsWallet =
       !!walletAddress &&
       !!account.data?.login_wallet &&

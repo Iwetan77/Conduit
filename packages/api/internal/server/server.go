@@ -160,6 +160,7 @@ func New(cfg Config) http.Handler {
 	payoutDestinationsH := &handlers.PayoutDestinations{Pool: cfg.Pool, ArcRPC: arcRPCForBalances}
 	payoutsH := &handlers.Payouts{Pool: cfg.Pool, ArcRPC: arcRPCForBalances}
 	externalSettlementH := &handlers.ExternalSettlement{Pool: cfg.Pool}
+	employeesH := &handlers.Employees{Pool: cfg.Pool}
 	paymentLinksH := &handlers.PaymentLinks{Pool: cfg.Pool, AppBaseURL: cfg.AppBaseURL}
 	bridgeH, err := newBridgeHandler(cfg, stableFX, dispatcher)
 	if err != nil {
@@ -497,6 +498,12 @@ func New(cfg Config) http.Handler {
 			// and reversible in one call.
 			r.Post("/accounts/me/settlement_address/external", externalSettlementH.SetExternal)
 			r.Post("/accounts/me/settlement_address/revert", externalSettlementH.Revert)
+			// The people a business pays. Archived rather than deleted: a
+			// removed row breaks the history of every run that paid them.
+			r.Get("/employees", employeesH.List)
+			r.Post("/employees", employeesH.Create)
+			r.Patch("/employees/{id}", employeesH.Update)
+			r.Post("/employees/{id}/archive", employeesH.Archive)
 			// Ends every session for the account. Authenticated because it acts
 			// on the caller's own account, and only meaningful to a session
 			// caller -- see Accounts.Logout.

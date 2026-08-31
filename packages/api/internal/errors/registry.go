@@ -51,6 +51,7 @@ const (
 	CodePayoutNotOnChain        Code = "payout_not_found_on_chain"
 	CodeUpstreamUnavailable     Code = "upstream_unavailable"
 	CodeConfirmationMismatch    Code = "confirmation_mismatch"
+	CodeEmployeeExists          Code = "employee_already_exists"
 )
 
 type entry struct {
@@ -134,6 +135,9 @@ var registry = map[Code]entry{
 	// friction, which is the right tool for a change that sends future income
 	// somewhere we cannot reach it.
 	CodeConfirmationMismatch: {http.StatusBadRequest, "That does not match the account name. Type it exactly to confirm."},
+	// 409: the request is fine, that person is simply already on the payroll.
+	// Two rows for one address is how somebody gets paid twice in a run.
+	CodeEmployeeExists: {http.StatusConflict, "Somebody on this payroll is already paid at that address."},
 }
 
 // APIError is what handlers return; the HTTP layer renders it to the

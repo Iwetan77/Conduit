@@ -337,6 +337,12 @@ export function WalletConnect() {
   const { identity, solanaWallets, walletsScanned, connectSolana, disconnect, connecting, error } =
     usePayerIdentity();
   const [picking, setPicking] = useState(false);
+  // Somebody pressed Connect before wallet discovery had finished.
+  //
+  // Declared with the other hooks and ABOVE every early return, like the memo
+  // below it, for the same reason: this component returns early four times.
+  const [connectWhenScanned, setConnectWhenScanned] = useState(false);
+
 
 
   // Every wallet this browser actually offers, by name.
@@ -377,6 +383,19 @@ export function WalletConnect() {
     return named.length > 0 ? named : all;
   }, [connectors]);
   const injected = evmConnectors[0];
+
+  // Acts on a press that arrived before discovery finished.
+  //
+  // ABOVE the early returns, with the other hooks, because this component
+  // returns on the first render and a hook below a conditional return is what
+  // took the site down with React #310 twice.
+  useEffect(() => {
+    if (!connectWhenScanned || !walletsScanned) return;
+    setConnectWhenScanned(false);
+    const only = solanaWallets.length === 0 && evmConnectors.length === 1;
+    if (only && injected) connect({ connector: injected });
+    else setPicking(true);
+  }, [connectWhenScanned, walletsScanned, solanaWallets.length, evmConnectors, injected, connect]);
 
   // A box, not a blank. Whatever this settles into -- a connected chip or the
   // connect buttons -- occupies roughly this space, so reserving it stops the
@@ -426,6 +445,26 @@ export function WalletConnect() {
         <div className="relative">
           <button
             onClick={() => {
+              // Pressed before discovery finished: remember the intent and act
+              // on it the moment the answer lands.
+              //
+              // This used to be disabled until the scan completed, with the
+              // label reading "Checking wallets…". The concern behind that was
+              // real -- the branch below reads solanaWallets, which is empty
+              // until the re-scan at 800ms, so the same button connected
+              // directly if you were fast and opened a picker if you were not,
+              // with nothing on screen distinguishing the two.
+              //
+              // But narrating our own plumbing is the wrong fix for it. The
+              // label answered a question nobody asked, changed the button's
+              // width for a moment, and locked out the one control somebody
+              // came to press. Waiting for the scan and THEN deciding removes
+              // the ambiguity instead of deferring it to the person clicking:
+              // one press, one outcome, whenever it happens.
+              if (!walletsScanned) {
+                setConnectWhenScanned(true);
+                return;
+              }
               // Straight through only when there is genuinely no choice to make:
               // exactly one wallet, of either family. Anything else opens the
               // list, because picking for the payer is how someone ends up
@@ -434,24 +473,11 @@ export function WalletConnect() {
               if (only && injected) connect({ connector: injected });
               else setPicking((p) => !p);
             }}
-            // Held until wallet discovery has finished.
-            //
-            // The branch above reads solanaWallets, which is empty until the
-            // re-scan at 800ms and may not be after -- so without this the same
-            // button, in the same position, with the same label, connected
-            // directly if you were fast and opened a picker if you were not.
-            // Nothing on screen distinguished the two. A control must not change
-            // what it does without changing how it looks, so it now says it is
-            // still working out the answer.
-            disabled={isPending || connecting || !walletsScanned}
+            disabled={isPending || connecting}
             className="px-4 py-2 text-scale-2 font-mono bg-signal text-signal-ink
                        hover:bg-signal/90 transition-colors disabled:opacity-50 whitespace-nowrap"
           >
-            {isPending || connecting
-              ? "Connecting..."
-              : !walletsScanned
-                ? "Checking wallets…"
-                : "Connect Wallet"}
+            {isPending || connecting || connectWhenScanned ? "Connecting..." : "Connect Wallet"}
           </button>
 
           {picking && (
@@ -513,6 +539,22 @@ export function WalletConnectCompact() {
   const { identity, solanaWallets, walletsScanned, connectSolana, disconnect, connecting } =
     usePayerIdentity();
   const [picking, setPicking] = useState(false);
+  // See the note on the desktop control: a press before discovery finishes is
+  // remembered rather than refused.
+  const [connectWhenScanned, setConnectWhenScanned] = useState(false);
+
+  // Derived up here rather than beside the button, so the effect below can
+  // depend on it while staying above the early returns. Same value either way.
+  const connector =
+    connectors.find((c) => c.id === "injected" || c.type === "injected") ?? connectors[0];
+
+  useEffect(() => {
+    if (!connectWhenScanned || !walletsScanned) return;
+    setConnectWhenScanned(false);
+    if (solanaWallets.length === 0 && connector) connect({ connector });
+    else setPicking(true);
+  }, [connectWhenScanned, walletsScanned, solanaWallets.length, connector, connect]);
+
 
   // Two sequential nulls stood here, and this component is what ArcSettlePanel
   // renders on its not-connected branch -- so a payer opening a payment link saw
@@ -542,9 +584,6 @@ export function WalletConnectCompact() {
     );
   }
 
-  const connector =
-    connectors.find((c) => c.id === "injected" || c.type === "injected") ?? connectors[0];
-
   // Side-by-side on one row — a stacked pair of full-width buttons read as
   // two competing CTAs on mobile.
   return (
@@ -552,25 +591,26 @@ export function WalletConnectCompact() {
       <div className="flex-1 relative">
         <button
           onClick={() => {
+            if (!walletsScanned) {
+              setConnectWhenScanned(true);
+              return;
+            }
             if (solanaWallets.length === 0 && connector) connect({ connector });
             else setPicking((p) => !p);
           }}
-          // Same discovery race as the desktop control above: this branches on
-          // solanaWallets, which is not final until the re-scan lands.
+          // Same discovery race as the desktop control, handled the same way:
+          // the press is remembered, not refused. Still disabled when there is
+          // genuinely nothing to connect to -- that is a real absence, not a
+          // moment of not knowing yet.
           disabled={
             isPending ||
             connecting ||
-            !walletsScanned ||
-            (!connector && solanaWallets.length === 0)
+            (walletsScanned && !connector && solanaWallets.length === 0)
           }
           className="px-4 py-2 text-scale-2 font-medium font-mono bg-signal text-signal-ink
                      w-full hover:bg-signal/90 transition-colors disabled:opacity-50 whitespace-nowrap"
         >
-          {isPending || connecting
-            ? "Connecting..."
-            : !walletsScanned
-              ? "Checking wallets…"
-              : "Connect Wallet"}
+          {isPending || connecting || connectWhenScanned ? "Connecting..." : "Connect Wallet"}
         </button>
         {picking && (
           <div className="absolute left-0 right-0 top-full mt-1 z-40 border border-border bg-surface">

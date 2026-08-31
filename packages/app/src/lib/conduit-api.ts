@@ -21,8 +21,24 @@ export function getSessionToken(): string | null {
   return window.localStorage.getItem(STORAGE_KEY);
 }
 
+/**
+ * Fired when the session token changes to a DIFFERENT one.
+ *
+ * Anything cached under the old session belongs to the old account and must go.
+ * `["account","me"]` is the sharp case: it cannot be keyed by account, because
+ * the endpoint means "whoever is signed in", so a cached entry is simply the
+ * previous person's account waiting to be served to the next one.
+ */
+export const SESSION_CHANGED_EVENT = "conduit:session-changed";
+
 export function setSessionToken(token: string): void {
+  const previous = window.localStorage.getItem(STORAGE_KEY);
   window.localStorage.setItem(STORAGE_KEY, token);
+  // Only on a real change. Re-minting the same session (the dashboard does this
+  // when a cs_ token is refreshed) must not wipe a working cache.
+  if (previous && previous !== token) {
+    window.dispatchEvent(new Event(SESSION_CHANGED_EVENT));
+  }
 }
 
 export function clearSessionToken(): void {

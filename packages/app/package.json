@@ -9,7 +9,8 @@
     "lint": "eslint src",
     "clean": "rm -rf .next",
     "smoke": "node scripts/smoke.mjs",
-    "verify": "tsc --noEmit && eslint src && next build"
+    "verify": "tsc --noEmit && eslint src && next build",
+    "session-check": "node scripts/session-isolation.mjs"
   },
   "dependencies": {
     "@circle-fin/adapter-solana": "^1.6.4",

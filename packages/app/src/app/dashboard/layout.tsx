@@ -2,6 +2,7 @@
 
 import { useMyAccount } from "@/lib/queries";
 import { SettlementWalletProvisioner } from "@/components/Dashboard/SettlementWalletProvisioner";
+import { signOutCompletely } from "@/lib/sign-out";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -394,27 +395,11 @@ function CircleDashboard({ children }: { children: React.ReactNode }) {
     };
   }, [onCircle, address]);
 
-  const signOut = async () => {
-    // Revoke server-side FIRST, while the token is still there to authenticate
-    // the call. Clearing localStorage only drops this browser's copy -- the
-    // token stays valid for the rest of its 12 hours anywhere else it reached.
-    //
-    // A failure here must not strand the user on a dashboard they asked to
-    // leave, so the local sign-out proceeds either way. The cost of that is a
-    // token that outlives the click; the cost of the alternative is a sign-out
-    // button that can refuse to work.
-    try {
-      await logout();
-    } catch {}
-
-    clearSessionToken();
-    queryClient.clear();
-    try {
-      localStorage.removeItem("conduit.lastMerchant");
-    } catch {}
-    await disconnectAsync();
-    clearCircleSession();
-  };
+  // One implementation, shared with the nav's button. These were two copies
+  // that drifted: this one did the whole job, the other cleared only half, and
+  // the half it skipped left the previous account's session in the browser for
+  // whoever signed in next. See lib/sign-out.
+  const signOut = () => signOutCompletely({ disconnect: disconnectAsync, queryClient });
 
   // Nothing rather than the sign-in screen while the answer is still unknown.
   // The dashboard's own null-until-ready below already renders as a blank

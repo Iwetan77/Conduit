@@ -17,6 +17,9 @@
 import { useContext, useEffect, useMemo, useState } from "react";
 import { useAccount, useConnect, useDisconnect } from "wagmi";
 import { CIRCLE_CONNECTOR_ID } from "@/lib/circle/connector";
+import { useQueryClient } from "@tanstack/react-query";
+import { signOutCompletely } from "@/lib/sign-out";
+import { SESSION_CHANGED_EVENT } from "@/lib/conduit-api";
 import { hasPendingResume, hasPersistedSession } from "@/lib/circle/browser";
 import { createAccountFromCircle, getSessionToken, setSessionToken } from "@/lib/conduit-api";
 import { WalletGateContext } from "@/lib/wallet-gate";
@@ -34,6 +37,10 @@ export default function CircleStack() {
   const { connectors, connectAsync } = useConnect();
   const { disconnectAsync } = useDisconnect();
   const { address, connector } = useAccount();
+  // CircleStack sits inside QueryClientProvider (see providers.tsx), so the
+  // sign-out handler can empty the cache -- which is half of what makes a
+  // sign-out actually a sign-out.
+  const queryClient = useQueryClient();
 
   useEffect(() => {
     const fire = (name: string) => window.dispatchEvent(new Event(name));
@@ -86,15 +93,11 @@ export default function CircleStack() {
     };
 
     const onSignOut = async () => {
-      // Both halves, in this order. wagmi's disconnect alone leaves the Circle
-      // session in localStorage, so the connector's isAuthorized() still says
-      // yes and the next page load silently signs the user back in — the same
-      // dead end privy-gate documents for Privy.
-      try {
-        await disconnectAsync();
-      } finally {
-        clearCircleSession();
-      }
+      // The whole job, not half of it. This used to disconnect wagmi and clear
+      // the Circle session only, leaving Conduit's own cs_ token in
+      // localStorage -- so the next person to sign in on this device was handed
+      // the previous account. See lib/sign-out.
+      await signOutCompletely({ disconnect: disconnectAsync, queryClient });
     };
 
     window.addEventListener(GOOGLE_LOGIN_EVENT, onLogin);
@@ -103,7 +106,21 @@ export default function CircleStack() {
       window.removeEventListener(GOOGLE_LOGIN_EVENT, onLogin);
       window.removeEventListener(SIGN_OUT_EVENT, onSignOut);
     };
-  }, [connectors, connectAsync, disconnectAsync, connector]);
+  }, [connectors, connectAsync, disconnectAsync, connector, queryClient]);
+
+  // A different account signed in: drop everything read as the previous one.
+  //
+  // Signing out properly already clears this (lib/sign-out), but on a phone
+  // people rarely sign out -- they close the app and come back as somebody
+  // else. Between that page load and the new token being minted, reads still go
+  // out under the OLD session, and ["account","me"] holds that answer for five
+  // minutes. This is what makes switching Google accounts show the right one
+  // even when nobody pressed sign out.
+  useEffect(() => {
+    const onSessionChanged = () => queryClient.clear();
+    window.addEventListener(SESSION_CHANGED_EVENT, onSessionChanged);
+    return () => window.removeEventListener(SESSION_CHANGED_EVENT, onSessionChanged);
+  }, [queryClient]);
 
   // Adopt a restored session into wagmi.
   //

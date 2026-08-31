@@ -54,6 +54,8 @@ const NAV = [
   { href: "/dashboard/locations", label: "Storefronts" },
   { href: "/dashboard/links", label: "Links & invoices" },
   { href: "/dashboard/send", label: "Send" },
+  { href: "/dashboard/employees", label: "Employees" },
+  { href: "/dashboard/payroll", label: "Payroll" },
   { href: "/dashboard/reconciliation", label: "Reconciliation" },
   { href: "/dashboard/developers", label: "Developers" },
   { href: "/dashboard/settings", label: "Settings" },
@@ -64,8 +66,8 @@ const NAV = [
 // the product; labelled groups make the sidebar readable at a glance.
 const NAV_GROUPS = [
   { label: "Money in", items: NAV.slice(0, 4) },
-  { label: "Money out", items: NAV.slice(4, 5) },
-  { label: "Admin", items: NAV.slice(5) },
+  { label: "Money out", items: NAV.slice(4, 7) },
+  { label: "Admin", items: NAV.slice(7) },
 ];
 
 // Who you're signed in as. The dashboard never said, so a merchant running
@@ -285,13 +287,22 @@ function CircleLoginGate() {
   const { connect, connectors, isPending } = useConnect();
   const [error, setError] = useState("");
   const circle = connectors.find((c) => c.id === CIRCLE_CONNECTOR_ID);
+  // Where they were going. Somebody who clicked a payroll link and landed on a
+  // sign-in screen saying only "Sign in to continue" has lost the thread of
+  // what they were doing; naming the destination keeps it.
+  const pathname = usePathname();
+  const destination = NAV.find((n) => pathname?.startsWith(n.href))?.label;
 
   return (
     <div className="min-h-screen text-ink flex items-center justify-center p-6">
       <div className="w-full max-w-md space-y-8 text-center">
         <div>
-          <h1 className="font-display text-3xl font-bold">Conduit Dashboard</h1>
-          <p className="text-ink-dim text-sm mt-1">Sign in to continue.</p>
+          <h1 className="font-display text-3xl font-bold">
+            {destination ?? "Conduit Dashboard"}
+          </h1>
+          <p className="text-ink-dim text-sm mt-1">
+            {destination ? `Sign in to see ${destination}.` : "Sign in to continue."}
+          </p>
         </div>
         <button
           onClick={() => {

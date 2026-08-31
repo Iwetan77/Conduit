@@ -46,6 +46,12 @@ failure is translated through this registry first.
 | `payout_not_found_on_chain` | 422 | The transaction given does not contain the transfer this payout describes. | Check the hash. A ledger built from what a client says happened is a ledger that can be told anything. |
 | `confirmation_mismatch` | 400 | The confirmation text did not match the account name. | Type it exactly. This is friction rather than security — it exists so the change cannot happen by mis-clicking. |
 | `upstream_unavailable` | 503 | A service this request depends on could not be reached. | Retry with backoff. Distinct from a definite refusal on purpose: retrying is right for one and not the other. |
+| `employee_already_exists` | 409 | Somebody on this payroll is already paid at that address. | Two rows for one address is how a person gets paid twice in a single run. Edit the existing one. |
+| `payroll_no_employees` | 422 | There is nobody active to pay. | Add employees, or un-pause them. Refused rather than producing an empty run somebody then tries to execute. |
+| `payroll_run_not_draft` | 409 | This run has already been executed. | Build a new one. A run is executed once. |
+| `payroll_run_key_reused` | 409 | That run key has already been used. **Nobody was paid twice.** | The response carries the run the key belongs to. This is the refusal that makes a double-clicked payroll button harmless. |
+| `payroll_not_configured` | 503 | Payroll is not configured on this deployment. | `CONDUIT_PAYROLL_ADDRESS` is unset, so runs can be drafted and read but not executed. |
+| `payroll_leg_not_found_on_chain` | 422 | That transaction does not contain this group's payment. | Recording a payment that did not happen would tell everybody in the group they had been paid, so the transaction is checked against the contract's own event. |
 
 ## `rate_limited` (429)
 

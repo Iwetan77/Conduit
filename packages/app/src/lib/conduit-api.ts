@@ -514,6 +514,134 @@ export function revertSettlementAddress() {
   );
 }
 
+// ── Employees and payroll ───────────────────────────────────────────────────
+
+export interface Employee {
+  id: string;
+  name: string;
+  address: string;
+  username: string | null;
+  pay_currency: string;
+  pay_type: "fixed" | "variable";
+  /** Null for a variable employee, by construction. */
+  amount: string | null;
+  status: "active" | "paused" | "archived";
+}
+
+export function listEmployees(includeArchived = false) {
+  return request<{ data: Employee[] }>(
+    `/v1/employees${includeArchived ? "?include_archived=true" : ""}`,
+  );
+}
+
+export function addEmployee(body: {
+  name: string;
+  username?: string;
+  address?: string;
+  pay_currency: string;
+  pay_type: "fixed" | "variable";
+  amount?: string;
+}) {
+  return request<Employee>("/v1/employees", { method: "POST", body });
+}
+
+/**
+ * No address. Changing where a person is paid is not an edit to their record —
+ * doing it quietly on a row a payroll run reads is how money goes elsewhere
+ * with nobody looking. Archive and re-add instead.
+ */
+export function updateEmployee(
+  id: string,
+  body: { name?: string; pay_currency?: string; pay_type?: "fixed" | "variable"; amount?: string; status?: "active" | "paused" },
+) {
+  return request<Employee>(`/v1/employees/${id}`, { method: "PATCH", body });
+}
+
+/** Never a delete: a removed row breaks the history of every run that paid them. */
+export function archiveEmployee(id: string) {
+  return request<Employee>(`/v1/employees/${id}/archive`, { method: "POST", body: {} });
+}
+
+export interface PayrollItem {
+  id: string;
+  employee_id: string;
+  name: string;
+  username: string | null;
+  address: string;
+  currency: string;
+  amount: string;
+  status: "pending" | "paid" | "failed";
+  tx_hash: string | null;
+  error: string | null;
+}
+
+export interface PayrollGroup {
+  currency: string;
+  total: string;
+  recipients: number;
+  needs_conversion: boolean;
+  status: string;
+}
+
+export interface PayrollRun {
+  id: string;
+  status: "draft" | "converting" | "executing" | "completed" | "partial" | "failed";
+  treasury_currency: string;
+  items: PayrollItem[];
+  groups: PayrollGroup[];
+  created_at: string;
+  executed_at: string | null;
+  wallet_balance?: string;
+  estimated_gas?: string;
+  balance_covers?: boolean;
+  settle_address?: string;
+  payroll_contract?: string;
+}
+
+export interface PayrollLeg {
+  currency: string;
+  token: string;
+  total: string;
+  needs_conversion: boolean;
+  recipients: string[];
+  amounts: string[];
+  run_id_hash: string;
+}
+
+/** Builds a draft and returns the whole preview. Nothing is paid. */
+export function createPayrollRun(amounts?: Record<string, string>) {
+  return request<PayrollRun>("/v1/payroll_runs", { method: "POST", body: { amounts: amounts ?? {} } });
+}
+
+export function getPayrollRun(id: string) {
+  return request<PayrollRun>(`/v1/payroll_runs/${id}`);
+}
+
+export function listPayrollRuns() {
+  return request<{ data: PayrollRun[] }>("/v1/payroll_runs");
+}
+
+/**
+ * Claims the run and returns what has to be signed.
+ *
+ * run_key is required, not optional. A double click, a retried request and a
+ * restored tab all produce a second execute, and the key is what refuses it.
+ */
+export function executePayrollRun(id: string, runKey: string) {
+  return request<{ run_id: string; status: string; spender: string; legs: PayrollLeg[] }>(
+    `/v1/payroll_runs/${id}/execute`,
+    { method: "POST", body: { run_key: runKey } },
+  );
+}
+
+/** Records one currency group's outcome. The server checks the chain. */
+export function recordPayrollLeg(
+  id: string,
+  body: { currency: string; tx_hash?: string; failed?: boolean; error?: string },
+) {
+  return request<PayrollRun>(`/v1/payroll_runs/${id}/legs`, { method: "POST", body });
+}
+
 export function listAccounts() {
   return request<{ data: Account[] }>("/v1/accounts");
 }

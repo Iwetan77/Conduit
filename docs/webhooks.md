@@ -91,13 +91,36 @@ failures) is persisted with response code and a truncated response body —
 
 ## Events
 
-`settlement_intent.created`, `settlement_intent.quoted`, `settlement.succeeded`,
-`settlement.failed`, `settlement_intent.expired`.
+**Sent today:**
 
-**Known gap as of this build:** only `settlement.succeeded` is actually enqueued anywhere
-in the handler code today. The other four are defined in the schema/spec but nothing
-calls `Enqueue` for them yet — don't rely on `settlement_intent.created` firing until this
-is closed out.
+- `settlement.succeeded`
+- `payroll.run.completed` — every line in the run paid
+- `payroll.run.partial` — one currency group paid and another did not
+- `payroll.run.failed` — nothing was paid
+
+**Defined but NOT sent:** `settlement_intent.created`, `settlement_intent.quoted`,
+`settlement.failed`, `settlement_intent.expired`. They exist in the schema and
+nothing calls `Enqueue` for them, so subscribing to one means waiting forever.
+Said plainly because the alternative is an integration that looks correct and
+never fires; the payroll events above were wired into the enqueue path
+specifically so as not to add a fifth.
+
+## `payroll.run.*` payload
+
+```json
+{
+  "type": "payroll.run.partial",
+  "data": {
+    "run_id": "pr_...",
+    "status": "partial",
+    "paid": 2,
+    "failed": 1
+  }
+}
+```
+
+`paid` and `failed` are line counts, not currency groups. On a partial run,
+`GET /v1/payroll_runs/{id}` names exactly who is in each.
 
 ## `settlement.succeeded` payload
 

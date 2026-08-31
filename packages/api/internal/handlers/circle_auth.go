@@ -82,6 +82,17 @@ func approvalSpender(data string) (string, bool) {
 func allowedApprovalSpender(spender string) bool {
 	allowed := []string{
 		strings.ToLower(strings.TrimSpace(os.Getenv("CONDUIT_ROUTER_ADDRESS"))),
+		// ConduitPayroll. Read from the environment, exactly like the router
+		// and from the same variable the payroll handler hands the browser as
+		// its `spender` -- so the address this guard permits and the address
+		// the browser is told to approve cannot drift apart. Hardcoding it
+		// here would let a redeploy break payroll silently.
+		//
+		// It was simply missing, and the resulting refusal was correct
+		// behaviour on a wrong list: every payroll run failed at the approve
+		// with "approvals are only built for Conduit's own contracts", which
+		// is true of the guard and false of the contract.
+		strings.ToLower(strings.TrimSpace(os.Getenv("CONDUIT_PAYROLL_ADDRESS"))),
 		"0x000000000022d473030f116ddee9f6b43ac78ba3", // Permit2
 		"0x0077777d7eba4688bdef3e311b846f25870a19b9", // Circle Gateway Wallet
 		"0x0022222abe238cc2c7bb1f21003f0a260052475b", // Circle Gateway Minter

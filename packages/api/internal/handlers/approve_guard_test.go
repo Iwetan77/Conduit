@@ -13,7 +13,9 @@ import (
 // stolen user token.
 func TestApprovalsAreOnlyBuiltForConduitContracts(t *testing.T) {
 	const router = "0x80f996e86C003AF309635B67A53dC6e63e623318"
+	const payroll = "0xcC4b99a2B74DA98695d4136FB7F20988621BeB11"
 	os.Setenv("CONDUIT_ROUTER_ADDRESS", router)
+	os.Setenv("CONDUIT_PAYROLL_ADDRESS", payroll)
 
 	approve := func(spender string) string {
 		return "0x095ea7b3" +
@@ -33,6 +35,10 @@ func TestApprovalsAreOnlyBuiltForConduitContracts(t *testing.T) {
 
 	for _, ok := range []struct{ name, spender string }{
 		{"our router", router},
+		// Was missing, and every payroll run failed at its approve with
+		// "approvals are only built for Conduit's own contracts" -- a refusal
+		// that was correct about the list and wrong about the contract.
+		{"our payroll contract", payroll},
 		{"permit2", "0x000000000022D473030F116dDEE9F6B43aC78BA3"},
 		{"gateway wallet", "0x0077777d7EBA4688BDeF3E311b846F25870A19B9"},
 		{"stablefx escrow", "0x867650F5eAe8df91445971f14d89fd84F0C9a9f8"},

@@ -54,7 +54,6 @@ curl -X POST https://api.example.com/v1/payment_links \
     "amount_mode": "fixed",
     "amount": "110990000",
     "settle_currency": "EUR",
-    "settle_address": "0x...storefront settle address",
     "reuse_policy": "single_use",
     "merchant_reference": "table-14/bill-8871",
     "expires_in": 3600

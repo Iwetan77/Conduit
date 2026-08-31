@@ -53,7 +53,6 @@ function BusinessIdentity() {
         name,
         logo_url: logoUrl || undefined,
         settle_currency: settleCurrency,
-        settle_address: settleAddress,
       });
       setAccount(updated);
       // The sidebar shows this account's name and other pages read its settle
@@ -106,14 +105,25 @@ function BusinessIdentity() {
               <SettleCurrencySelect value={settleCurrency} onChange={setSettleCurrency} />
             </div>
           </div>
+          {/* Shown, not edited.
+              This was a text field, validated only as well-formed hex -- which
+              accepts an address on another chain, an exchange deposit address
+              that will never credit an Arc token, and any typo that happens to
+              look right. Settlement is final, so none of those were
+              recoverable. This account owns the address below; payments land
+              there. */}
           <div>
-            <label className="text-scale-1 font-mono text-ink-dim uppercase tracking-wider block mb-1">Settle address</label>
-            <input
-              className="w-full bg-surface border border-border px-3 py-2 text-sm font-mono focus:border-signal focus:outline-none"
-              value={settleAddress}
-              onChange={(e) => setSettleAddress(e.target.value)}
-              required
-            />
+            <label className="text-scale-1 font-mono text-ink-dim uppercase tracking-wider block mb-1">
+              Settlement address
+            </label>
+            <p className="w-full bg-bg border border-border px-3 py-2 text-sm font-mono text-ink-dim break-all">
+              {settleAddress || "—"}
+            </p>
+            <p className="text-ink-dim text-xs mt-1">
+              {account.settle_address_source === "provisioned"
+                ? "This business's own wallet. Payments to you land here."
+                : "Payments to you land here."}
+            </p>
           </div>
           <button
             type="submit"

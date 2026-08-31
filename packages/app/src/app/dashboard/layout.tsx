@@ -1,7 +1,6 @@
 "use client";
 
 import { useMyAccount } from "@/lib/queries";
-import { PayoutAddressGate } from "@/components/Dashboard/PayoutAddressGate";
 import { SettlementWalletProvisioner } from "@/components/Dashboard/SettlementWalletProvisioner";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
@@ -434,13 +433,12 @@ function CircleDashboard({ children }: { children: React.ReactNode }) {
     );
   }
   if (!accountReady) return null;
-  // Asked once, before anything else in the dashboard: where should this
-  // business be paid? The account bootstrap defaults settle_address to the
-  // sign-in wallet without asking, so until this is answered a business is
-  // mixing its takings with its owner's own money by accident rather than by
-  // choice. Renders its children untouched the moment it has an answer.
+  // There used to be a blocking gate here asking where this business should be
+  // paid. The question is gone, not deferred: the account is now GIVEN an
+  // address of its own, so there is nothing to ask and nothing to interrupt
+  // anyone for. Asking was only ever a way of coping with a default nobody saw.
   return (
-    <PayoutAddressGate account={myAccount}>
+    <>
       <DashboardChrome signOut={signOut}>
         {/* Beside the dashboard, not in front of it. Creating the business's
             own settlement wallet needs a Circle challenge, and holding a
@@ -452,7 +450,7 @@ function CircleDashboard({ children }: { children: React.ReactNode }) {
         />
         {children}
       </DashboardChrome>
-    </PayoutAddressGate>
+    </>
   );
 }
 

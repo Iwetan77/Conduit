@@ -13,7 +13,7 @@ SK_KEY=$(echo "$ACCOUNT" | python3 -c 'import json,sys;print(json.load(sys.stdin
 
 INTENT=$(curl -s -X POST http://localhost:8080/v1/settlement_intents \
   -H "Authorization: Bearer $SK_KEY" -H "Idempotency-Key: $(uuidgen)" -H 'content-type: application/json' \
-  -d '{"amount":1000000,"settle_currency":"EUR","settle_address":"0xf04a181eaB4CfABf7D13CCe64737782737cD0b22","reference":"QUICKSTART"}')
+  -d '{"amount":1000000,"settle_currency":"EUR","reference":"QUICKSTART"}')
 INTENT_ID=$(echo "$INTENT" | python3 -c 'import json,sys;print(json.load(sys.stdin)["id"])')
 
 PRIVATE_KEY="$(grep PRIVATE_KEY "$REPO_ROOT/packages/contracts/.env" | cut -d= -f2-)"

@@ -32,13 +32,11 @@ export default function RequestPaymentPage() {
   const [reusePolicy, setReusePolicy] = useState<ReusePolicy>("single_use");
   const [expiresIn, setExpiresIn] = useState("3600");
   const [acceptCurrencies, setAcceptCurrencies] = useState<string[]>([]);
-  const [settleAddress, setSettleAddress] = useState("");
   // The merchant's own account address, prefilled below. Kept separately so
   // "Use my account address" can restore it after the merchant has edited the
   // field, and so we can show whether they're paying out to themselves or
   // somewhere else.
   const [accountAddress, setAccountAddress] = useState("");
-  const [editingAddress, setEditingAddress] = useState(false);
   const [busy, setBusy] = useState(false);
   const { copied, copy } = useCopy();
   const [error, setError] = useState("");
@@ -58,11 +56,7 @@ export default function RequestPaymentPage() {
     const addr = myAccount?.settle_address;
     if (!addr) return;
     setAccountAddress(addr);
-    setSettleAddress((cur) => cur || addr);
   }, [myAccount?.settle_address]);
-
-  const usingAccountAddress =
-    !!accountAddress && settleAddress.toLowerCase() === accountAddress.toLowerCase();
 
   const toggleAccept = (c: string) => {
     setAcceptCurrencies((prev) => (prev.includes(c) ? prev.filter((x) => x !== c) : [...prev, c]));
@@ -80,7 +74,6 @@ export default function RequestPaymentPage() {
         min_amount: amountMode !== "fixed" && minAmount ? toMinorUnits(minAmount, decimals) : undefined,
         max_amount: amountMode !== "fixed" && maxAmount ? toMinorUnits(maxAmount, decimals) : undefined,
         settle_currency: settleCurrency,
-        settle_address: settleAddress,
         accept_currencies: acceptCurrencies.length ? acceptCurrencies : undefined,
         description: description || undefined,
         merchant_reference: merchantReference || undefined,
@@ -211,48 +204,18 @@ export default function RequestPaymentPage() {
           </div>
         )}
 
+        {/* Where this link settles is not a choice made per link.
+            It was: an editable address, defaulting to the account's, with "use
+            a different address" beside it. That is one text box per payment
+            request pointing at wherever somebody pasted -- and a link outlives
+            the moment it was made, printed and pasted and paid weeks later.
+            It settles to this business's own address, full stop. */}
         <div>
-          <label className="text-scale-1 font-mono text-ink-dim uppercase tracking-wider block mb-1">Settle to address</label>
-
-          {/* Default: pay out to the merchant's own account address, shown as
-              a settled fact rather than an empty box. "Use a different address"
-              swaps in an editable field for the case where this link's money
-              should land somewhere else. */}
-          {!editingAddress && usingAccountAddress ? (
-            <div className="flex items-center justify-between gap-2 bg-surface border border-border px-3 py-2">
-              <span className="text-sm font-mono text-ink truncate" title={accountAddress}>
-                {shortenAddress(accountAddress)}
-                <span className="text-ink-dim ml-2 text-xs">your account</span>
-              </span>
-              <button
-                type="button"
-                onClick={() => { setEditingAddress(true); setSettleAddress(""); }}
-                className="shrink-0 text-xs font-mono text-signal hover:underline"
-              >
-                Use a different address
-              </button>
-            </div>
-          ) : (
-            <div className="space-y-1">
-              <input
-                className="w-full bg-surface border border-border px-3 py-2 text-sm font-mono focus:border-signal focus:outline-none"
-                placeholder="0x..."
-                value={settleAddress}
-                onChange={(e) => setSettleAddress(e.target.value)}
-                required
-                autoFocus={editingAddress}
-              />
-              {accountAddress && (
-                <button
-                  type="button"
-                  onClick={() => { setSettleAddress(accountAddress); setEditingAddress(false); }}
-                  className="text-xs font-mono text-ink-dim hover:text-ink"
-                >
-                  ← Use my account address
-                </button>
-              )}
-            </div>
-          )}
+          <label className="text-scale-1 font-mono text-ink-dim uppercase tracking-wider block mb-1">Settles to</label>
+          <p className="bg-bg border border-border px-3 py-2 text-sm font-mono text-ink-dim truncate" title={accountAddress}>
+            {accountAddress ? shortenAddress(accountAddress) : "—"}
+            <span className="ml-2 text-xs">your business wallet</span>
+          </p>
         </div>
 
         <div>

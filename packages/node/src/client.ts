@@ -25,7 +25,13 @@ export interface SettlementIntent {
 export interface CreateSettlementIntentParams {
   amount: string | number;
   settle_currency: string;
-  settle_address: string;
+  /**
+   * Removed. An intent settles to the address of the account that created it,
+   * derived server-side and snapshotted onto the intent. The API rejects this
+   * field rather than ignoring it, so leaving it in place would turn every
+   * create into a 400 rather than quietly settling somewhere unexpected.
+   */
+  settle_address?: never;
   accept_currencies?: string[];
   reference?: string;
   expires_in?: number;

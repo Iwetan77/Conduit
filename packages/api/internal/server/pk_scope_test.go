@@ -46,7 +46,7 @@ func TestPkKeyIsNotACredential(t *testing.T) {
 
 	// A real intent to aim at, created the way a merchant's server would.
 	resp := doJSON(t, srv.URL, "POST", "/v1/settlement_intents", secretKey,
-		`{"amount":7000000,"settle_currency":"USD","settle_address":"0x0000000000000000000000000000000000000009","reference":"order_1481"}`, "")
+		`{"amount":7000000,"settle_currency":"USD","reference":"order_1481"}`, "")
 	if resp.status != http.StatusCreated {
 		t.Fatalf("create intent: status=%d body=%s", resp.status, resp.body)
 	}
@@ -74,7 +74,7 @@ func TestPkKeyIsNotACredential(t *testing.T) {
 	// Creating a charge is the sk_ key's job -- it is what fixes the amount
 	// server-side so the browser cannot tamper with it.
 	resp = doJSON(t, srv.URL, "POST", "/v1/settlement_intents", pkKey,
-		`{"amount":1,"settle_currency":"USD","settle_address":"0x0000000000000000000000000000000000000009"}`, "")
+		`{"amount":1,"settle_currency":"USD"}`, "")
 	if resp.status != http.StatusUnauthorized {
 		t.Errorf("pk key creating a charge: status=%d, want 401; body=%s", resp.status, resp.body)
 	}

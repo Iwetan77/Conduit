@@ -19,7 +19,6 @@ curl -s -X POST "$API/v1/payment_links" \
     "amount_mode": "fixed",
     "amount": "25000000",
     "settle_currency": "EURC",
-    "settle_address": "0xYourSettleAddress",
     "reuse_policy": "single_use",
     "expires_at": "2026-08-31T00:00:00Z",
     "description": "Invoice #1042",

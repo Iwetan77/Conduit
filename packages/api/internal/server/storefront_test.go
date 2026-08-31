@@ -29,7 +29,7 @@ func TestStorefrontLink(t *testing.T) {
 	srv, key, _ := newLinkTestServer(t, 15506)
 
 	resp := doJSON(t, srv.URL, "POST", "/v1/accounts/sub", key,
-		`{"name":"Shibuya store","settle_currency":"EUR","settle_address":"0x00000000000000000000000000000000000000AA"}`, "")
+		`{"name":"Shibuya store","settle_currency":"EUR"}`, "")
 	if resp.status != http.StatusCreated {
 		t.Fatalf("create storefront: status=%d body=%s", resp.status, resp.body)
 	}
@@ -53,9 +53,19 @@ func TestStorefrontLink(t *testing.T) {
 	if link.ReusePolicy != "multi_use" {
 		t.Errorf("reuse_policy = %q, want multi_use", link.ReusePolicy)
 	}
-	// Derived from the storefront, which is what makes takings attributable.
-	if link.SettleCurrency != "EUR" || !strings.EqualFold(link.SettleAddress, "0x00000000000000000000000000000000000000AA") {
-		t.Errorf("link should settle to the storefront: got %s / %s", link.SettleCurrency, link.SettleAddress)
+	// Currency is the storefront's own; the ADDRESS is its parent's, inherited
+	// when the storefront was created.
+	//
+	// A storefront is a place the same business takes money, not a different
+	// business, so it has never needed an address of its own -- and letting one
+	// be typed per till was five separate chances to point a location's takings
+	// somewhere unrecoverable. Attribution comes from the account the link is
+	// bound to, which is what the settlement row records, not from the address.
+	if link.SettleCurrency != "EUR" {
+		t.Errorf("settle_currency = %q, want the storefront's own EUR", link.SettleCurrency)
+	}
+	if !strings.EqualFold(link.SettleAddress, "0x0000000000000000000000000000000000000009") {
+		t.Errorf("link settles to %s, want the parent's address it inherited", link.SettleAddress)
 	}
 	if link.Description != "Shibuya store" {
 		t.Errorf("description = %q, want the storefront name", link.Description)
@@ -100,7 +110,7 @@ func TestStorefrontLinkTenancy(t *testing.T) {
 	srv, key, _ := newLinkTestServer(t, 15507)
 
 	resp := doJSON(t, srv.URL, "POST", "/v1/accounts", "",
-		`{"name":"Other Co","settle_currency":"USD","settle_address":"0x00000000000000000000000000000000000000BB"}`, "")
+		`{"name":"Other Co","settle_currency":"USD","settle_address":"0x0000000000000000000000000000000000000009"}`, "")
 	var other struct {
 		ID string `json:"id"`
 	}
@@ -144,7 +154,7 @@ func TestMultiUseSurvivesSettlement(t *testing.T) {
 	mk := func(reuse string) string {
 		t.Helper()
 		r := doJSON(t, srv.URL, "POST", "/v1/payment_links", key,
-			`{"amount_mode":"fixed","amount":5000,"settle_currency":"USD","settle_address":"0x0000000000000000000000000000000000000009","reuse_policy":"`+reuse+`"}`, "")
+			`{"amount_mode":"fixed","amount":5000,"settle_currency":"USD","reuse_policy":"`+reuse+`"}`, "")
 		var l struct {
 			ID string `json:"id"`
 		}

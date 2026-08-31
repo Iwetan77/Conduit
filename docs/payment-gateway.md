@@ -36,7 +36,6 @@ curl -s -X POST https://conduit-z56x.onrender.com/v1/settlement_intents \
   -d '{
     "amount": 7000000,
     "settle_currency": "USD",
-    "settle_address": "0xYourMerchantWallet",
     "return_url": "https://yourstore.com/thank-you",
     "reference": "order_1481",
     "metadata": { "order_id": "1481" }

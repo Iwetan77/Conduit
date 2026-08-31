@@ -26,17 +26,20 @@ type PaymentLinks struct {
 }
 
 type createLinkRequest struct {
-	AmountMode        string     `json:"amount_mode"` // fixed | open | open_with_suggested
-	Amount            *bigAmount `json:"amount"`      // required for fixed; suggested default for open_with_suggested; must be omitted for open
-	MinAmount         *bigAmount `json:"min_amount"`  // open / open_with_suggested only
-	MaxAmount         *bigAmount `json:"max_amount"`  // open / open_with_suggested only
-	SettleCurrency    string     `json:"settle_currency"`
-	SettleAddress     string     `json:"settle_address"`
-	AcceptCurrencies  []string   `json:"accept_currencies"`
-	Description       string     `json:"description"`
-	MerchantReference string     `json:"merchant_reference"`
-	ReusePolicy       string     `json:"reuse_policy"` // single_use (default) | multi_use
-	ExpiresIn         int64      `json:"expires_in"`   // seconds; 0/omitted = no expiry (a reusable QR isn't obligated to expire)
+	AmountMode     string     `json:"amount_mode"` // fixed | open | open_with_suggested
+	Amount         *bigAmount `json:"amount"`      // required for fixed; suggested default for open_with_suggested; must be omitted for open
+	MinAmount      *bigAmount `json:"min_amount"`  // open / open_with_suggested only
+	MaxAmount      *bigAmount `json:"max_amount"`  // open / open_with_suggested only
+	SettleCurrency string     `json:"settle_currency"`
+	// NOT the address this will settle to -- that is derived from the account.
+	// Present only so a caller still sending one can be refused rather than
+	// silently ignored. See rejectSuppliedSettleAddress.
+	SuppliedSettleAddress *string  `json:"settle_address"`
+	AcceptCurrencies      []string `json:"accept_currencies"`
+	Description           string   `json:"description"`
+	MerchantReference     string   `json:"merchant_reference"`
+	ReusePolicy           string   `json:"reuse_policy"` // single_use (default) | multi_use
+	ExpiresIn             int64    `json:"expires_in"`   // seconds; 0/omitted = no expiry (a reusable QR isn't obligated to expire)
 }
 
 type linkResponse struct {
@@ -148,8 +151,16 @@ func (h *PaymentLinks) Create(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, apierrors.E(apierrors.CodeCurrencyNotSupported, "settle_currency"))
 		return
 	}
-	if req.SettleAddress == "" {
-		writeErr(w, apierrors.E(apierrors.CodeInvalidRequest, "settle_address"))
+	if e := rejectSuppliedSettleAddress(req.SuppliedSettleAddress); e != nil {
+		writeErr(w, e)
+		return
+	}
+	// The link's address comes from the account that owns it and is snapshotted
+	// into the row, exactly as the storefront path already did. Every path now
+	// looks like that one.
+	settleAddress, e := deriveSettleAddress(r.Context(), h.Pool, principal.AccountID)
+	if e != nil {
+		writeErr(w, e)
 		return
 	}
 	if req.ReusePolicy == "" {
@@ -182,7 +193,7 @@ func (h *PaymentLinks) Create(w http.ResponseWriter, r *http.Request) {
 		  accept_currencies, description, merchant_reference, reuse_policy, status, expires_at, livemode)
 		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'active',$13,$14)`,
 		id, principal.AccountID, req.AmountMode, bigStrDB(req.Amount.bi()), bigStrDB(req.MinAmount.bi()), bigStrDB(req.MaxAmount.bi()),
-		req.SettleCurrency, req.SettleAddress, req.AcceptCurrencies, nullIfEmpty(req.Description),
+		req.SettleCurrency, settleAddress, req.AcceptCurrencies, nullIfEmpty(req.Description),
 		nullIfEmpty(req.MerchantReference), req.ReusePolicy, expiresAt, principal.Livemode,
 	)
 	if err != nil {
@@ -191,7 +202,7 @@ func (h *PaymentLinks) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusCreated, h.toResponse(id, req.AmountMode, bigStrDisplay(req.Amount.bi()), bigStrDisplay(req.MinAmount.bi()), bigStrDisplay(req.MaxAmount.bi()),
-		req.SettleCurrency, req.SettleAddress, req.AcceptCurrencies, req.Description, req.MerchantReference,
+		req.SettleCurrency, settleAddress, req.AcceptCurrencies, req.Description, req.MerchantReference,
 		req.ReusePolicy, "active", expiresAt, time.Now()))
 }
 

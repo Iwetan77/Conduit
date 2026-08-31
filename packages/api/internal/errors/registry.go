@@ -43,6 +43,7 @@ const (
 	CodeSettlementWalletUnknown  Code = "settlement_wallet_unknown"
 	CodeSettlementWalletInvalid  Code = "settlement_wallet_invalid"
 	CodeSettlementWalletSet      Code = "settlement_wallet_already_set"
+	CodeSettleAddressDerived     Code = "settle_address_derived"
 )
 
 type entry struct {
@@ -102,6 +103,10 @@ var registry = map[Code]entry{
 	// Moving where income lands is a deliberate act with its own confirmation,
 	// not something a repeated provisioning call should do quietly.
 	CodeSettlementWalletSet: {http.StatusConflict, "This account already has a settlement wallet."},
+	// 400 rather than ignoring the field. An integration that keeps sending an
+	// address and keeps getting 201 back would be paid somewhere other than it
+	// asked for, with nothing anywhere reporting a problem.
+	CodeSettleAddressDerived: {http.StatusBadRequest, "settle_address is derived from the account and can no longer be set on this request. Remove it."},
 }
 
 // APIError is what handlers return; the HTTP layer renders it to the

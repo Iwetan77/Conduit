@@ -67,60 +67,65 @@ func TestConfirmingWithoutChangingTheAddress(t *testing.T) {
 	}
 }
 
-// Naming a different address is itself the answer. Asking again afterwards is
-// the kind of prompt people click through without reading.
-func TestSettingAnAddressConfirmsItImplicitly(t *testing.T) {
+// Naming a different address is no longer something this endpoint does.
+//
+// It used to be, validated only as "20 bytes of well-formed hex" -- which
+// accepts an address on another chain, an exchange deposit address that will
+// never credit an Arc token, a contract that cannot receive, and any typo that
+// happens to be well formed. Settlement is on-chain and final, so none of those
+// were recoverable, and the account had no way to prove the address was even
+// its own.
+//
+// The account now settles to the wallet provisioned for it. Sending income
+// somewhere else is a deliberate act with its own proof of control, not a field
+// on a general-purpose update.
+func TestUpdateRefusesToSetAPayoutAddress(t *testing.T) {
 	srv, key, _ := newLinkTestServer(t, 15531)
-	_, _ = accountMe(t, srv.URL, key)
+	_, before := accountMe(t, srv.URL, key)
 
-	// The account's own id is needed for the update route.
 	resp := doJSON(t, srv.URL, "GET", "/v1/accounts/me", key, "", "")
 	var me struct {
 		ID string `json:"id"`
 	}
 	_ = json.Unmarshal([]byte(resp.body), &me)
 
-	business := "0x00000000000000000000000000000000000000bb"
 	upd := doJSON(t, srv.URL, "PATCH", "/v1/accounts/"+me.ID, key,
-		`{"settle_address":"`+business+`"}`, "")
-	if upd.status != http.StatusOK {
-		t.Fatalf("update: status=%d body=%s", upd.status, upd.body)
+		`{"settle_address":"0x00000000000000000000000000000000000000bb"}`, "")
+	if upd.status != http.StatusBadRequest {
+		t.Fatalf("update: status=%d, want 400; body=%s", upd.status, upd.body)
+	}
+	// Refused, not ignored. An integration that kept sending an address and
+	// kept getting 200 back would be paid somewhere other than it asked for,
+	// with nothing anywhere reporting a problem.
+	if got := errCode(t, upd.body); got != "settle_address_derived" {
+		t.Errorf("code=%s, want settle_address_derived", got)
 	}
 
-	confirmed, addr := accountMe(t, srv.URL, key)
-	if !confirmed {
-		t.Fatal("setting a payout address did not count as confirming it")
-	}
-	if addr != business {
-		t.Fatalf("settle_address = %s, want %s", addr, business)
+	_, after := accountMe(t, srv.URL, key)
+	if after != before {
+		t.Fatalf("a refused update still moved the address: %s -> %s", before, after)
 	}
 }
 
-// A payout address is where money goes and settlement is final, so a malformed
-// one must never be stored however it arrived. We cannot undo an on-chain
-// transfer to a typo.
-func TestAMalformedPayoutAddressIsRefused(t *testing.T) {
+// Everything else on the update still works -- this removed one field, not the
+// endpoint.
+func TestUpdateStillChangesTheNameAndCurrency(t *testing.T) {
 	srv, key, _ := newLinkTestServer(t, 15532)
 	resp := doJSON(t, srv.URL, "GET", "/v1/accounts/me", key, "", "")
 	var me struct {
 		ID string `json:"id"`
 	}
 	_ = json.Unmarshal([]byte(resp.body), &me)
-	_, before := accountMe(t, srv.URL, key)
 
-	for _, bad := range []string{"not-an-address", "0x123", "", "0xZZZZ2c8b0d4089b883d7b9e5a7986ba33ff51125"} {
-		body, _ := json.Marshal(map[string]string{"settle_address": bad})
-		upd := doJSON(t, srv.URL, "PATCH", "/v1/accounts/"+me.ID, key, string(body), "")
-		// An empty string is COALESCE'd away rather than rejected, which is the
-		// existing "field omitted" behaviour and is fine -- what must never
-		// happen is a bad value being written.
-		if bad != "" && upd.status == http.StatusOK {
-			t.Fatalf("stored %q as a payout address", bad)
-		}
+	upd := doJSON(t, srv.URL, "PATCH", "/v1/accounts/"+me.ID, key, `{"name":"Renamed Co"}`, "")
+	if upd.status != http.StatusOK {
+		t.Fatalf("update: status=%d body=%s", upd.status, upd.body)
 	}
-
-	_, after := accountMe(t, srv.URL, key)
-	if after != before {
-		t.Fatalf("a refused update still changed the address: %s -> %s", before, after)
+	var out struct {
+		Name string `json:"name"`
+	}
+	_ = json.Unmarshal([]byte(upd.body), &out)
+	if out.Name != "Renamed Co" {
+		t.Fatalf("name = %q, want Renamed Co", out.Name)
 	}
 }

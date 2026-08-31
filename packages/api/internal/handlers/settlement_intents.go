@@ -44,13 +44,17 @@ type SettlementIntents struct {
 }
 
 type createIntentRequest struct {
-	Amount           *bigAmount     `json:"amount"` // string or number; see big_amount.go
-	SettleCurrency   string         `json:"settle_currency"`
-	SettleAddress    string         `json:"settle_address"`
-	AcceptCurrencies []string       `json:"accept_currencies"`
-	Reference        string         `json:"reference"`
-	ExpiresIn        int64          `json:"expires_in"`
-	Metadata         map[string]any `json:"metadata"`
+	Amount         *bigAmount `json:"amount"` // string or number; see big_amount.go
+	SettleCurrency string     `json:"settle_currency"`
+	// NOT the address this will settle to -- that is derived from the account.
+	// This field exists only to detect a caller still sending one, so it can be
+	// refused rather than silently dropped. Named for what it is: something
+	// supplied, and rejected. See rejectSuppliedSettleAddress.
+	SuppliedSettleAddress *string        `json:"settle_address"`
+	AcceptCurrencies      []string       `json:"accept_currencies"`
+	Reference             string         `json:"reference"`
+	ExpiresIn             int64          `json:"expires_in"`
+	Metadata              map[string]any `json:"metadata"`
 	// SourceChain: "arc" (default, today's behavior, no bridge) or a CCTP
 	// source domain name like "solana". Non-"arc" runs a bridging pre-stage
 	// (internal/bridge) before the existing quote/settle path -- see
@@ -82,10 +86,12 @@ func validReturnURL(raw string) bool {
 }
 
 type intentResponse struct {
-	ID               string         `json:"id"`
-	Status           string         `json:"status"`
-	Amount           string         `json:"amount"`
-	SettleCurrency   string         `json:"settle_currency"`
+	ID             string `json:"id"`
+	Status         string `json:"status"`
+	Amount         string `json:"amount"`
+	SettleCurrency string `json:"settle_currency"`
+	// Where this intent settles, as snapshotted when it was created. Reported,
+	// never accepted -- see createIntentRequest.
 	SettleAddress    string         `json:"settle_address"`
 	AcceptCurrencies []string       `json:"accept_currencies"`
 	Reference        string         `json:"reference,omitempty"`
@@ -121,8 +127,15 @@ func (h *SettlementIntents) Create(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, apierrors.E(apierrors.CodeCurrencyNotSupported, "settle_currency"))
 		return
 	}
-	if req.SettleAddress == "" {
-		writeErr(w, apierrors.E(apierrors.CodeInvalidRequest, "settle_address"))
+	if e := rejectSuppliedSettleAddress(req.SuppliedSettleAddress); e != nil {
+		writeErr(w, e)
+		return
+	}
+	// One source, the owning account, snapshotted into the row below exactly as
+	// before. Only where the value comes from has changed.
+	settleAddress, e := deriveSettleAddress(r.Context(), h.Pool, principal.AccountID)
+	if e != nil {
+		writeErr(w, e)
 		return
 	}
 	if !validReturnURL(req.ReturnURL) {
@@ -154,7 +167,7 @@ func (h *SettlementIntents) Create(w http.ResponseWriter, r *http.Request) {
 		`INSERT INTO settlement_intents
 		 (id, account_id, amount, settle_currency, settle_address, accept_currencies, status, reference, metadata, expires_at, livemode, source_chain, return_url)
 		 VALUES ($1,$2,$3,$4,$5,$6,'created',$7,$8,$9,$10,$11,$12)`,
-		id, principal.AccountID, req.Amount.String(), req.SettleCurrency, req.SettleAddress,
+		id, principal.AccountID, req.Amount.String(), req.SettleCurrency, settleAddress,
 		req.AcceptCurrencies, nullIfEmpty(req.Reference), metadataJSON, expiresAt, principal.Livemode, req.SourceChain,
 		nullIfEmpty(req.ReturnURL),
 	)
@@ -164,7 +177,7 @@ func (h *SettlementIntents) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusCreated, h.toResponse(id, req.Amount.String(), "created", req.SettleCurrency,
-		req.SettleAddress, req.AcceptCurrencies, req.Reference, req.Metadata, expiresAt, time.Now(), req.SourceChain))
+		settleAddress, req.AcceptCurrencies, req.Reference, req.Metadata, expiresAt, time.Now(), req.SourceChain))
 }
 
 type createDirectIntentRequest struct {
@@ -220,8 +233,8 @@ func (h *SettlementIntents) CreateDirect(w http.ResponseWriter, r *http.Request)
 	}
 	req.SettleCurrency = settleInfo.ISO
 
-	if req.SettleAddress == "" {
-		writeErr(w, apierrors.E(apierrors.CodeInvalidRequest, "settle_address"))
+	if e := rejectSuppliedSettleAddress(req.SuppliedSettleAddress); e != nil {
+		writeErr(w, e)
 		return
 	}
 
@@ -229,6 +242,15 @@ func (h *SettlementIntents) CreateDirect(w http.ResponseWriter, r *http.Request)
 	accountID, err := h.personalAccountForWallet(ctx, req.PayerWallet, req.SettleCurrency)
 	if err != nil {
 		writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
+		return
+	}
+	// The payer's own account, which settles to the wallet that signed in --
+	// derived here for the same reason as everywhere else, even though on this
+	// path it can only ever be the payer's own address. One rule, no exception
+	// to remember.
+	settleAddress, e := deriveSettleAddress(ctx, h.Pool, accountID)
+	if e != nil {
+		writeErr(w, e)
 		return
 	}
 
@@ -254,7 +276,7 @@ func (h *SettlementIntents) CreateDirect(w http.ResponseWriter, r *http.Request)
 		`INSERT INTO settlement_intents
 		 (id, account_id, amount, settle_currency, settle_address, accept_currencies, status, reference, metadata, expires_at, livemode, source_chain)
 		 VALUES ($1,$2,$3,$4,$5,$6,'created',$7,$8,$9,false,$10)`,
-		id, accountID, req.Amount.String(), req.SettleCurrency, req.SettleAddress,
+		id, accountID, req.Amount.String(), req.SettleCurrency, settleAddress,
 		req.AcceptCurrencies, nullIfEmpty(req.Reference), metadataJSON, expiresAt, req.SourceChain,
 	)
 	if err != nil {
@@ -263,7 +285,7 @@ func (h *SettlementIntents) CreateDirect(w http.ResponseWriter, r *http.Request)
 	}
 
 	writeJSON(w, http.StatusCreated, h.toResponse(id, req.Amount.String(), "created", req.SettleCurrency,
-		req.SettleAddress, req.AcceptCurrencies, req.Reference, req.Metadata, expiresAt, time.Now(), req.SourceChain))
+		settleAddress, req.AcceptCurrencies, req.Reference, req.Metadata, expiresAt, time.Now(), req.SourceChain))
 }
 
 // personalAccountForWallet returns the wallet-keyed personal account for
@@ -310,8 +332,10 @@ func personalAccountForWallet(ctx context.Context, pool *pgxpool.Pool, wallet, s
 	// "Personal 0xa51dd4...b0..." header on mobile.
 	name := "Personal"
 	_, err = pool.Exec(ctx,
-		`INSERT INTO accounts (id, name, settle_currency, settle_address, login_wallet, livemode)
-		 VALUES ($1,$2,$3,$4,$5,false)
+		// 'login_wallet' is the literal truth here and not a default: a payer's
+		// account settles to the wallet that signed in, by definition.
+		`INSERT INTO accounts (id, name, settle_currency, settle_address, login_wallet, settle_address_source, livemode)
+		 VALUES ($1,$2,$3,$4,$5,'login_wallet',false)
 		 ON CONFLICT DO NOTHING`,
 		accountID, name, settleCurrency, wallet, wallet,
 	)

@@ -467,7 +467,7 @@ func TestPaymentLinksRefusedUntilTheBusinessHasItsOwnWallet(t *testing.T) {
 	srv, pool := newSettlementTestServer(t, 15547, "TEST_API_KEY:placeholder:placeholder")
 	session := seedMerchant(t, pool, "acct_notready", "0x00000000000000000000000000000000000000e1", "")
 
-	body := `{"amount_mode":"fixed","amount":50000,"settle_currency":"USD","settle_address":"0x00000000000000000000000000000000000000e1"}`
+	body := `{"amount_mode":"fixed","amount":50000,"settle_currency":"USD"}`
 	resp := doJSON(t, srv.URL, "POST", "/v1/payment_links", session, body, "")
 	if resp.status != http.StatusConflict {
 		t.Fatalf("status=%d, want 409; body=%s", resp.status, resp.body)
@@ -494,9 +494,77 @@ func TestPaymentLinksRefusedUntilTheBusinessHasItsOwnWallet(t *testing.T) {
 // this check exists to catch the silent case, not to break integrations.
 func TestApiKeyAccountsAreUnaffectedByTheReadinessCheck(t *testing.T) {
 	srv, key, _ := newLinkTestServer(t, 15548)
-	body := `{"amount_mode":"fixed","amount":1000,"settle_currency":"USD","settle_address":"0x0000000000000000000000000000000000000009"}`
+	body := `{"amount_mode":"fixed","amount":1000,"settle_currency":"USD"}`
 	resp := doJSON(t, srv.URL, "POST", "/v1/payment_links", key, body, "")
 	if resp.status != http.StatusCreated {
 		t.Fatalf("status=%d, want 201; body=%s", resp.status, resp.body)
+	}
+}
+
+// An intent records where it was going when it was made.
+//
+// This is the property that makes changing an account's settlement address safe
+// at all: a payment somebody already agreed to cannot be redirected afterwards,
+// and no link has to be reissued when a merchant moves where income lands. The
+// address is derived at creation and snapshotted -- never looked up at pay time.
+func TestAnIntentsAddressIsSnapshottedNotLookedUp(t *testing.T) {
+	srv, key, pool := newLinkTestServer(t, 15549)
+	ctx := context.Background()
+
+	var accountID, original string
+	if err := pool.QueryRow(ctx,
+		`SELECT id, settle_address FROM accounts WHERE parent_id IS NULL ORDER BY created_at LIMIT 1`,
+	).Scan(&accountID, &original); err != nil {
+		t.Fatalf("read account: %v", err)
+	}
+
+	resp := doJSON(t, srv.URL, "POST", "/v1/settlement_intents", key,
+		`{"amount":"50000","settle_currency":"USD"}`, "")
+	if resp.status != http.StatusCreated {
+		t.Fatalf("create intent: status=%d body=%s", resp.status, resp.body)
+	}
+	var intent struct {
+		ID            string `json:"id"`
+		SettleAddress string `json:"settle_address"`
+	}
+	if err := json.Unmarshal([]byte(resp.body), &intent); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	// Derived from the account, not from the request -- the request did not
+	// carry one and could not have.
+	if !strings.EqualFold(intent.SettleAddress, original) {
+		t.Fatalf("intent settles to %s, want the account's %s", intent.SettleAddress, original)
+	}
+
+	// The account moves. Directly, because the only paths that do this are
+	// provisioning and the advanced external setting, and neither is what is
+	// under test here.
+	moved := "0x00000000000000000000000000000000000000ff"
+	if _, err := pool.Exec(ctx,
+		`UPDATE accounts SET settle_address = $1 WHERE id = $2`, moved, accountID,
+	); err != nil {
+		t.Fatalf("move the account's address: %v", err)
+	}
+
+	var stored string
+	if err := pool.QueryRow(ctx,
+		`SELECT settle_address FROM settlement_intents WHERE id = $1`, intent.ID,
+	).Scan(&stored); err != nil {
+		t.Fatalf("read intent: %v", err)
+	}
+	if !strings.EqualFold(stored, original) {
+		t.Fatalf("the intent followed the account to %s; it must still say %s", stored, original)
+	}
+
+	// And a NEW intent picks up the new address, so the snapshot is a snapshot
+	// rather than a value frozen at some earlier point.
+	next := doJSON(t, srv.URL, "POST", "/v1/settlement_intents", key,
+		`{"amount":"50000","settle_currency":"USD"}`, "")
+	var second struct {
+		SettleAddress string `json:"settle_address"`
+	}
+	_ = json.Unmarshal([]byte(next.body), &second)
+	if !strings.EqualFold(second.SettleAddress, moved) {
+		t.Fatalf("a new intent settles to %s, want the account's current %s", second.SettleAddress, moved)
 	}
 }

@@ -23,7 +23,7 @@ func TestStorefrontAPIKey(t *testing.T) {
 	srv, parentKey, _ := newLinkTestServer(t, 15509)
 
 	resp := doJSON(t, srv.URL, "POST", "/v1/accounts/sub", parentKey,
-		`{"name":"Kitchen till","settle_currency":"EUR","settle_address":"0x00000000000000000000000000000000000000CC"}`, "")
+		`{"name":"Kitchen till","settle_currency":"EUR"}`, "")
 	if resp.status != http.StatusCreated {
 		t.Fatalf("create storefront: status=%d body=%s", resp.status, resp.body)
 	}
@@ -48,7 +48,7 @@ func TestStorefrontAPIKey(t *testing.T) {
 
 	// The POS flow: one fixed-amount link per bill, printed as a QR.
 	resp = doJSON(t, srv.URL, "POST", "/v1/payment_links", minted.Key,
-		`{"amount_mode":"fixed","amount":11099,"settle_currency":"EUR","settle_address":"0x00000000000000000000000000000000000000CC","reuse_policy":"single_use"}`, "")
+		`{"amount_mode":"fixed","amount":11099,"settle_currency":"EUR","reuse_policy":"single_use"}`, "")
 	if resp.status != http.StatusCreated {
 		t.Fatalf("create bill link with storefront key: status=%d body=%s", resp.status, resp.body)
 	}
@@ -95,7 +95,7 @@ func TestStorefrontAPIKeyTenancy(t *testing.T) {
 	srv, key, _ := newLinkTestServer(t, 15510)
 
 	resp := doJSON(t, srv.URL, "POST", "/v1/accounts", "",
-		`{"name":"Other Co","settle_currency":"USD","settle_address":"0x00000000000000000000000000000000000000DD"}`, "")
+		`{"name":"Other Co","settle_currency":"USD","settle_address":"0x0000000000000000000000000000000000000009"}`, "")
 	var other struct {
 		ID string `json:"id"`
 	}
@@ -122,7 +122,7 @@ func TestSettledWebhookPayloadIdentifiesTheBill(t *testing.T) {
 	ctx := context.Background()
 
 	resp := doJSON(t, srv.URL, "POST", "/v1/payment_links", key,
-		`{"amount_mode":"fixed","amount":11099,"settle_currency":"EUR","settle_address":"0x00000000000000000000000000000000000000EE","reuse_policy":"single_use","merchant_reference":"table-14/bill-8871"}`, "")
+		`{"amount_mode":"fixed","amount":11099,"settle_currency":"EUR","reuse_policy":"single_use","merchant_reference":"table-14/bill-8871"}`, "")
 	if resp.status != http.StatusCreated {
 		t.Fatalf("create bill link: status=%d body=%s", resp.status, resp.body)
 	}
@@ -186,7 +186,7 @@ func TestLinkGetIncludesSettlements(t *testing.T) {
 	ctx := context.Background()
 
 	resp := doJSON(t, srv.URL, "POST", "/v1/payment_links", key,
-		`{"amount_mode":"fixed","amount":11099,"settle_currency":"EUR","settle_address":"0x00000000000000000000000000000000000000FF","reuse_policy":"single_use","merchant_reference":"table-9/bill-3"}`, "")
+		`{"amount_mode":"fixed","amount":11099,"settle_currency":"EUR","reuse_policy":"single_use","merchant_reference":"table-9/bill-3"}`, "")
 	var link struct {
 		ID string `json:"id"`
 	}

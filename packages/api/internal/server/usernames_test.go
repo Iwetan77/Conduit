@@ -95,7 +95,7 @@ func TestUsernameCannotBeTakenTwice(t *testing.T) {
 
 	// A second account, so two DIFFERENT accounts contend for one name.
 	resp := doJSON(t, srv.URL, "POST", "/v1/accounts", "",
-		`{"name":"Other Co","settle_currency":"USD","settle_address":"0x0000000000000000000000000000000000000008"}`, "")
+		`{"name":"Other Co","settle_currency":"USD","settle_address":"0x0000000000000000000000000000000000000009"}`, "")
 	if resp.status != http.StatusCreated {
 		t.Fatalf("create second account: status=%d body=%s", resp.status, resp.body)
 	}
@@ -134,7 +134,7 @@ func TestConcurrentClaimsOfOneNameLeaveExactlyOneWinner(t *testing.T) {
 	srv, keyA, _ := newLinkTestServer(t, 15524)
 
 	resp := doJSON(t, srv.URL, "POST", "/v1/accounts", "",
-		`{"name":"Racer Co","settle_currency":"USD","settle_address":"0x0000000000000000000000000000000000000007"}`, "")
+		`{"name":"Racer Co","settle_currency":"USD","settle_address":"0x0000000000000000000000000000000000000009"}`, "")
 	if resp.status != http.StatusCreated {
 		t.Fatalf("create second account: status=%d body=%s", resp.status, resp.body)
 	}

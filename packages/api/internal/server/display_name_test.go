@@ -21,7 +21,7 @@ func TestPublicIntentShowsTheUsernameNotTheAccountName(t *testing.T) {
 	}
 
 	resp := doJSON(t, srv.URL, "POST", "/v1/settlement_intents", key,
-		`{"amount":"5000000","settle_currency":"USD","settle_address":"0x0000000000000000000000000000000000000009"}`, "")
+		`{"amount":"5000000","settle_currency":"USD"}`, "")
 	if resp.status != http.StatusCreated {
 		t.Fatalf("create intent: status=%d body=%s", resp.status, resp.body)
 	}
@@ -55,7 +55,7 @@ func TestPublicIntentFallsBackToTheAccountName(t *testing.T) {
 	srv, key, _ := newLinkTestServer(t, 15528)
 
 	resp := doJSON(t, srv.URL, "POST", "/v1/settlement_intents", key,
-		`{"amount":"5000000","settle_currency":"USD","settle_address":"0x0000000000000000000000000000000000000009"}`, "")
+		`{"amount":"5000000","settle_currency":"USD"}`, "")
 	if resp.status != http.StatusCreated {
 		t.Fatalf("create intent: status=%d body=%s", resp.status, resp.body)
 	}

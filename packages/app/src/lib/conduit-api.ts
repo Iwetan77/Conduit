@@ -243,7 +243,15 @@ export function revokeApiKey(keyId: string) {
   return request<{ id: string; status: string }>(`/v1/api_keys/${keyId}/revoke`, { method: "POST" });
 }
 
-export function createSubAccount(body: { name: string; settle_currency: string; settle_address: string }) {
+/**
+ * A storefront under this account.
+ *
+ * No address: a storefront inherits its parent's, snapshotted at creation. It
+ * is a place the same business takes money, not a different business, and
+ * letting one be typed per till was a separate chance to point each location's
+ * takings somewhere unrecoverable.
+ */
+export function createSubAccount(body: { name: string; settle_currency: string }) {
   return request<AccountWithKey>("/v1/accounts/sub", { method: "POST", body });
 }
 
@@ -351,7 +359,12 @@ export function logout() {
   return request<void>("/v1/auth/logout", { method: "POST" });
 }
 
-export function updateAccount(id: string, body: { name?: string; logo_url?: string; settle_currency?: string; settle_address?: string }) {
+/**
+ * No settle_address. Where an account is paid is derived from the wallet
+ * provisioned for it; the API rejects this field rather than ignoring it, so
+ * sending one is a 400 rather than a silent no-op.
+ */
+export function updateAccount(id: string, body: { name?: string; logo_url?: string; settle_currency?: string }) {
   return request<Account>(`/v1/accounts/${id}`, { method: "PATCH", body });
 }
 
@@ -835,13 +848,20 @@ export interface PaymentLink {
   qr_payload: string;
 }
 
+/**
+ * A payment link.
+ *
+ * No settle_address: it is derived from the account that owns the link and
+ * snapshotted onto it, so a link created today keeps paying where it said even
+ * if the business later moves its settlement. The API rejects this field rather
+ * than ignoring it — sending one is a 400, not a silent no-op.
+ */
 export function createPaymentLink(body: {
   amount_mode: AmountMode;
   amount?: string;
   min_amount?: string;
   max_amount?: string;
   settle_currency: string;
-  settle_address: string;
   accept_currencies?: string[];
   description?: string;
   merchant_reference?: string;

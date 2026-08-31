@@ -64,7 +64,7 @@ func errCode(t *testing.T, body string) string {
 func TestLinkLifecycle(t *testing.T) {
 	srv, key, pool := newLinkTestServer(t, 15501)
 
-	createBody := `{"amount_mode":"fixed","amount":50000,"settle_currency":"USD","settle_address":"0x0000000000000000000000000000000000000009","description":"Invoice #1","merchant_reference":"INV-1"}`
+	createBody := `{"amount_mode":"fixed","amount":50000,"settle_currency":"USD","description":"Invoice #1","merchant_reference":"INV-1"}`
 	resp := doJSON(t, srv.URL, "POST", "/v1/payment_links", key, createBody, "")
 	if resp.status != http.StatusCreated {
 		t.Fatalf("create link: status=%d body=%s", resp.status, resp.body)
@@ -143,7 +143,7 @@ func TestSingleUse(t *testing.T) {
 	srv, key, pool := newLinkTestServer(t, 15502)
 
 	resp := doJSON(t, srv.URL, "POST", "/v1/payment_links", key,
-		`{"amount_mode":"fixed","amount":10000,"settle_currency":"USD","settle_address":"0x0000000000000000000000000000000000000009","reuse_policy":"single_use"}`, "")
+		`{"amount_mode":"fixed","amount":10000,"settle_currency":"USD","reuse_policy":"single_use"}`, "")
 	var link struct {
 		ID string `json:"id"`
 	}
@@ -177,7 +177,7 @@ func TestSingleUse(t *testing.T) {
 
 	// A multi_use link must allow repeated payment.
 	resp = doJSON(t, srv.URL, "POST", "/v1/payment_links", key,
-		`{"amount_mode":"fixed","amount":5000,"settle_currency":"USD","settle_address":"0x0000000000000000000000000000000000000009","reuse_policy":"multi_use"}`, "")
+		`{"amount_mode":"fixed","amount":5000,"settle_currency":"USD","reuse_policy":"multi_use"}`, "")
 	var multiLink struct {
 		ID string `json:"id"`
 	}
@@ -198,7 +198,7 @@ func TestExpiry(t *testing.T) {
 	// expires_in=1 second, then we wait past it via a direct DB backdate
 	// instead of sleeping -- deterministic and instant.
 	resp := doJSON(t, srv.URL, "POST", "/v1/payment_links", key,
-		`{"amount_mode":"fixed","amount":10000,"settle_currency":"USD","settle_address":"0x0000000000000000000000000000000000000009","expires_in":3600}`, "")
+		`{"amount_mode":"fixed","amount":10000,"settle_currency":"USD","expires_in":3600}`, "")
 	var link struct {
 		ID string `json:"id"`
 	}
@@ -224,7 +224,7 @@ func TestVoid(t *testing.T) {
 	srv, key, pool := newLinkTestServer(t, 15504)
 
 	resp := doJSON(t, srv.URL, "POST", "/v1/payment_links", key,
-		`{"amount_mode":"fixed","amount":10000,"settle_currency":"USD","settle_address":"0x0000000000000000000000000000000000000009"}`, "")
+		`{"amount_mode":"fixed","amount":10000,"settle_currency":"USD"}`, "")
 	var link struct {
 		ID string `json:"id"`
 	}
@@ -245,7 +245,7 @@ func TestVoid(t *testing.T) {
 
 	// A paid link cannot be voided (immutable).
 	resp = doJSON(t, srv.URL, "POST", "/v1/payment_links", key,
-		`{"amount_mode":"fixed","amount":10000,"settle_currency":"USD","settle_address":"0x0000000000000000000000000000000000000009"}`, "")
+		`{"amount_mode":"fixed","amount":10000,"settle_currency":"USD"}`, "")
 	var link2 struct {
 		ID string `json:"id"`
 	}
@@ -272,7 +272,7 @@ func TestAmountBounds(t *testing.T) {
 	srv, key, _ := newLinkTestServer(t, 15505)
 
 	resp := doJSON(t, srv.URL, "POST", "/v1/payment_links", key,
-		`{"amount_mode":"open","min_amount":1000,"max_amount":100000,"settle_currency":"USD","settle_address":"0x0000000000000000000000000000000000000009"}`, "")
+		`{"amount_mode":"open","min_amount":1000,"max_amount":100000,"settle_currency":"USD"}`, "")
 	if resp.status != http.StatusCreated {
 		t.Fatalf("create open link: status=%d body=%s", resp.status, resp.body)
 	}
@@ -304,7 +304,7 @@ func TestAmountBounds(t *testing.T) {
 
 	// open with no amount at all is a required-field error, not a bounds error
 	resp2 := doJSON(t, srv.URL, "POST", "/v1/payment_links", key,
-		`{"amount_mode":"open","settle_currency":"USD","settle_address":"0x0000000000000000000000000000000000000009","reuse_policy":"multi_use"}`, "")
+		`{"amount_mode":"open","settle_currency":"USD","reuse_policy":"multi_use"}`, "")
 	var link2 struct {
 		ID string `json:"id"`
 	}

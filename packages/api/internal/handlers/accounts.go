@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/ethereum/go-ethereum/common"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/kzn-labs/conduit/api/internal/auth"
@@ -61,6 +60,29 @@ type createdKey struct {
 	Suffix string `json:"suffix"`
 }
 
+// storefrontSource is the source a storefront records for the address it
+// inherited.
+//
+// Never 'provisioned', whatever the parent says: no wallet was created for this
+// row, so claiming one would be false and the present-together constraint would
+// refuse it anyway. A storefront under a provisioned parent holds that parent's
+// address, which from the storefront's own point of view came from outside it.
+// bootstrapSource says where a freshly bootstrapped account's address came
+// from: the wallet that signed in, or something the caller named.
+func bootstrapSource(settleAddress, loginWallet string) string {
+	if loginWallet != "" && strings.EqualFold(settleAddress, loginWallet) {
+		return sourceLoginWallet
+	}
+	return sourceExternal
+}
+
+func storefrontSource(parent *string) string {
+	if parent != nil && *parent == sourceLoginWallet {
+		return sourceLoginWallet
+	}
+	return sourceExternal
+}
+
 func (h *Accounts) Create(w http.ResponseWriter, r *http.Request) {
 	var req createAccountRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -77,7 +99,12 @@ func (h *Accounts) Create(w http.ResponseWriter, r *http.Request) {
 
 	accountID := models.NewID("acct")
 	_, err := q.Exec(ctx,
-		`INSERT INTO accounts (id, name, settle_currency, settle_address, livemode) VALUES ($1,$2,$3,$4,$5)`,
+		// 'external': supplied by whoever created the account. An API-key
+		// account has no Circle identity to provision a wallet from, so this
+		// stays a caller-supplied address -- but it is now recorded as one
+		// rather than being indistinguishable from an address we chose.
+		`INSERT INTO accounts (id, name, settle_currency, settle_address, settle_address_source, livemode)
+		 VALUES ($1,$2,$3,$4,'external',$5)`,
 		accountID, req.Name, req.SettleCurrency, req.SettleAddress, req.Livemode,
 	)
 	if err != nil {
@@ -225,9 +252,14 @@ func (h *Accounts) bootstrapAccount(w http.ResponseWriter, r *http.Request, prov
 	// what the personal-account predicate in settlement_intents.go expects:
 	// "no identity" means BOTH privy_user_id and auth_subject are NULL.
 	_, err = h.Pool.Exec(ctx,
-		`INSERT INTO accounts (id, name, settle_currency, settle_address, auth_provider, auth_subject, login_wallet, livemode)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,false)`,
+		// 'login_wallet': settleAddress below defaults to the wallet that signed
+		// in. Recorded rather than left blank, because that default is exactly
+		// the thing provisioning exists to replace -- and a row that does not
+		// say where its address came from cannot be told apart from a choice.
+		`INSERT INTO accounts (id, name, settle_currency, settle_address, auth_provider, auth_subject, login_wallet, settle_address_source, livemode)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,false)`,
 		accountID, req.Name, req.SettleCurrency, settleAddress, provider, subject, req.LoginWallet,
+		bootstrapSource(settleAddress, req.LoginWallet),
 	)
 	if err != nil {
 		writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
@@ -380,12 +412,19 @@ func (h *Accounts) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.SettleAddress != nil && !common.IsHexAddress(*req.SettleAddress) {
-		// Validated here because this is where money starts going somewhere
-		// else. A typo in a payout address is not recoverable by us -- the
-		// settlement is on-chain and final -- so a malformed one must never be
-		// stored, however it arrived.
-		writeErr(w, apierrors.E(apierrors.CodeInvalidRequest, "settle_address"))
+	// settle_address is no longer settable here.
+	//
+	// It used to be, validated only as "20 bytes of well-formed hex" -- which
+	// accepts an address on another chain, an exchange deposit address that will
+	// never credit an Arc token, a contract that cannot receive, and any typo
+	// that happens to be well formed. Settlement is on-chain and final, so none
+	// of those are recoverable.
+	//
+	// The account settles to the wallet provisioned for it. Sending income
+	// somewhere else is a deliberate act with its own confirmation and its own
+	// proof of control, not a field on a general-purpose update.
+	if e := rejectSuppliedSettleAddress(req.SettleAddress); e != nil {
+		writeErr(w, e)
 		return
 	}
 
@@ -394,16 +433,9 @@ func (h *Accounts) Update(w http.ResponseWriter, r *http.Request) {
 		`UPDATE accounts SET
 		   name = COALESCE($1, name),
 		   logo_url = COALESCE($2, logo_url),
-		   settle_currency = COALESCE($3, settle_currency),
-		   settle_address = COALESCE($4, settle_address),
-		   -- Setting the payout address IS confirming it. Someone who has just
-		   -- typed where their money should go has answered the question the
-		   -- gate exists to ask, and asking again afterwards would be the kind
-		   -- of prompt people learn to click through without reading.
-		   payout_confirmed_at = CASE WHEN $4::text IS NOT NULL
-		                              THEN now() ELSE payout_confirmed_at END
-		 WHERE id = $5 AND (id = $6 OR parent_id = $6)`,
-		req.Name, req.LogoURL, req.SettleCurrency, req.SettleAddress, id, principal.AccountID,
+		   settle_currency = COALESCE($3, settle_currency)
+		 WHERE id = $4 AND (id = $5 OR parent_id = $5)`,
+		req.Name, req.LogoURL, req.SettleCurrency, id, principal.AccountID,
 	)
 	if err != nil {
 		writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
@@ -442,16 +474,38 @@ func (h *Accounts) CreateSub(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, apierrors.E(apierrors.CodeInvalidRequest, "body"))
 		return
 	}
-	if req.Name == "" || req.SettleCurrency == "" || req.SettleAddress == "" {
-		writeErr(w, apierrors.E(apierrors.CodeInvalidRequest, "name, settle_currency, settle_address are required"))
+	if req.Name == "" || req.SettleCurrency == "" {
+		writeErr(w, apierrors.E(apierrors.CodeInvalidRequest, "name, settle_currency are required"))
+		return
+	}
+	if e := rejectSuppliedSettleAddress(&req.SettleAddress); req.SettleAddress != "" && e != nil {
+		writeErr(w, e)
 		return
 	}
 
 	ctx := r.Context()
+	// A storefront is a place the same business takes money, not a different
+	// business. It inherits the parent's address, snapshotted -- so a parent
+	// that later moves its settlement does not silently drag its storefronts
+	// with it, and a storefront can never point somewhere the parent did not.
+	settleAddress, e := deriveSettleAddress(ctx, h.Pool, principal.AccountID)
+	if e != nil {
+		writeErr(w, e)
+		return
+	}
+	var parentSource *string
+	_ = h.Pool.QueryRow(ctx, `SELECT settle_address_source FROM accounts WHERE id = $1`,
+		principal.AccountID).Scan(&parentSource)
+
 	accountID := models.NewID("acct")
 	_, err := h.Pool.Exec(ctx,
-		`INSERT INTO accounts (id, parent_id, name, settle_currency, settle_address, livemode) VALUES ($1,$2,$3,$4,$5,$6)`,
-		accountID, principal.AccountID, req.Name, req.SettleCurrency, req.SettleAddress, req.Livemode,
+		`INSERT INTO accounts (id, parent_id, name, settle_currency, settle_address, settle_address_source, livemode)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+		accountID, principal.AccountID, req.Name, req.SettleCurrency, settleAddress,
+		// Mirrors the parent, because it IS the parent's address. Never
+		// 'provisioned': no wallet was created for this row, and the
+		// present-together constraint would refuse the claim anyway.
+		storefrontSource(parentSource), req.Livemode,
 	)
 	if err != nil {
 		writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
@@ -475,7 +529,7 @@ func (h *Accounts) CreateSub(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusCreated, accountResponse{
 		ID: accountID, Name: req.Name, SettleCurrency: req.SettleCurrency,
-		SettleAddress: req.SettleAddress, Livemode: req.Livemode,
+		SettleAddress: settleAddress, Livemode: req.Livemode,
 		APIKey: &createdKey{Key: fullKey, Prefix: prefix, Suffix: suffix},
 	})
 }

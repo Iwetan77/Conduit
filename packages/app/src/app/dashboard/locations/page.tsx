@@ -178,7 +178,6 @@ export default function LocationsPage() {
   const [showForm, setShowForm] = useState(false);
   const [name, setName] = useState("");
   const [settleCurrency, setSettleCurrency] = useState("EUR");
-  const [settleAddress, setSettleAddress] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [newKey, setNewKey] = useState<{ name: string; key: string } | null>(null);
@@ -195,11 +194,10 @@ export default function LocationsPage() {
       // to discard the whole response, which left every storefront holding a
       // live credential nobody could ever read — the reason a till couldn't be
       // wired to one. Surface it; it can also be re-minted from the card.
-      const created = await createSubAccount({ name, settle_currency: settleCurrency, settle_address: settleAddress });
+      const created = await createSubAccount({ name, settle_currency: settleCurrency });
       if (created.api_key?.key) setNewKey({ name, key: created.api_key.key });
       setShowForm(false);
       setName("");
-      setSettleAddress("");
       await qc.invalidateQueries({ queryKey: qk.subAccounts });
     } catch (err) {
       setError(err instanceof ConduitApiError ? err.message : "Failed to create storefront");
@@ -233,13 +231,13 @@ export default function LocationsPage() {
             required
           />
           <SettleCurrencySelect value={settleCurrency} onChange={setSettleCurrency} />
-          <input
-            className="w-full bg-surface border border-border px-3 py-2 text-sm font-mono focus:border-signal focus:outline-none"
-            placeholder="0x... settle address"
-            value={settleAddress}
-            onChange={(e) => setSettleAddress(e.target.value)}
-            required
-          />
+          {/* No address field. A storefront is a place the same business
+              takes money, not a different business -- it inherits the parent's
+              address, and a per-till text box was one more chance to point a
+              location's takings somewhere unrecoverable. */}
+          <p className="text-ink-dim text-xs">
+            Takings settle to this business&apos;s own address, attributed to this storefront.
+          </p>
           {error && <p className="text-danger text-xs">{error}</p>}
           <button
             type="submit"

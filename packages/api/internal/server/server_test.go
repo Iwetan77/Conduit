@@ -56,7 +56,7 @@ func TestFullFlow_AccountToQuote(t *testing.T) {
 	defer srv.Close()
 
 	// 1. Create an account -> get a real sk_test_ key
-	createAcctBody := `{"name":"Tanaka Trading KK","settle_currency":"USDC","settle_address":"0x0000000000000000000000000000000000000001"}`
+	createAcctBody := `{"name":"Tanaka Trading KK","settle_currency":"USDC","settle_address":"0x0000000000000000000000000000000000000009"}`
 	resp := doJSON(t, srv.URL, "POST", "/v1/accounts", "", createAcctBody, "")
 	if resp.status != http.StatusCreated {
 		t.Fatalf("create account: status=%d body=%s", resp.status, resp.body)
@@ -86,7 +86,7 @@ func TestFullFlow_AccountToQuote(t *testing.T) {
 
 	// 3. Create a settlement intent WITH an Idempotency-Key
 	idemKey := "test-idem-key-1"
-	createIntentBody := `{"amount":1240000,"settle_currency":"USD","settle_address":"0x0000000000000000000000000000000000000001","reference":"INV-2026-0412"}`
+	createIntentBody := `{"amount":1240000,"settle_currency":"USD","reference":"INV-2026-0412"}`
 	resp = doJSON(t, srv.URL, "POST", "/v1/settlement_intents", skKey, createIntentBody, idemKey)
 	if resp.status != http.StatusCreated {
 		t.Fatalf("create intent: status=%d body=%s", resp.status, resp.body)
@@ -113,7 +113,7 @@ func TestFullFlow_AccountToQuote(t *testing.T) {
 
 	// 4b. Same key, DIFFERENT body -> 409 idempotency_key_reuse
 	resp3 := doJSON(t, srv.URL, "POST", "/v1/settlement_intents", skKey,
-		`{"amount":999,"settle_currency":"USD","settle_address":"0x0000000000000000000000000000000000000001"}`, idemKey)
+		`{"amount":999,"settle_currency":"USD"}`, idemKey)
 	if resp3.status != http.StatusConflict {
 		t.Errorf("expected 409 on idempotency key reuse with different body, got %d: %s", resp3.status, resp3.body)
 	}
@@ -147,7 +147,7 @@ func TestFullFlow_AccountToQuote(t *testing.T) {
 	}
 
 	// 6. Cross-tenant isolation: a second account's key must not see the first account's intent
-	resp = doJSON(t, srv.URL, "POST", "/v1/accounts", "", `{"name":"Other Co","settle_currency":"USDC","settle_address":"0x0000000000000000000000000000000000000002"}`, "")
+	resp = doJSON(t, srv.URL, "POST", "/v1/accounts", "", `{"name":"Other Co","settle_currency":"USDC","settle_address":"0x0000000000000000000000000000000000000009"}`, "")
 	var acct2 struct {
 		APIKey struct {
 			Key string `json:"key"`

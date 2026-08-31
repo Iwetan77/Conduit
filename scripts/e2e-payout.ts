@@ -32,10 +32,19 @@ const CIRCLE = "https://api.circle.com";
 const USDC = "0x3600000000000000000000000000000000000000" as const;
 const ARC = "ARC-TESTNET";
 
-// Small on purpose. This runs against a real funded wallet and there is no
-// reason for a correctness test to move meaningful value.
-const FUND = 3_000_000n; // 3 USDC — the withdrawal plus gas, which Arc charges in USDC
-const WITHDRAW = 1_000_000n; // 1 USDC
+// Small on purpose, and smaller than it was.
+//
+// Every run strands what it funds: the settlement wallet belongs to a throwaway
+// Circle user and the destination is a throwaway key, so neither is ever
+// recovered. The cost of a run is therefore FUND, not the amount withdrawn.
+//
+// Nothing here is scale-dependent. The assertions are "rose by exactly the
+// amount" and "fell by the amount plus gas", which hold at any size, so the
+// figures are as small as they can be while leaving obvious room for gas —
+// measured at 1,800 minor units, so 0.2 USDC of headroom is a hundredfold
+// margin. This was ten times larger for no reason at all.
+const FUND = 300_000n; // 0.3 USDC — the withdrawal plus gas, which Arc charges in USDC
+const WITHDRAW = 100_000n; // 0.1 USDC
 
 const erc20 = parseAbi([
   "function transfer(address to, uint256 amount) returns (bool)",

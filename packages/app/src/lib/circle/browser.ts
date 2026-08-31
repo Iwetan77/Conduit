@@ -427,7 +427,25 @@ export async function createSettlementWallet(refId: string, name: string): Promi
   for (;;) {
     const list = ((await api("/v1/auth/circle/wallets", { token })).data ?? []) as CircleWallet[];
     const found = list.find((w) => w.refId === refId);
-    if (found?.address) return found;
+    if (found?.address) {
+      // Fold it into the live session, and re-persist.
+      //
+      // session.wallets is a SNAPSHOT taken at login, and it is what the
+      // provider looks a wallet up in before signing. Creating a wallet after
+      // that snapshot and not writing it back left the business's own
+      // settlement wallet absent from the list for the rest of the session --
+      // and, because the session is persisted, for every session after it too,
+      // until the next full sign-in.
+      //
+      // What that looked like was payroll failing to sign for an address the
+      // merchant could see on their own dashboard.
+      if (session) {
+        session = { ...session, wallets: list };
+        persist(session);
+        emit();
+      }
+      return found;
+    }
     if (Date.now() > deadline) {
       throw new Error(
         "Circle accepted the new wallet but it has not appeared after 60s. " +

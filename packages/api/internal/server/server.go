@@ -170,6 +170,7 @@ func New(cfg Config) http.Handler {
 	payoutsH := &handlers.Payouts{Pool: cfg.Pool, ArcRPC: arcRPCForBalances}
 	externalSettlementH := &handlers.ExternalSettlement{Pool: cfg.Pool}
 	employeesH := &handlers.Employees{Pool: cfg.Pool}
+	employeeGroupsH := &handlers.EmployeeGroups{Pool: cfg.Pool}
 	// The deployed ConduitPayroll.
 	//
 	// Defaulted rather than left empty, and the reason is what actually
@@ -536,6 +537,14 @@ func New(cfg Config) http.Handler {
 			r.Post("/employees", employeesH.Create)
 			r.Patch("/employees/{id}", employeesH.Update)
 			r.Post("/employees/{id}/archive", employeesH.Archive)
+
+			// Groups scope a payroll run. A business that never makes one is
+			// unaffected: a run with no group named still pays everybody.
+			r.Get("/employee_groups", employeeGroupsH.List)
+			r.Post("/employee_groups", employeeGroupsH.Create)
+			r.Patch("/employee_groups/{id}", employeeGroupsH.Update)
+			// Deletes the GROUP, not its people -- they return to ungrouped.
+			r.Delete("/employee_groups/{id}", employeeGroupsH.Delete)
 			// Payroll: draft, read, execute, then report each currency group's
 			// outcome as it lands. Partial is an outcome, not an error.
 			r.Get("/payroll_runs", payrollRunsH.List)

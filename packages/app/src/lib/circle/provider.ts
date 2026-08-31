@@ -95,9 +95,13 @@ export function createCircleProvider(config: CircleProviderConfig) {
   // The wallet currently being signed with, and the chain it lives on.
   // Defaults to the one passed explicitly, which is Arc in every path except
   // a cross-chain deposit.
-  const wallets = config.wallets?.length
-    ? config.wallets
-    : [{ id: config.walletId, address: config.address, blockchain: "ARC-TESTNET" }];
+  // A COPY. conduit_useWallet appends to this when it refreshes a stale list,
+  // and config.wallets is the session's own array -- mutating it would edit
+  // session state from inside a provider, which is not this file's business.
+  const wallets: { id: string; address: string; blockchain: string }[] =
+    config.wallets?.length
+      ? [...config.wallets]
+      : [{ id: config.walletId, address: config.address, blockchain: "ARC-TESTNET" }];
 
   let active: { id: string; address: string; blockchain: string } =
     wallets.find((w) => w.id === config.walletId) ?? wallets[0];
@@ -417,7 +421,35 @@ export function createCircleProvider(config: CircleProviderConfig) {
       // exists to prevent.
       case "conduit_useWallet": {
         const wanted = String(params[0] ?? "").toLowerCase();
-        const match = wallets.find((w) => w.address.toLowerCase() === wanted);
+        let match = wallets.find((w) => w.address.toLowerCase() === wanted);
+
+        // Not in the snapshot? Ask Circle before believing it.
+        //
+        // `wallets` comes from the session, which is captured at login and then
+        // persisted. A settlement wallet created after that login is genuinely
+        // this user's and genuinely signable, but absent from a list that was
+        // taken before it existed -- and since the session is persisted, every
+        // later visit inherited the same stale list. The symptom was payroll
+        // refusing to sign for an address the merchant could see on their own
+        // dashboard.
+        //
+        // The session write-back in createSettlementWallet fixes new sessions.
+        // This fixes the ones already stored in people's browsers, which is
+        // most of them, and costs one request only on the miss.
+        if (!match) {
+          try {
+            const res = (await api("/v1/auth/circle/wallets")) as {
+              data?: { id: string; address: string; blockchain: string }[];
+            };
+            for (const w of res.data ?? []) {
+              if (!wallets.some((x) => x.id === w.id)) wallets.push(w);
+            }
+            match = wallets.find((w) => w.address.toLowerCase() === wanted);
+          } catch {
+            // Fall through to the refusal below, which names what IS available.
+          }
+        }
+
         if (!match) {
           throw new ProviderRpcError(
             -32602,

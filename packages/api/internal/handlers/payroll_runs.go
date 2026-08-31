@@ -153,6 +153,13 @@ func (h *PayrollRuns) Create(w http.ResponseWriter, r *http.Request) {
 		// executed while any variable line is blank, and asking for them here
 		// means the blank is visible in the preview rather than at execution.
 		Amounts map[string]string `json:"amounts"`
+		// Pay one group only. Absent means everybody active, which is what a
+		// run has always meant and what an account with no groups still gets.
+		//
+		// This is the whole point of groups: one person often runs more than one
+		// business, and paying one team used to mean pausing every other team
+		// and remembering to unpause them.
+		GroupID string `json:"group_id"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&req)
 
@@ -165,11 +172,22 @@ func (h *PayrollRuns) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Refused, not ignored. A group id belonging to somebody else would filter
+	// this to nobody, and a payroll that pays nobody reports as "done" rather
+	// than as "wrong" -- the worst possible way for this to fail.
+	groupID := strings.TrimSpace(req.GroupID)
+	if groupID != "" && !groupBelongsTo(ctx, h.Pool, groupID, principal.AccountID) {
+		writeErr(w, apierrors.E(apierrors.CodeInvalidRequest, "group_id"))
+		return
+	}
+
 	rows, err := h.Pool.Query(ctx,
 		`SELECT id, name, username, address, pay_currency, pay_type, amount::text
-		   FROM employees WHERE account_id = $1 AND status = 'active'
+		   FROM employees
+		  WHERE account_id = $1 AND status = 'active'
+		    AND ($2 = '' OR group_id = $2)
 		  ORDER BY created_at`,
-		principal.AccountID)
+		principal.AccountID, groupID)
 	if err != nil {
 		writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
 		return

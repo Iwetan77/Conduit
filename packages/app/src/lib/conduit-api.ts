@@ -525,7 +525,39 @@ export interface Employee {
   pay_type: "fixed" | "variable";
   /** Null for a variable employee, by construction. */
   amount: string | null;
+  /** Which group they are in, or null for ungrouped. */
+  group_id: string | null;
   status: "active" | "paused" | "archived";
+}
+
+/**
+ * A group of staff — the scope of a payroll run, and nothing more.
+ *
+ * One person often runs more than one business. Without groups, paying one
+ * team meant pausing every other team and remembering to unpause them.
+ */
+export interface EmployeeGroup {
+  id: string;
+  name: string;
+  /** Active members. */
+  members: number;
+}
+
+export function listEmployeeGroups() {
+  return request<{ data: EmployeeGroup[] }>("/v1/employee_groups");
+}
+
+export function createEmployeeGroup(name: string) {
+  return request<EmployeeGroup>("/v1/employee_groups", { method: "POST", body: { name } });
+}
+
+export function renameEmployeeGroup(id: string, name: string) {
+  return request<EmployeeGroup>(`/v1/employee_groups/${id}`, { method: "PATCH", body: { name } });
+}
+
+/** Removes the GROUP. Its members return to ungrouped — nobody is deleted. */
+export function deleteEmployeeGroup(id: string) {
+  return request<void>(`/v1/employee_groups/${id}`, { method: "DELETE" });
 }
 
 export function listEmployees(includeArchived = false) {
@@ -541,6 +573,7 @@ export function addEmployee(body: {
   pay_currency: string;
   pay_type: "fixed" | "variable";
   amount?: string;
+  group_id?: string;
 }) {
   return request<Employee>("/v1/employees", { method: "POST", body });
 }
@@ -552,7 +585,10 @@ export function addEmployee(body: {
  */
 export function updateEmployee(
   id: string,
-  body: { name?: string; pay_currency?: string; pay_type?: "fixed" | "variable"; amount?: string; status?: "active" | "paused" },
+  // group_id has three states: absent leaves it alone, "" removes them from
+  // their group, an id moves them. Moving groups is a normal edit — it changes
+  // which run pays somebody, not where their money goes.
+  body: { name?: string; pay_currency?: string; pay_type?: "fixed" | "variable"; amount?: string; status?: "active" | "paused"; group_id?: string },
 ) {
   return request<Employee>(`/v1/employees/${id}`, { method: "PATCH", body });
 }
@@ -609,8 +645,12 @@ export interface PayrollLeg {
 }
 
 /** Builds a draft and returns the whole preview. Nothing is paid. */
-export function createPayrollRun(amounts?: Record<string, string>) {
-  return request<PayrollRun>("/v1/payroll_runs", { method: "POST", body: { amounts: amounts ?? {} } });
+/** Pass a groupId to pay only that group. Omit it to pay everybody active. */
+export function createPayrollRun(amounts?: Record<string, string>, groupId?: string) {
+  return request<PayrollRun>("/v1/payroll_runs", {
+    method: "POST",
+    body: { amounts: amounts ?? {}, group_id: groupId ?? "" },
+  });
 }
 
 export function getPayrollRun(id: string) {

@@ -48,19 +48,23 @@ type employeeResponse struct {
 	PayType     string  `json:"pay_type"`
 	// Null for a variable employee, by construction. Present rather than
 	// omitted so a client can tell "no amount" from "field missing".
-	Amount    *string   `json:"amount"`
-	Status    string    `json:"status"`
+	Amount *string `json:"amount"`
+	// Which group they are in, or null for ungrouped. A run scoped to a group
+	// pays only its members; a run with no group named pays everybody, which is
+	// what every existing account gets.
+	GroupID *string `json:"group_id"`
+	Status  string  `json:"status"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
 const employeeColumns = `id, name, address, username, pay_currency, pay_type,
-                         amount::text, status, created_at, updated_at`
+                         amount::text, group_id, status, created_at, updated_at`
 
 func scanEmployee(row pgx.Row) (employeeResponse, error) {
 	var e employeeResponse
 	err := row.Scan(&e.ID, &e.Name, &e.Address, &e.Username, &e.PayCurrency,
-		&e.PayType, &e.Amount, &e.Status, &e.CreatedAt, &e.UpdatedAt)
+		&e.PayType, &e.Amount, &e.GroupID, &e.Status, &e.CreatedAt, &e.UpdatedAt)
 	return e, err
 }
 
@@ -104,6 +108,9 @@ type employeeRequest struct {
 	PayCurrency string  `json:"pay_currency"`
 	PayType     string  `json:"pay_type"`
 	Amount      *string `json:"amount"`
+	// Optional. Omitted or empty means ungrouped, which is where everybody who
+	// existed before groups did stays.
+	GroupID *string `json:"group_id"`
 }
 
 // Create is POST /v1/employees.
@@ -138,13 +145,25 @@ func (h *Employees) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A group id that is not this account's is refused, not ignored. Silently
+	// dropping it would put the person in the ungrouped list, where the next
+	// group-scoped run would not pay them and nothing would say why.
+	if req.GroupID != nil && strings.TrimSpace(*req.GroupID) != "" {
+		if !groupBelongsTo(r.Context(), h.Pool, *req.GroupID, principal.AccountID) {
+			writeErr(w, apierrors.E(apierrors.CodeInvalidRequest, "group_id"))
+			return
+		}
+	} else {
+		req.GroupID = nil
+	}
+
 	id := models.NewID("emp")
 	row := h.Pool.QueryRow(r.Context(),
-		`INSERT INTO employees (id, account_id, name, address, username, pay_currency, pay_type, amount)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+		`INSERT INTO employees (id, account_id, name, address, username, pay_currency, pay_type, amount, group_id)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
 		 RETURNING `+employeeColumns,
 		id, principal.AccountID, strings.TrimSpace(req.Name), address, username,
-		info.ISO, req.PayType, amount,
+		info.ISO, req.PayType, amount, req.GroupID,
 	)
 	out, err := scanEmployee(row)
 	if err != nil {
@@ -237,6 +256,10 @@ func (h *Employees) Update(w http.ResponseWriter, r *http.Request) {
 		PayType     *string `json:"pay_type"`
 		Amount      *string `json:"amount"`
 		Status      *string `json:"status"`
+		// Moving somebody between groups IS a normal edit, unlike moving their
+		// address: it changes which run pays them, not where the money goes.
+		// A caller that omits it leaves the group alone; sending "" clears it.
+		GroupID *string `json:"group_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, apierrors.E(apierrors.CodeInvalidRequest, "body"))
@@ -287,6 +310,22 @@ func (h *Employees) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Three states, and they are not the same: absent leaves the group as it
+	// is, "" removes them from theirs, and an id moves them. A single COALESCE
+	// cannot say all three, hence the explicit flag.
+	groupID := current.GroupID
+	if req.GroupID != nil {
+		if strings.TrimSpace(*req.GroupID) == "" {
+			groupID = nil
+		} else {
+			if !groupBelongsTo(r.Context(), h.Pool, *req.GroupID, principal.AccountID) {
+				writeErr(w, apierrors.E(apierrors.CodeInvalidRequest, "group_id"))
+				return
+			}
+			groupID = req.GroupID
+		}
+	}
+
 	row = h.Pool.QueryRow(r.Context(),
 		`UPDATE employees
 		    SET name = COALESCE($1, name),
@@ -294,10 +333,11 @@ func (h *Employees) Update(w http.ResponseWriter, r *http.Request) {
 		        pay_type = $3,
 		        amount = $4,
 		        status = COALESCE($5, status),
+		        group_id = $6,
 		        updated_at = now()
-		  WHERE id = $6 AND account_id = $7
+		  WHERE id = $7 AND account_id = $8
 		  RETURNING `+employeeColumns,
-		req.Name, req.PayCurrency, payType, amount, req.Status, id, principal.AccountID)
+		req.Name, req.PayCurrency, payType, amount, req.Status, groupID, id, principal.AccountID)
 	out, err := scanEmployee(row)
 	if err != nil {
 		writeErr(w, apierrors.E(apierrors.CodeInternal, ""))

@@ -17,6 +17,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   createPayrollRun,
   discardPayrollRun,
+  listEmployeeGroups,
   executePayrollRun,
   listPayrollRuns,
   recordPayrollLeg,
@@ -33,7 +34,17 @@ import type { Currency } from "@conduit/sdk/lite";
 const EXPLORER = process.env.NEXT_PUBLIC_EXPLORER ?? "https://testnet.arcscan.app";
 
 function errorText(err: unknown): string {
-  return err instanceof ConduitApiError ? err.message : "Something went wrong. Try again.";
+  // The real message, whatever kind of error it is.
+  //
+  // This returned "Something went wrong. Try again." for anything that was not
+  // a ConduitApiError -- which is every wallet, provider and signing failure,
+  // i.e. most of what can actually go wrong here. A payroll that refused to
+  // sign for the business's own address reported itself as "Something went
+  // wrong", and that sentence is why it took a person to find the cause
+  // instead of the screen saying it.
+  if (err instanceof ConduitApiError) return err.message;
+  if (err instanceof Error && err.message) return err.message;
+  return "Something went wrong. Try again.";
 }
 
 type Stage = "idle" | "preview" | "confirm" | "running" | "done";
@@ -56,12 +67,21 @@ export default function PayrollPage() {
   const [error, setError] = useState("");
 
   const { data: history } = useQuery({ queryKey: ["payroll-runs"], queryFn: listPayrollRuns });
+  const { data: groupData } = useQuery({
+    queryKey: ["employee-groups"],
+    queryFn: listEmployeeGroups,
+  });
+  const groups = groupData?.data ?? [];
+  // Who this run pays. "" is everybody active, which is what a run has always
+  // meant and what an account with no groups still gets.
+  const [groupID, setGroupID] = useState("");
+  const chosen = groups.find((g) => g.id === groupID);
 
   const build = async () => {
     setError("");
     setBusy(true);
     try {
-      const draft = await createPayrollRun();
+      const draft = await createPayrollRun(undefined, groupID || undefined);
       setRun(draft);
       setStage("preview");
     } catch (err) {
@@ -131,19 +151,47 @@ export default function PayrollPage() {
       />
 
       {stage === "idle" && (
-        <div className="border border-border p-8 text-center space-y-3">
-          <p className="text-ink text-sm">Ready when you are.</p>
-          <p className="text-ink-dim text-xs">
-            This builds a draft from everybody active. You will see the full list
-            and the total before anything is paid.
-          </p>
+        <div className="border border-border p-8 text-center space-y-4">
+          <div className="space-y-1">
+            <p className="text-ink text-sm">Ready when you are.</p>
+            <p className="text-ink-dim text-xs">
+              {chosen
+                ? `This builds a draft from the ${chosen.members} active ${chosen.members === 1 ? "person" : "people"} in ${chosen.name}. Nobody outside it is paid.`
+                : "This builds a draft from everybody active. You will see the full list and the total before anything is paid."}
+            </p>
+          </div>
+
+          {/* Who gets paid, chosen BEFORE the draft is built.
+              Somebody running two businesses used to have to pause one team,
+              run payroll, then remember to unpause them -- and the failure mode
+              of forgetting is paying the wrong people next month, quietly. */}
+          {groups.length > 0 && (
+            <div className="max-w-xs mx-auto text-left">
+              <label className="text-scale-1 font-mono text-ink-dim uppercase tracking-wider block mb-1">
+                Pay
+              </label>
+              <select
+                value={groupID}
+                onChange={(e) => setGroupID(e.target.value)}
+                className="w-full bg-bg border border-border px-3 py-2 text-sm text-ink focus:border-signal focus:outline-none"
+              >
+                <option value="">Everybody</option>
+                {groups.map((g) => (
+                  <option key={g.id} value={g.id}>
+                    {g.name} ({g.members})
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
           <button
             type="button"
             onClick={() => void build()}
             disabled={busy}
             className="bg-signal text-signal-ink font-medium px-6 py-2 text-sm disabled:opacity-50"
           >
-            {busy ? "Building…" : "Run payroll"}
+            {busy ? "Building…" : chosen ? `Run payroll for ${chosen.name}` : "Run payroll"}
           </button>
           {error && <p className="text-danger text-xs">{error}</p>}
         </div>

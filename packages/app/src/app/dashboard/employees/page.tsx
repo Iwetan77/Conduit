@@ -12,10 +12,14 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   addEmployee,
   archiveEmployee,
+  createEmployeeGroup,
+  deleteEmployeeGroup,
+  listEmployeeGroups,
   listEmployees,
   updateEmployee,
   ConduitApiError,
   type Employee,
+  type EmployeeGroup,
 } from "@/lib/conduit-api";
 import { isoToToken } from "@/lib/currencies";
 import { SettleCurrencySelect } from "@/components/Shared/SettleCurrencySelect";
@@ -26,6 +30,7 @@ import { UserMark } from "@/components/Shared/UserMark";
 import { currencyDecimals, type Currency } from "@conduit/sdk/lite";
 
 const qkEmployees = ["employees"] as const;
+const qkEmployeeGroups = ["employee-groups"] as const;
 
 function toMinorUnits(human: string, decimals: number): string {
   const clean = human.replace(/[^0-9.]/g, "");
@@ -35,27 +40,60 @@ function toMinorUnits(human: string, decimals: number): string {
 }
 
 function errorText(err: unknown): string {
-  return err instanceof ConduitApiError ? err.message : "Something went wrong. Try again.";
+  // The real message, whatever kind of error it is.
+  //
+  // This returned "Something went wrong. Try again." for anything that was not
+  // a ConduitApiError -- which is every wallet, provider and signing failure,
+  // i.e. most of what can actually go wrong here. A payroll that refused to
+  // sign for the business's own address reported itself as "Something went
+  // wrong", and that sentence is why it took a person to find the cause
+  // instead of the screen saying it.
+  if (err instanceof ConduitApiError) return err.message;
+  if (err instanceof Error && err.message) return err.message;
+  return "Something went wrong. Try again.";
 }
 
 export default function EmployeesPage() {
   const qc = useQueryClient();
   const [showArchived, setShowArchived] = useState(false);
+  // Which group is being looked at. "" is everybody, which is also what an
+  // account that has never made a group always sees.
+  const [groupID, setGroupID] = useState("");
   const { data, isLoading } = useQuery({
     queryKey: [...qkEmployees, showArchived],
     queryFn: () => listEmployees(showArchived),
   });
-  const employees = data?.data ?? [];
-  const refresh = () => qc.invalidateQueries({ queryKey: qkEmployees });
+  const { data: groupData } = useQuery({
+    queryKey: qkEmployeeGroups,
+    queryFn: listEmployeeGroups,
+  });
+  const groups = groupData?.data ?? [];
+  const all = data?.data ?? [];
+  // Filtered here rather than refetched per tab. The roster is small, it is
+  // already in memory, and a request per tab click would make switching
+  // between two teams feel like loading two pages.
+  const employees = groupID ? all.filter((e) => e.group_id === groupID) : all;
+  const refresh = () => {
+    qc.invalidateQueries({ queryKey: qkEmployees });
+    qc.invalidateQueries({ queryKey: qkEmployeeGroups });
+  };
 
   return (
     <div className="max-w-4xl mx-auto">
       <PageHeader
         title="Employees"
-        description="The people this business pays. Add them by username so nobody has to check a hex address."
+        description="The people this business pays. Group them by business, then pay one group at a time."
       />
 
-      <AddEmployee onAdded={refresh} />
+      <GroupBar
+        groups={groups}
+        selected={groupID}
+        onSelect={setGroupID}
+        total={all.length}
+        onChanged={refresh}
+      />
+
+      <AddEmployee onAdded={refresh} groups={groups} defaultGroup={groupID} />
 
       <div className="mt-6 border border-border">
         {isLoading && <p className="text-ink-dim text-xs p-4">Loading…</p>}
@@ -64,10 +102,13 @@ export default function EmployeesPage() {
           // Says what the page is for. "No employees" tells somebody who has
           // never used it nothing at all.
           <div className="p-8 text-center space-y-1">
-            <p className="text-ink text-sm">Nobody on the payroll yet.</p>
+            <p className="text-ink text-sm">
+              {groupID ? "Nobody in this group yet." : "Nobody on the payroll yet."}
+            </p>
             <p className="text-ink-dim text-xs">
-              Add the people you pay regularly, then run payroll to pay them all
-              in one transaction.
+              {groupID
+                ? "Add someone above, or move an existing person into this group from their row."
+                : "Add the people you pay regularly, then run payroll to pay them all in one transaction."}
             </p>
           </div>
         )}
@@ -78,6 +119,7 @@ export default function EmployeesPage() {
               <tr>
                 <th className="px-4 py-3 font-medium">Name</th>
                 <th className="px-4 py-3 font-medium">Paid to</th>
+                <th className="px-4 py-3 font-medium">Group</th>
                 <th className="px-4 py-3 font-medium">Receives</th>
                 <th className="px-4 py-3 font-medium text-right">Amount</th>
                 <th className="px-4 py-3 font-medium">Status</th>
@@ -86,7 +128,7 @@ export default function EmployeesPage() {
             </thead>
             <tbody>
               {employees.map((e) => (
-                <EmployeeRow key={e.id} employee={e} onChanged={refresh} />
+                <EmployeeRow key={e.id} employee={e} groups={groups} onChanged={refresh} />
               ))}
             </tbody>
           </table>
@@ -104,7 +146,155 @@ export default function EmployeesPage() {
   );
 }
 
-function EmployeeRow({ employee, onChanged }: { employee: Employee; onChanged: () => void }) {
+// The groups, as tabs, with the way to make one sitting in the same row.
+//
+// A merchant who runs two businesses needs to see one team at a time; that is
+// the entire feature. It renders even with no groups yet, because "New group"
+// has to be findable BEFORE there is a group to hint that groups exist -- a bar
+// that only appears once you have used it is a feature nobody discovers.
+function GroupBar({
+  groups,
+  selected,
+  onSelect,
+  total,
+  onChanged,
+}: {
+  groups: EmployeeGroup[];
+  selected: string;
+  onSelect: (id: string) => void;
+  total: number;
+  onChanged: () => void;
+}) {
+  const [creating, setCreating] = useState(false);
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const create = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!name.trim()) return;
+    setError("");
+    setBusy(true);
+    try {
+      const g = await createEmployeeGroup(name.trim());
+      setName("");
+      setCreating(false);
+      onChanged();
+      // Straight into the group they just made. Creating one and being left on
+      // "Everyone" means the next thing they do -- add staff to it -- starts
+      // with a click they should not have needed.
+      onSelect(g.id);
+    } catch (err) {
+      setError(errorText(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = async (g: EmployeeGroup) => {
+    // Named, and honest about what survives. Deleting a group is not deleting
+    // people, and somebody hesitating over this button deserves to know that
+    // before they press it rather than after.
+    const ok = window.confirm(
+      `Delete the group "${g.name}"?\n\n` +
+        `The ${g.members} ${g.members === 1 ? "person" : "people"} in it stay on your payroll and become ungrouped. Nobody is removed.`,
+    );
+    if (!ok) return;
+    setBusy(true);
+    try {
+      await deleteEmployeeGroup(g.id);
+      if (selected === g.id) onSelect("");
+      onChanged();
+    } catch (err) {
+      setError(errorText(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const tab = (active: boolean) =>
+    `px-3 py-1.5 text-xs border transition-colors ${
+      active
+        ? "border-signal text-signal bg-signal/5"
+        : "border-border text-ink-dim hover:text-ink hover:border-ink-dim"
+    }`;
+
+  return (
+    <div className="mb-4 space-y-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <button type="button" onClick={() => onSelect("")} className={tab(selected === "")}>
+          Everyone <span className="text-ink-dim/70">{total}</span>
+        </button>
+        {groups.map((g) => (
+          <span key={g.id} className="inline-flex items-center">
+            <button type="button" onClick={() => onSelect(g.id)} className={tab(selected === g.id)}>
+              {g.name} <span className="text-ink-dim/70">{g.members}</span>
+            </button>
+            {/* Only on the open group, so a row of tabs is not a row of
+                delete buttons waiting to be mis-clicked. */}
+            {selected === g.id && (
+              <button
+                type="button"
+                onClick={() => remove(g)}
+                disabled={busy}
+                aria-label={`Delete the group ${g.name}`}
+                title={`Delete the group ${g.name}`}
+                className="border border-l-0 border-border px-2 py-1.5 text-xs text-ink-dim hover:text-danger hover:border-danger disabled:opacity-50"
+              >
+                ×
+              </button>
+            )}
+          </span>
+        ))}
+
+        {creating ? (
+          <form onSubmit={create} className="inline-flex items-center gap-2">
+            <input
+              autoFocus
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") {
+                  setCreating(false);
+                  setName("");
+                }
+              }}
+              placeholder="Group name"
+              maxLength={60}
+              className="bg-bg border border-signal px-3 py-1.5 text-xs font-mono text-ink focus:outline-none"
+            />
+            <button
+              type="submit"
+              disabled={busy || !name.trim()}
+              className="bg-signal text-signal-ink px-3 py-1.5 text-xs font-medium disabled:opacity-50"
+            >
+              {busy ? "…" : "Create"}
+            </button>
+          </form>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setCreating(true)}
+            className="px-3 py-1.5 text-xs border border-dashed border-border text-ink-dim hover:text-ink hover:border-ink-dim"
+          >
+            + New group
+          </button>
+        )}
+      </div>
+      {error && <p className="text-danger text-xs">{error}</p>}
+    </div>
+  );
+}
+
+function EmployeeRow({
+  employee,
+  groups,
+  onChanged,
+}: {
+  employee: Employee;
+  groups: EmployeeGroup[];
+  onChanged: () => void;
+}) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const token = isoToToken(employee.pay_currency);
@@ -135,6 +325,25 @@ function EmployeeRow({ employee, onChanged }: { employee: Employee; onChanged: (
             {shortenAddress(employee.address)}
           </span>
         )}
+      </td>
+      {/* Moving somebody between groups, in place.
+          A dropdown on the row rather than a separate edit screen, because
+          this is the one field here that a person changes casually -- it
+          changes which run pays them, not where their money goes. */}
+      <td className="px-4 py-3">
+        <select
+          value={employee.group_id ?? ""}
+          disabled={busy}
+          onChange={(e) => run(() => updateEmployee(employee.id, { group_id: e.target.value }))}
+          className="bg-bg border border-border px-2 py-1 text-xs text-ink-dim focus:border-signal focus:outline-none disabled:opacity-50"
+        >
+          <option value="">Ungrouped</option>
+          {groups.map((g) => (
+            <option key={g.id} value={g.id}>
+              {g.name}
+            </option>
+          ))}
+        </select>
       </td>
       <td className="px-4 py-3">
         <span className="flex items-center gap-1.5">
@@ -205,9 +414,21 @@ function EmployeeRow({ employee, onChanged }: { employee: Employee; onChanged: (
   );
 }
 
-function AddEmployee({ onAdded }: { onAdded: () => void }) {
+function AddEmployee({
+  onAdded,
+  groups,
+  defaultGroup,
+}: {
+  onAdded: () => void;
+  groups: EmployeeGroup[];
+  // Whichever group is being viewed. Adding somebody while looking at "staff1"
+  // should put them in staff1 -- making them ungrouped and asking the merchant
+  // to move them afterwards is a step the screen already knew the answer to.
+  defaultGroup: string;
+}) {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
+  const [groupID, setGroupID] = useState(defaultGroup);
   const [byAddress, setByAddress] = useState(false);
   const [username, setUsername] = useState("");
   const [address, setAddress] = useState("");
@@ -228,6 +449,7 @@ function AddEmployee({ onAdded }: { onAdded: () => void }) {
         address: byAddress ? address.trim() : undefined,
         pay_currency: currency,
         pay_type: payType,
+        group_id: groupID || undefined,
         amount:
           payType === "fixed"
             ? toMinorUnits(amount, currencyDecimals(isoToToken(currency) as Currency))
@@ -237,6 +459,9 @@ function AddEmployee({ onAdded }: { onAdded: () => void }) {
       setUsername("");
       setAddress("");
       setAmount("");
+      // The group is NOT reset. Somebody adding a team adds several people to
+      // the same one, and clearing it every time would make the common case
+      // the one that needs a click.
       setOpen(false);
       onAdded();
     } catch (err) {
@@ -356,6 +581,30 @@ function AddEmployee({ onAdded }: { onAdded: () => void }) {
               </span>
             </div>
           </>
+        )}
+      </div>
+
+      <div>
+        <label className="text-scale-1 font-mono text-ink-dim uppercase tracking-wider block mb-1">
+          Group
+        </label>
+        <select
+          value={groupID}
+          onChange={(e) => setGroupID(e.target.value)}
+          className="w-full bg-bg border border-border px-3 py-2 text-sm text-ink focus:border-signal focus:outline-none"
+        >
+          <option value="">Ungrouped</option>
+          {groups.map((g) => (
+            <option key={g.id} value={g.id}>
+              {g.name}
+            </option>
+          ))}
+        </select>
+        {groups.length === 0 && (
+          <p className="text-ink-dim text-xs mt-1">
+            Make a group above to pay one business&apos;s staff without paying
+            everybody else&apos;s.
+          </p>
         )}
       </div>
 

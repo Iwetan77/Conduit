@@ -9,6 +9,7 @@ import { CURRENCIES } from "@conduit/sdk/lite";
 import { updateAccount, type Account, ConduitApiError } from "@/lib/conduit-api";
 import { SettleCurrencySelect } from "@/components/Shared/SettleCurrencySelect";
 import { PageHeader } from "@/components/Dashboard/PageHeader";
+import { PayoutDestinations } from "@/components/Dashboard/PayoutDestinations";
 import { useCopy } from "@/lib/use-copy";
 
 const EXPLORER = process.env.NEXT_PUBLIC_EXPLORER ?? "https://testnet.arcscan.app";
@@ -264,6 +265,11 @@ export default function SettingsPage() {
       <PageHeader title="Settings" description="Your business identity and where payments settle." />
 
       <BusinessIdentity />
+
+      {/* Below the settlement address on purpose: the first says where money
+          arrives, this says where it can be sent. Reading them in that order is
+          the difference between the two. */}
+      <PayoutDestinations />
 
       <div className="border border-border p-6 space-y-4">
         <div>

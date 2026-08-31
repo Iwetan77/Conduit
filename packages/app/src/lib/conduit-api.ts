@@ -433,6 +433,83 @@ export function provisionSettlementWallet(walletId: string, circleToken: string)
   });
 }
 
+// ── Payout destinations ─────────────────────────────────────────────────────
+//
+// Where a business withdraws TO, which is not where its income routes. An
+// address is added unverified and stays unpayable until its owner proves
+// control of it — a withdrawal is on-chain and final, and twenty bytes of valid
+// hex is not evidence of anything.
+
+export interface PayoutDestination {
+  id: string;
+  address: string;
+  label: string | null;
+  verified: boolean;
+  verified_at: string | null;
+  created_at: string;
+}
+
+export function listPayoutDestinations() {
+  return request<{ data: PayoutDestination[] }>("/v1/payout_destinations");
+}
+
+export function addPayoutDestination(body: { address: string; label?: string }) {
+  return request<PayoutDestination>("/v1/payout_destinations", { method: "POST", body });
+}
+
+/** Asks for the message to sign. Single-use, and re-asking replaces the last one. */
+export function payoutDestinationChallenge(id: string) {
+  return request<{ message: string; expires_in: number }>(
+    `/v1/payout_destinations/${id}/challenge`,
+    { method: "POST", body: {} },
+  );
+}
+
+export function verifyPayoutDestination(id: string, signature: string) {
+  return request<{ verified: boolean }>(`/v1/payout_destinations/${id}/verify`, {
+    method: "POST",
+    body: { signature },
+  });
+}
+
+export function removePayoutDestination(id: string) {
+  return request<void>(`/v1/payout_destinations/${id}`, { method: "DELETE" });
+}
+
+export interface Payout {
+  id: string;
+  status: "pending" | "paid" | "failed";
+  currency: string;
+  amount: string;
+  destination_address: string;
+  from_address: string;
+  tx_hash: string | null;
+  created_at: string;
+  paid_at: string | null;
+  /** Present only on the create response: what the browser has to send. */
+  transfer?: { token: string; to: string; amount: string };
+}
+
+/**
+ * Authorises a withdrawal. Nothing has moved when this returns — it hands back
+ * the transfer to make, every field of which the SERVER chose.
+ */
+export function createPayout(body: { destination_id: string; currency: string; amount: string }) {
+  return request<Payout>("/v1/payouts", { method: "POST", body });
+}
+
+/** Records what the chain says happened. The hash is a claim until this looks. */
+export function confirmPayout(id: string, txHash: string) {
+  return request<Payout>(`/v1/payouts/${id}/confirm`, {
+    method: "POST",
+    body: { tx_hash: txHash },
+  });
+}
+
+export function listPayouts() {
+  return request<{ data: Payout[] }>("/v1/payouts");
+}
+
 export function listAccounts() {
   return request<{ data: Account[] }>("/v1/accounts");
 }

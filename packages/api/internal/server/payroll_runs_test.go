@@ -229,10 +229,16 @@ func TestPayrollOneCurrencyPaidAndOneFailedIsPartial(t *testing.T) {
 		t.Fatalf("execute: status=%d body=%s", resp.status, resp.body)
 	}
 
-	paid := doJSON(t, srv.URL, "POST", "/v1/payroll_runs/"+run.ID+"/legs", key,
-		`{"currency":"USD","tx_hash":"0xaaaa"}`, "")
-	if paid.status != http.StatusOK {
-		t.Fatalf("record USD: status=%d body=%s", paid.status, paid.body)
+	// The USD group is marked paid directly, because recording it through the
+	// API now REQUIRES a transaction that really contains the run -- which is
+	// the point of that check and cannot be produced without a chain. What is
+	// under test here is the status derivation, and this is the state a
+	// verified leg leaves behind. The API path is proven end to end in
+	// scripts/e2e-payroll.sh against a real disperse.
+	if _, err := p.Exec(ctx,
+		`UPDATE payroll_run_items SET status = 'paid', tx_hash = '0xverified'
+		  WHERE run_id = $1 AND currency = 'USD'`, run.ID); err != nil {
+		t.Fatalf("mark USD paid: %v", err)
 	}
 	failed := doJSON(t, srv.URL, "POST", "/v1/payroll_runs/"+run.ID+"/legs", key,
 		`{"currency":"EUR","failed":true,"error":"conversion quote expired"}`, "")
@@ -297,5 +303,70 @@ func TestAPayrollWithNobodyActiveIsRefused(t *testing.T) {
 	resp, _ := draftRun(t, srv.URL, key, `{}`)
 	if resp.status != http.StatusUnprocessableEntity {
 		t.Fatalf("status=%d, want 422; body=%s", resp.status, resp.body)
+	}
+}
+
+// Recording a payment that did not happen would tell everybody in that group
+// they had been paid. So the transaction has to actually contain the run —
+// a hash on its own is a claim, not evidence.
+func TestPayrollALegCannotBeRecordedOnAnUnrelatedTransaction(t *testing.T) {
+	t.Setenv("CONDUIT_PAYROLL_ADDRESS", "0xcC4b99a2B74DA98695d4136FB7F20988621BeB11")
+	srv, key, p := newLinkTestServer(t, 15618)
+	ctx := context.Background()
+	hireThree(t, srv.URL, key)
+	_, run := draftRun(t, srv.URL, key, `{}`)
+
+	if resp := doJSON(t, srv.URL, "POST", "/v1/payroll_runs/"+run.ID+"/execute", key,
+		`{"run_key":"unverified-leg"}`, ""); resp.status != http.StatusOK {
+		t.Fatalf("execute: status=%d body=%s", resp.status, resp.body)
+	}
+
+	// A well-formed hash for a transaction that is not this payroll. Whether the
+	// chain says "no such transaction" or "not that run", the answer must not be
+	// success.
+	resp := doJSON(t, srv.URL, "POST", "/v1/payroll_runs/"+run.ID+"/legs", key,
+		`{"currency":"USD","tx_hash":"0x2222222222222222222222222222222222222222222222222222222222222222"}`, "")
+	if resp.status == http.StatusOK {
+		t.Fatalf("an unrelated transaction recorded a payroll group as paid: %s", resp.body)
+	}
+
+	var paid int
+	_ = p.QueryRow(ctx,
+		`SELECT count(*) FROM payroll_run_items WHERE run_id = $1 AND status = 'paid'`,
+		run.ID).Scan(&paid)
+	if paid != 0 {
+		t.Fatalf("%d lines were marked paid on an unverified claim", paid)
+	}
+}
+
+// A failure after the run is claimed must not strand it. The claim happens
+// before any work so a second execute cannot slip in, but an error that moved
+// no money should leave the run runnable.
+func TestPayrollAFailedExecuteReleasesTheRun(t *testing.T) {
+	t.Setenv("CONDUIT_PAYROLL_ADDRESS", "0xcC4b99a2B74DA98695d4136FB7F20988621BeB11")
+	srv, key, p := newLinkTestServer(t, 15619)
+	ctx := context.Background()
+	hireThree(t, srv.URL, key)
+	_, run := draftRun(t, srv.URL, key, `{}`)
+
+	// Every line already resolved, so there is nothing left to build legs from —
+	// the shape a run is in when it has been fully recorded already.
+	if _, err := p.Exec(ctx,
+		`UPDATE payroll_run_items SET status = 'failed' WHERE run_id = $1`, run.ID); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	resp := doJSON(t, srv.URL, "POST", "/v1/payroll_runs/"+run.ID+"/execute", key,
+		`{"run_key":"released"}`, "")
+	if resp.status == http.StatusOK {
+		t.Fatalf("a run with no payable lines executed: %s", resp.body)
+	}
+
+	var status string
+	var runKey *string
+	_ = p.QueryRow(ctx,
+		`SELECT status, run_key FROM payroll_runs WHERE id = $1`, run.ID).Scan(&status, &runKey)
+	if status != "draft" || runKey != nil {
+		t.Fatalf("a failed execute stranded the run: status=%s key=%v", status, runKey)
 	}
 }

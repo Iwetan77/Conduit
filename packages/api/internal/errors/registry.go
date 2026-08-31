@@ -56,6 +56,7 @@ const (
 	CodePayrollNotDraft         Code = "payroll_run_not_draft"
 	CodePayrollKeyReused        Code = "payroll_run_key_reused"
 	CodePayrollNotConfigured    Code = "payroll_not_configured"
+	CodePayrollNotOnChain       Code = "payroll_leg_not_found_on_chain"
 )
 
 type entry struct {
@@ -149,6 +150,9 @@ var registry = map[Code]entry{
 	// paying twice impossible rather than unlikely.
 	CodePayrollKeyReused:     {http.StatusConflict, "That run key has already been used. Nobody was paid twice."},
 	CodePayrollNotConfigured: {http.StatusServiceUnavailable, "Payroll is not configured on this deployment."},
+	// Recording a payment that did not happen would tell everybody in that
+	// group they had been paid. The transaction has to contain the run.
+	CodePayrollNotOnChain: {http.StatusUnprocessableEntity, "That transaction does not contain this payroll group's payment."},
 }
 
 // APIError is what handlers return; the HTTP layer renders it to the

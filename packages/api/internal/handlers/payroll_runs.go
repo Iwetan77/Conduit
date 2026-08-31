@@ -102,14 +102,42 @@ type payrollRunResponse struct {
 const gasPerRecipient = 35_000
 const gasFixed = 80_000
 
-// A price rather than an oracle. Arc testnet gas is cheap and stable, and a
-// preview figure that is roughly right is worth far more than a figure that
-// needs a live call to produce and can therefore fail.
-const gasPriceWei = 1_000_000_000 // 1 gwei
+// Fallback only, and deliberately high.
+//
+// This was hardcoded at 1 gwei. Arc charges 21, so the preview came out
+// TWENTY-ONE TIMES too low -- it would have told a business it could afford a
+// payroll it could not, which is the exact failure the preview exists to
+// prevent. Measured against a real disperse: 196,113 gas at 21 gwei cost 4,118
+// USDC minor units, and the old formula said 196.
+//
+// The live price is read instead, and this is what to use when that read fails.
+// Erring high: an over-estimate makes somebody top up unnecessarily, an
+// under-estimate makes a payroll fail halfway.
+const fallbackGasPriceWei = 30_000_000_000 // 30 gwei
 
-func estimateGasCost(recipients int, groups int) *big.Int {
+// Arc's native unit is 18-decimal while USDC is 6, so a wei-denominated fee
+// divides by 1e12 to land in USDC minor units. Verified against a real receipt.
+var weiPerUSDCMinorUnit = big.NewInt(1_000_000_000_000)
+
+func estimateGasCost(recipients, groups int, gasPriceWei *big.Int) *big.Int {
 	units := big.NewInt(int64(gasFixed*groups + gasPerRecipient*recipients))
-	return new(big.Int).Div(new(big.Int).Mul(units, big.NewInt(gasPriceWei)), big.NewInt(1_000_000_000_000))
+	return new(big.Int).Div(new(big.Int).Mul(units, gasPriceWei), weiPerUSDCMinorUnit)
+}
+
+// gasPrice asks the chain, because a hardcoded one was wrong by a factor of 21
+// and nothing noticed until a receipt was read by hand.
+func (h *PayrollRuns) gasPrice(ctx context.Context) *big.Int {
+	client, err := arcrpc.Get(ctx, h.ArcRPC)
+	if err == nil {
+		callCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		if p, err := client.SuggestGasPrice(callCtx); err == nil && p.Sign() > 0 {
+			// A fifth on top. Gas moves between drafting a run and signing it,
+			// and the direction that hurts is upward.
+			return new(big.Int).Div(new(big.Int).Mul(p, big.NewInt(6)), big.NewInt(5))
+		}
+	}
+	return big.NewInt(fallbackGasPriceWei)
 }
 
 // Create is POST /v1/payroll_runs — builds a draft and returns the whole
@@ -355,7 +383,7 @@ func (h *PayrollRuns) writeRun(w http.ResponseWriter, r *http.Request, runID, ac
 		p.SettleAddress = settleAddress
 		p.ContractAddress = h.PayrollContract
 
-		gas := estimateGasCost(len(p.Items), len(p.Groups))
+		gas := estimateGasCost(len(p.Items), len(p.Groups), h.gasPrice(r.Context()))
 		gasStr := gas.String()
 		p.EstimatedGas = &gasStr
 

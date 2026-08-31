@@ -23,9 +23,12 @@ import (
 	"math/big"
 	"net/http"
 	"strings"
+	"time"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/jackc/pgx/v5"
+	"github.com/kzn-labs/conduit/api/internal/arcrpc"
 	"github.com/kzn-labs/conduit/api/internal/auth"
 	"github.com/kzn-labs/conduit/api/internal/currency"
 	apierrors "github.com/kzn-labs/conduit/api/internal/errors"
@@ -127,7 +130,22 @@ func (h *PayrollRuns) Execute(w http.ResponseWriter, r *http.Request) {
 
 	legs, e := h.buildLegs(ctx, runID, treasury)
 	if e != nil {
+		// Put it back. The claim happens before any work so a second execute
+		// cannot slip in beside this one -- but a failure here has moved no
+		// money, and leaving the run 'executing' with its key consumed would
+		// make it both unexecutable and unretryable over an error that touched
+		// nothing.
+		_, _ = h.Pool.Exec(ctx,
+			`UPDATE payroll_runs SET status = 'draft', run_key = NULL, executed_at = NULL
+			  WHERE id = $1 AND status = 'executing'`, runID)
 		writeErr(w, e)
+		return
+	}
+	if len(legs) == 0 {
+		_, _ = h.Pool.Exec(ctx,
+			`UPDATE payroll_runs SET status = 'draft', run_key = NULL, executed_at = NULL
+			  WHERE id = $1 AND status = 'executing'`, runID)
+		writeErr(w, apierrors.E(apierrors.CodePayrollNoEmployees, ""))
 		return
 	}
 	writeJSON(w, http.StatusOK, executeResponse{
@@ -239,11 +257,31 @@ func (h *PayrollRuns) RecordLeg(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	} else {
-		_, err := h.Pool.Exec(ctx,
+		// The chain, not the caller.
+		//
+		// Payouts already read the receipt before recording one; this did not,
+		// so a caller could report a payroll paid that never happened and every
+		// person in it would be told they had been. The contract emits one
+		// PayrollRun carrying the run id, the token and the total, which is
+		// exactly the claim being made.
+		total, e := h.groupTotal(ctx, runID, req.Currency)
+		if e != nil {
+			writeErr(w, e)
+			return
+		}
+		ok, err := h.dispersed(ctx, strings.TrimSpace(req.TxHash), runID, req.Currency, total)
+		if err != nil {
+			writeErr(w, apierrors.E(apierrors.CodeUpstreamUnavailable, "arc rpc"))
+			return
+		}
+		if !ok {
+			writeErr(w, apierrors.E(apierrors.CodePayrollNotOnChain, "tx_hash"))
+			return
+		}
+		if _, err := h.Pool.Exec(ctx,
 			`UPDATE payroll_run_items SET status = 'paid', tx_hash = $1, error = NULL
 			  WHERE run_id = $2 AND currency = $3 AND status = 'pending'`,
-			strings.TrimSpace(req.TxHash), runID, req.Currency)
-		if err != nil {
+			strings.TrimSpace(req.TxHash), runID, req.Currency); err != nil {
 			writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
 			return
 		}
@@ -315,4 +353,73 @@ func (h *PayrollRuns) settleRunStatus(ctx context.Context, runID, accountID stri
 // silently truncates is a run that cannot be found later.
 func runIDHash(runID string) string {
 	return crypto.Keccak256Hash([]byte(runID)).Hex()
+}
+
+// groupTotal is what this currency's pending lines add up to — the figure the
+// contract should have reported paying.
+func (h *PayrollRuns) groupTotal(ctx context.Context, runID, currencyISO string) (*big.Int, *apierrors.APIError) {
+	var total string
+	if err := h.Pool.QueryRow(ctx,
+		`SELECT COALESCE(sum(amount), 0)::text FROM payroll_run_items
+		  WHERE run_id = $1 AND currency = $2 AND status = 'pending'`,
+		runID, currencyISO).Scan(&total); err != nil {
+		return nil, apierrors.E(apierrors.CodeInternal, "")
+	}
+	n, _ := new(big.Int).SetString(total, 10)
+	return n, nil
+}
+
+// payrollRunTopic is keccak256 of the run-level event the contract emits.
+var payrollRunTopic = crypto.Keccak256Hash([]byte("PayrollRun(bytes32,address,address,uint256,uint256)"))
+
+// dispersed reports whether `txHash` really contains this group's payment.
+//
+// Matched on the run id AND the token AND the total, all three. The run id
+// alone would accept a different currency's leg from the same run; the token
+// alone would accept somebody else's payroll of the same asset.
+func (h *PayrollRuns) dispersed(
+	ctx context.Context, txHash, runID, currencyISO string, total *big.Int,
+) (bool, error) {
+	info, ok := currency.ByISO(currencyISO)
+	if !ok {
+		return false, nil
+	}
+	client, err := arcrpc.Get(ctx, h.ArcRPC)
+	if err != nil {
+		return false, err
+	}
+	callCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+
+	receipt, err := client.TransactionReceipt(callCtx, common.HexToHash(txHash))
+	if err != nil {
+		return false, err
+	}
+	// A reverted transaction paid nobody, whatever its logs say.
+	if receipt.Status != 1 {
+		return false, nil
+	}
+
+	wantRun := crypto.Keccak256Hash([]byte(runID))
+	wantToken := common.HexToAddress(info.Token)
+	contract := common.HexToAddress(h.PayrollContract)
+	for _, lg := range receipt.Logs {
+		if lg.Address != contract || len(lg.Topics) != 4 || lg.Topics[0] != payrollRunTopic {
+			continue
+		}
+		if lg.Topics[1] != wantRun {
+			continue
+		}
+		if common.BytesToAddress(lg.Topics[2].Bytes()) != wantToken {
+			continue
+		}
+		// recipients, then total — two non-indexed words, in declaration order.
+		if len(lg.Data) < 64 {
+			continue
+		}
+		if new(big.Int).SetBytes(lg.Data[32:64]).Cmp(total) == 0 {
+			return true, nil
+		}
+	}
+	return false, nil
 }

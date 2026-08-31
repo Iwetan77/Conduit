@@ -17,7 +17,8 @@
     "contracts:build": "pnpm --filter @conduit/contracts build",
     "contracts:test": "pnpm --filter @conduit/contracts test",
     "contracts:deploy": "pnpm --filter @conduit/contracts deploy",
-    "sdk:build": "pnpm --filter @conduit/sdk build"
+    "sdk:build": "pnpm --filter @conduit/sdk build",
+    "contracts:deploy:payroll": "pnpm --filter @conduit/contracts deploy:payroll"
   },
   "devDependencies": {
     "esbuild": "^0.28.2",

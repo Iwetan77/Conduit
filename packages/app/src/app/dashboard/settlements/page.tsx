@@ -5,6 +5,7 @@ import { type Settlement } from "@/lib/conduit-api";
 import { useMyAccount, useSettlements } from "@/lib/queries";
 import { formatDate, shortenAddress, formatMinorUnits, tokenLabel } from "@/lib/format";
 import { PageHeader } from "@/components/Dashboard/PageHeader";
+import { SettlementWalletCard } from "@/components/Dashboard/SettlementWalletCard";
 import { useSettledTotal, type CurrencyTotal } from "@/lib/use-settled-total";
 
 const EXPLORER = process.env.NEXT_PUBLIC_EXPLORER ?? "https://testnet.arcscan.app";
@@ -79,7 +80,15 @@ export default function SettlementsPage() {
 
   return (
     <div>
-      <PageHeader title="Settlements" description="Every payment that has landed, with the on-chain transaction behind it." />
+      {/* Balance and address in the header's action slot — top right, beside
+          the takings they explain. Both used to live in Settings, which is
+          where you go to CHANGE something; "how much is in there" is checked
+          constantly and changed never. */}
+      <PageHeader
+        title="Settlements"
+        description="Every payment that has landed, with the on-chain transaction behind it."
+        action={<SettlementWalletCard />}
+      />
 
       {/* The headline figure, in its own panel. It used to sit bare on the grid
           ABOVE the page title, so the first thing on screen was an unlabelled

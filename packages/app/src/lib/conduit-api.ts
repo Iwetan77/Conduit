@@ -510,6 +510,30 @@ export function listPayouts() {
   return request<{ data: Payout[] }>("/v1/payouts");
 }
 
+/**
+ * Settle directly to a verified payout destination instead of the wallet
+ * Conduit provisioned.
+ *
+ * Only a destination id — there is no free-text address anywhere in this flow,
+ * because a typed settlement address is the hole all of this closed. The name
+ * is friction rather than security: anyone who can call this can read it, and
+ * the point is that it cannot happen by mis-clicking.
+ */
+export function settleToExternal(body: { destination_id: string; confirm_name: string }) {
+  return request<{ settle_address: string; settle_address_source: string }>(
+    "/v1/accounts/me/settlement_address/external",
+    { method: "POST", body },
+  );
+}
+
+/** Back to the account's own wallet. One call, nothing to type. */
+export function revertSettlementAddress() {
+  return request<{ settle_address: string; settle_address_source: string }>(
+    "/v1/accounts/me/settlement_address/revert",
+    { method: "POST", body: {} },
+  );
+}
+
 export function listAccounts() {
   return request<{ data: Account[] }>("/v1/accounts");
 }

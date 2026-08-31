@@ -270,6 +270,10 @@ func (h *SettlementWallet) Provision(w http.ResponseWriter, r *http.Request) {
 	const q = `UPDATE accounts
 	              SET settle_wallet_id = $1,
 	                  settle_address = $2,
+	                  -- Remembered separately from settle_address, which can be
+	                  -- pointed elsewhere later. This is the address to come
+	                  -- back to, and the server cannot ask Circle for it again.
+	                  provisioned_address = $2,
 	                  settle_address_source = 'provisioned',
 	                  payout_confirmed_at = COALESCE(payout_confirmed_at, now())
 	            WHERE id = $3 AND settle_wallet_id IS NULL`

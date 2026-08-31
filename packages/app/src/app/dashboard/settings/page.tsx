@@ -10,6 +10,7 @@ import { updateAccount, type Account, ConduitApiError } from "@/lib/conduit-api"
 import { SettleCurrencySelect } from "@/components/Shared/SettleCurrencySelect";
 import { PageHeader } from "@/components/Dashboard/PageHeader";
 import { PayoutDestinations } from "@/components/Dashboard/PayoutDestinations";
+import { AdvancedSettlement } from "@/components/Dashboard/AdvancedSettlement";
 import { useCopy } from "@/lib/use-copy";
 
 const EXPLORER = process.env.NEXT_PUBLIC_EXPLORER ?? "https://testnet.arcscan.app";
@@ -195,6 +196,14 @@ function SettlementAddress({
   );
 }
 
+// Reads the account through the shared cache, like every other consumer, so the
+// advanced panel reflects a switch the moment it lands.
+function AdvancedSettlementSection() {
+  const { data: account } = useMyAccount();
+  if (!account) return null;
+  return <AdvancedSettlement account={account} />;
+}
+
 const SETTLEMENT_PREFERENCE_REGISTRY = process.env.NEXT_PUBLIC_SETTLEMENT_PREFERENCE_REGISTRY as `0x${string}` | undefined;
 
 const PREF_REGISTRY_ABI = [
@@ -270,6 +279,11 @@ export default function SettingsPage() {
           arrives, this says where it can be sent. Reading them in that order is
           the difference between the two. */}
       <PayoutDestinations />
+
+      {/* Last, and behind a disclosure. This is the answer for a company with a
+          finance function, not for somebody signing up, and it should not be in
+          the path of anyone who is not looking for it. */}
+      <AdvancedSettlementSection />
 
       <div className="border border-border p-6 space-y-4">
         <div>

@@ -357,7 +357,8 @@ func TestSettlementWalletProvisioningIsIdempotent(t *testing.T) {
 	const walletID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 	const provisioned = "0x00000000000000000000000000000000000000f1"
 	if _, err := pool.Exec(context.Background(),
-		`UPDATE accounts SET settle_wallet_id=$1, settle_address=$2, settle_address_source='provisioned'
+		`UPDATE accounts SET settle_wallet_id=$1, settle_address=$2, provisioned_address=$2,
+		        settle_address_source='provisioned'
 		  WHERE id='acct_idem'`, walletID, provisioned,
 	); err != nil {
 		t.Fatalf("seed provisioned state: %v", err)
@@ -446,7 +447,8 @@ func TestAccountMeReportsSettlementWalletReadiness(t *testing.T) {
 	}
 
 	if _, err := pool.Exec(context.Background(),
-		`UPDATE accounts SET settle_wallet_id='w1', settle_address_source='provisioned' WHERE id='acct_ready'`,
+		`UPDATE accounts SET settle_wallet_id='w1', provisioned_address=settle_address,
+		        settle_address_source='provisioned' WHERE id='acct_ready'`,
 	); err != nil {
 		t.Fatalf("mark provisioned: %v", err)
 	}
@@ -478,8 +480,8 @@ func TestPaymentLinksRefusedUntilTheBusinessHasItsOwnWallet(t *testing.T) {
 
 	// Once it has one, the same request goes through.
 	if _, err := pool.Exec(context.Background(),
-		`UPDATE accounts SET settle_wallet_id='w-ready', settle_address_source='provisioned'
-		  WHERE id='acct_notready'`,
+		`UPDATE accounts SET settle_wallet_id='w-ready', provisioned_address=settle_address,
+		        settle_address_source='provisioned' WHERE id='acct_notready'`,
 	); err != nil {
 		t.Fatalf("mark provisioned: %v", err)
 	}

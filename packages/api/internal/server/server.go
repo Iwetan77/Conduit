@@ -159,6 +159,7 @@ func New(cfg Config) http.Handler {
 	// key of its own and can only answer for a signature through EIP-1271.
 	payoutDestinationsH := &handlers.PayoutDestinations{Pool: cfg.Pool, ArcRPC: arcRPCForBalances}
 	payoutsH := &handlers.Payouts{Pool: cfg.Pool, ArcRPC: arcRPCForBalances}
+	externalSettlementH := &handlers.ExternalSettlement{Pool: cfg.Pool}
 	paymentLinksH := &handlers.PaymentLinks{Pool: cfg.Pool, AppBaseURL: cfg.AppBaseURL}
 	bridgeH, err := newBridgeHandler(cfg, stableFX, dispatcher)
 	if err != nil {
@@ -492,6 +493,11 @@ func New(cfg Config) http.Handler {
 			r.Get("/payouts", payoutsH.List)
 			r.Post("/payouts", payoutsH.Create)
 			r.Post("/payouts/{id}/confirm", payoutsH.Confirm)
+			// Advanced: income lands directly in a treasury instead of the
+			// wallet Conduit provisioned. Only from a verified destination,
+			// and reversible in one call.
+			r.Post("/accounts/me/settlement_address/external", externalSettlementH.SetExternal)
+			r.Post("/accounts/me/settlement_address/revert", externalSettlementH.Revert)
 			// Ends every session for the account. Authenticated because it acts
 			// on the caller's own account, and only meaningful to a session
 			// caller -- see Accounts.Logout.

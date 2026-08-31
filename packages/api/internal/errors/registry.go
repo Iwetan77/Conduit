@@ -50,6 +50,7 @@ const (
 	CodePayoutUnverified        Code = "payout_destination_unverified"
 	CodePayoutNotOnChain        Code = "payout_not_found_on_chain"
 	CodeUpstreamUnavailable     Code = "upstream_unavailable"
+	CodeConfirmationMismatch    Code = "confirmation_mismatch"
 )
 
 type entry struct {
@@ -129,6 +130,10 @@ var registry = map[Code]entry{
 	// The chain could not be asked. Distinct from a definite no, because
 	// retrying is the right response to one and not the other.
 	CodeUpstreamUnavailable: {http.StatusServiceUnavailable, "A service this request depends on is temporarily unavailable."},
+	// Not security -- anyone who can make this call can read the name. It is
+	// friction, which is the right tool for a change that sends future income
+	// somewhere we cannot reach it.
+	CodeConfirmationMismatch: {http.StatusBadRequest, "That does not match the account name. Type it exactly to confirm."},
 }
 
 // APIError is what handlers return; the HTTP layer renders it to the

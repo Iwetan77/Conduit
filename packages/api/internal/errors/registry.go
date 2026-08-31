@@ -48,6 +48,8 @@ const (
 	CodePayoutChallengeRequired Code = "payout_challenge_required"
 	CodePayoutChallengeExpired  Code = "payout_challenge_expired"
 	CodePayoutUnverified        Code = "payout_destination_unverified"
+	CodePayoutNotOnChain        Code = "payout_not_found_on_chain"
+	CodeUpstreamUnavailable     Code = "upstream_unavailable"
 )
 
 type entry struct {
@@ -120,6 +122,13 @@ var registry = map[Code]entry{
 	// final, and an address nobody has proven control of is indistinguishable
 	// from a typo until the money has gone.
 	CodePayoutUnverified: {http.StatusConflict, "This payout destination has not been verified. Prove control of it before withdrawing to it."},
+	// 422 rather than 404: the transaction may well exist and simply not be the
+	// transfer this payout describes. A ledger built from what a client says
+	// happened is a ledger that can be told anything.
+	CodePayoutNotOnChain: {http.StatusUnprocessableEntity, "That transaction does not contain the transfer this payout describes."},
+	// The chain could not be asked. Distinct from a definite no, because
+	// retrying is the right response to one and not the other.
+	CodeUpstreamUnavailable: {http.StatusServiceUnavailable, "A service this request depends on is temporarily unavailable."},
 }
 
 // APIError is what handlers return; the HTTP layer renders it to the

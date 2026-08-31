@@ -158,6 +158,7 @@ func New(cfg Config) http.Handler {
 	// Arc RPC is needed here for contract wallets: a multisig treasury holds no
 	// key of its own and can only answer for a signature through EIP-1271.
 	payoutDestinationsH := &handlers.PayoutDestinations{Pool: cfg.Pool, ArcRPC: arcRPCForBalances}
+	payoutsH := &handlers.Payouts{Pool: cfg.Pool, ArcRPC: arcRPCForBalances}
 	paymentLinksH := &handlers.PaymentLinks{Pool: cfg.Pool, AppBaseURL: cfg.AppBaseURL}
 	bridgeH, err := newBridgeHandler(cfg, stableFX, dispatcher)
 	if err != nil {
@@ -486,6 +487,11 @@ func New(cfg Config) http.Handler {
 			r.Post("/payout_destinations/{id}/challenge", payoutDestinationsH.Challenge)
 			r.Post("/payout_destinations/{id}/verify", payoutDestinationsH.Verify)
 			r.Delete("/payout_destinations/{id}", payoutDestinationsH.Delete)
+			// Withdrawals. Create authorises and hands back the transfer to
+			// make; confirm records what the chain says actually happened.
+			r.Get("/payouts", payoutsH.List)
+			r.Post("/payouts", payoutsH.Create)
+			r.Post("/payouts/{id}/confirm", payoutsH.Confirm)
 			// Ends every session for the account. Authenticated because it acts
 			// on the caller's own account, and only meaningful to a session
 			// caller -- see Accounts.Logout.

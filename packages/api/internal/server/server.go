@@ -207,6 +207,9 @@ func New(cfg Config) http.Handler {
 	// One limiter for the whole process, so a client cannot reset its budget by
 	// moving between public routes.
 	publicLimiter := newRateLimiter(publicRatePerSecond, publicBurst)
+	// The RPC relay's own bucket. See rateLimitRPC for why it is separate and
+	// why the ceiling is this high.
+	rpcLimiter := newRateLimiter(rpcRatePerSecond, rpcBurst)
 	// Separate bucket set, so a merchant's own traffic can never exhaust the
 	// payer allowance or the other way round.
 	authedLimiter := newRateLimiter(authedRatePerSecond, authedBurst)
@@ -380,7 +383,14 @@ func New(cfg Config) http.Handler {
 			// Public JSON-RPC relay to Arc (method-allowlisted, fixed upstream).
 			// No API key: reads are public chain data and a broadcast carries an
 			// already-signed transaction. See handlers.RPCProxy.
-			r.Post("/rpc", rpcProxyH.Handle)
+			//
+			// Its OWN limiter, not the public one. A single payment makes dozens
+			// of reads, so sharing the payer bucket of 5/second meant one payer
+			// throttled themselves -- measured at nine rejections out of thirty
+			// calls, which the browser reports as "Couldn't reach the network".
+			// See rateLimitRPC.
+			r.With(rateLimitRPC(rpcLimiter, trustProxyHeaders)).
+				Post("/rpc", rpcProxyH.Handle)
 			r.Post("/accounts", accountsH.Create)
 			// Login bootstrap: verifies the credential itself (not gated by
 			// auth.Middleware, since a brand-new user has no account yet for the

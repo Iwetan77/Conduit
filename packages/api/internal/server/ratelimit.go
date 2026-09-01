@@ -1,7 +1,9 @@
 package server
 
 import (
+	"bytes"
 	"encoding/json"
+	"io"
 	"net"
 	"net/http"
 	"strings"
@@ -37,6 +39,31 @@ const (
 	// hammering quotes is not.
 	publicRatePerSecond = 5
 	publicBurst         = 20
+
+	// POST /v1/rpc gets its own, far larger bucket.
+	//
+	// It shared the public one, and that was an outage waiting for a faster
+	// client. A single payment makes dozens of JSON-RPC calls -- nonce, gas
+	// estimate, fee history, broadcast, then receipt polling -- so one payer,
+	// alone, exhausted a bucket of 5/second. Measured against production before
+	// this change: thirty rapid calls, the volume of ONE payment, returned nine
+	// 429s. The browser surfaces a rejected read as "failed to fetch", which
+	// the app reports as "Couldn't reach the network".
+	//
+	// Phase B2 then made it worse by fixing something else. Dropping ethers'
+	// poll interval from 4000ms to 500ms cut nine seconds off every payment and
+	// multiplied receipt-polling requests by eight, straight into this bucket.
+	// The lesson is in the pairing: a client optimisation and a server limit are
+	// one system, and tuning either alone is how a latency fix becomes a
+	// network error.
+	//
+	// A high ceiling is appropriate because this is a RELAY to a public chain,
+	// not a spend endpoint. Nothing behind it costs money or mutates Conduit
+	// state; the worst an abuser achieves is proxying reads that Arc's own
+	// public endpoint would serve them anyway. The limit exists to stop this
+	// instance being used as free infrastructure, not to ration payers.
+	rpcRatePerSecond = 120
+	rpcBurst         = 400
 
 	// Authenticated callers get their own, far more generous allowance, keyed
 	// on the account rather than the IP.
@@ -117,6 +144,77 @@ func (rl *rateLimiter) allow(key string) bool {
 	c.lastSeen = time.Now()
 	rl.mu.Unlock()
 	return c.limiter.Allow()
+}
+
+// allowN is allow, for a request that costs more than one.
+//
+// Used by the RPC proxy so an eth_getLogs scan is charged what it costs while
+// receipt polling stays nearly free. See rpcMethodCost.
+func (rl *rateLimiter) allowN(key string, n int) bool {
+	if n < 1 {
+		n = 1
+	}
+	rl.mu.Lock()
+	c, ok := rl.clients[key]
+	if !ok {
+		if len(rl.clients) >= maxTrackedClients {
+			key = overflowKey
+			c, ok = rl.clients[key]
+		}
+		if !ok {
+			c = &clientLimiter{limiter: rate.NewLimiter(rl.rps, rl.burst)}
+			rl.clients[key] = c
+		}
+	}
+	c.lastSeen = time.Now()
+	rl.mu.Unlock()
+	return c.limiter.AllowN(time.Now(), n)
+}
+
+// rateLimitRPC is the middleware for POST /v1/rpc.
+//
+// Separate from the public limiter because the traffic is a different shape: a
+// single payment makes dozens of reads, and sharing the payer bucket meant one
+// person throttled themselves. It reads the method out of the body to weight
+// the cost, then puts the body back for the handler -- the alternative, letting
+// the proxy do its own limiting, would put the decision behind the thing it is
+// meant to protect.
+func rateLimitRPC(rl *rateLimiter, trustProxy bool) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodOptions {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			cost := 1
+			// Bounded read: the proxy has its own body limit, and this must not
+			// become a way to make the limiter allocate.
+			body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+			r.Body.Close()
+			if err == nil {
+				var probe struct {
+					Method string `json:"method"`
+				}
+				if json.Unmarshal(body, &probe) == nil {
+					cost = rpcMethodCost(probe.Method)
+				}
+				// Handed back intact. Reading a request body consumes it, and a
+				// proxy that received an empty one would fail every call.
+				r.Body = io.NopCloser(bytes.NewReader(body))
+			}
+
+			if !rl.allowN("rpc:"+clientIP(r, trustProxy), cost) {
+				e := apierrors.E(apierrors.CodeRateLimited, "")
+				w.Header().Set("Retry-After", "1")
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(e.Status)
+				json.NewEncoder(w).Encode(map[string]any{"error": e})
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 // clientIP identifies the caller for limiting purposes.
@@ -223,5 +321,25 @@ func rateLimit(rl *rateLimiter, trustProxy bool) func(http.Handler) http.Handler
 			}
 			next.ServeHTTP(w, r)
 		})
+	}
+}
+
+// rpcMethodCost weights a JSON-RPC method by what it actually costs to serve.
+//
+// A flat count treats eth_getTransactionReceipt -- the cheapest possible lookup,
+// and the one receipt polling makes hundreds of -- the same as eth_getLogs,
+// which scans a block range and is the only method here that can be made
+// genuinely expensive by its arguments. Weighting keeps polling nearly free
+// while still bounding the calls worth bounding.
+func rpcMethodCost(method string) int {
+	switch method {
+	case "eth_getLogs":
+		return 20
+	case "eth_call", "eth_estimateGas", "eth_feeHistory":
+		return 2
+	default:
+		// Receipts, nonces, block numbers, balances, broadcasts. The traffic a
+		// payment is actually made of.
+		return 1
 	}
 }

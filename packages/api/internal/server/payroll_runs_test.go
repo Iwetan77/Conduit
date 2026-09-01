@@ -16,8 +16,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"testing"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type payrollRun struct {
@@ -368,5 +372,156 @@ func TestPayrollAFailedExecuteReleasesTheRun(t *testing.T) {
 		`SELECT status, run_key FROM payroll_runs WHERE id = $1`, run.ID).Scan(&status, &runKey)
 	if status != "draft" || runKey != nil {
 		t.Fatalf("a failed execute stranded the run: status=%s key=%v", status, runKey)
+	}
+}
+
+// ── Phase C2: a run that stranded itself ──────────────────────────────────────
+//
+// Execute claims a run as 'executing' and burns its key. If the browser then
+// dies between claiming and reporting -- closed tab, hung wallet, merchant
+// walked away mid-signature -- the run could never move again: Execute requires
+// 'draft', settleRunStatus returns early while anything is pending, and the key
+// cannot be reused. Nothing recovered it and nothing said who had been paid.
+
+// stall backdates a run so it looks abandoned, which is the only way to test
+// this without waiting ten real minutes.
+func stall(t *testing.T, p *pgxpool.Pool, runID string, ago time.Duration) {
+	t.Helper()
+	if _, err := p.Exec(context.Background(),
+		`UPDATE payroll_runs SET last_progress_at = now() - $1::interval WHERE id = $2`,
+		ago.String(), runID); err != nil {
+		t.Fatalf("backdating run: %v", err)
+	}
+}
+
+func TestPayrollAnAbandonedRunCanBeResumed(t *testing.T) {
+	t.Setenv("CONDUIT_PAYROLL_ADDRESS", "0xcC4b99a2B74DA98695d4136FB7F20988621BeB11")
+	srv, key, p := newLinkTestServer(t, 15620)
+	hireThree(t, srv.URL, key)
+	_, run := draftRun(t, srv.URL, key, `{}`)
+
+	first := doJSON(t, srv.URL, "POST", "/v1/payroll_runs/"+run.ID+"/execute", key,
+		`{"run_key":"run-a"}`, "")
+	if first.status != http.StatusOK {
+		t.Fatalf("execute: status=%d body=%s", first.status, first.body)
+	}
+
+	// The browser dies here. Nothing is reported.
+	stall(t, p, run.ID, 20*time.Minute)
+
+	res := doJSON(t, srv.URL, "POST", "/v1/payroll_runs/"+run.ID+"/resume", key,
+		`{"run_key":"run-b"}`, "")
+	if res.status != http.StatusOK {
+		t.Fatalf("resume: status=%d body=%s", res.status, res.body)
+	}
+	if !strings.Contains(res.body, `"legs"`) {
+		t.Fatalf("resume returned no legs to sign: %s", res.body)
+	}
+}
+
+// The wait is the safety property, not a formality: without it a resume races
+// the browser that is still signing, and two sessions build legs from the same
+// pending rows.
+func TestPayrollAResumeAttemptedImmediatelyIsRefused(t *testing.T) {
+	t.Setenv("CONDUIT_PAYROLL_ADDRESS", "0xcC4b99a2B74DA98695d4136FB7F20988621BeB11")
+	srv, key, _ := newLinkTestServer(t, 15621)
+	hireThree(t, srv.URL, key)
+	_, run := draftRun(t, srv.URL, key, `{}`)
+
+	doJSON(t, srv.URL, "POST", "/v1/payroll_runs/"+run.ID+"/execute", key, `{"run_key":"run-a"}`, "")
+
+	res := doJSON(t, srv.URL, "POST", "/v1/payroll_runs/"+run.ID+"/resume", key,
+		`{"run_key":"run-b"}`, "")
+	if res.status == http.StatusOK {
+		t.Fatal("resumed a run that had only just started — this races a live browser")
+	}
+}
+
+// The whole point of resuming rather than re-running.
+func TestPayrollAResumeDoesNotRePayAnyoneAlreadyPaid(t *testing.T) {
+	t.Setenv("CONDUIT_PAYROLL_ADDRESS", "0xcC4b99a2B74DA98695d4136FB7F20988621BeB11")
+	srv, key, p := newLinkTestServer(t, 15622)
+	hireThree(t, srv.URL, key)
+	_, run := draftRun(t, srv.URL, key, `{}`)
+	doJSON(t, srv.URL, "POST", "/v1/payroll_runs/"+run.ID+"/execute", key, `{"run_key":"run-a"}`, "")
+
+	// One person lands. The rest never do.
+	var paidID string
+	if err := p.QueryRow(context.Background(),
+		`UPDATE payroll_run_items SET status = 'paid', tx_hash = '0xdead'
+		  WHERE id = (SELECT id FROM payroll_run_items WHERE run_id = $1 AND status = 'pending' LIMIT 1)
+		  RETURNING id`, run.ID).Scan(&paidID); err != nil {
+		t.Fatalf("marking one item paid: %v", err)
+	}
+
+	stall(t, p, run.ID, 20*time.Minute)
+	res := doJSON(t, srv.URL, "POST", "/v1/payroll_runs/"+run.ID+"/resume", key,
+		`{"run_key":"run-b"}`, "")
+	if res.status != http.StatusOK {
+		t.Fatalf("resume: status=%d body=%s", res.status, res.body)
+	}
+
+	// The paid row must be in no leg. buildLegs filters on 'pending', which is
+	// exactly why -- this asserts that filter is load-bearing rather than
+	// incidental.
+	var addr string
+	_ = p.QueryRow(context.Background(),
+		`SELECT address FROM payroll_run_items WHERE id = $1`, paidID).Scan(&addr)
+	if addr != "" && strings.Contains(strings.ToLower(res.body), strings.ToLower(addr)) {
+		t.Fatalf("resume rebuilt a leg containing somebody already paid (%s)", addr)
+	}
+
+	var stillPaid string
+	_ = p.QueryRow(context.Background(),
+		`SELECT status FROM payroll_run_items WHERE id = $1`, paidID).Scan(&stillPaid)
+	if stillPaid != "paid" {
+		t.Fatalf("a paid item became %q during resume", stillPaid)
+	}
+}
+
+// Resume issues a new key; the original must stay burned. If it did not, a
+// recovery would double as a way to replay the original request.
+func TestPayrollTheOriginalRunKeyStaysUnusableAfterAResume(t *testing.T) {
+	t.Setenv("CONDUIT_PAYROLL_ADDRESS", "0xcC4b99a2B74DA98695d4136FB7F20988621BeB11")
+	srv, key, p := newLinkTestServer(t, 15623)
+	hireThree(t, srv.URL, key)
+	_, run := draftRun(t, srv.URL, key, `{}`)
+	doJSON(t, srv.URL, "POST", "/v1/payroll_runs/"+run.ID+"/execute", key, `{"run_key":"run-a"}`, "")
+
+	stall(t, p, run.ID, 20*time.Minute)
+	res := doJSON(t, srv.URL, "POST", "/v1/payroll_runs/"+run.ID+"/resume", key, `{"run_key":"run-b"}`, "")
+	if res.status != http.StatusOK {
+		t.Fatalf("resume: status=%d body=%s", res.status, res.body)
+	}
+
+	// A fresh run, and the ORIGINAL key. Before Phase C2 the uniqueness lived
+	// on payroll_runs.run_key, so overwriting it during resume handed the old
+	// key back.
+	_, second := draftRun(t, srv.URL, key, `{}`)
+	dup := doJSON(t, srv.URL, "POST", "/v1/payroll_runs/"+second.ID+"/execute", key,
+		`{"run_key":"run-a"}`, "")
+	if dup.status != http.StatusConflict {
+		t.Fatalf("the original key was accepted again after a resume: status=%d body=%s", dup.status, dup.body)
+	}
+
+	// And the resume's own key is burned too.
+	_, third := draftRun(t, srv.URL, key, `{}`)
+	dup2 := doJSON(t, srv.URL, "POST", "/v1/payroll_runs/"+third.ID+"/execute", key,
+		`{"run_key":"run-b"}`, "")
+	if dup2.status != http.StatusConflict {
+		t.Fatalf("the resume key was accepted again: status=%d body=%s", dup2.status, dup2.body)
+	}
+}
+
+// Only a stalled run. A draft is executed, and a finished one is finished.
+func TestPayrollADraftCannotBeResumed(t *testing.T) {
+	t.Setenv("CONDUIT_PAYROLL_ADDRESS", "0xcC4b99a2B74DA98695d4136FB7F20988621BeB11")
+	srv, key, _ := newLinkTestServer(t, 15624)
+	hireThree(t, srv.URL, key)
+	_, run := draftRun(t, srv.URL, key, `{}`)
+
+	res := doJSON(t, srv.URL, "POST", "/v1/payroll_runs/"+run.ID+"/resume", key, `{"run_key":"run-b"}`, "")
+	if res.status == http.StatusOK {
+		t.Fatal("resumed a draft; drafts are executed, not resumed")
 	}
 }

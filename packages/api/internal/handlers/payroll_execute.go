@@ -124,21 +124,25 @@ func (h *PayrollRuns) Execute(w http.ResponseWriter, r *http.Request) {
 	// pass: the unique index on (account_id, run_key) rejects the loser, and
 	// the status guard rejects a run somebody already executed.
 	var treasury string
-	err := h.Pool.QueryRow(ctx,
-		`UPDATE payroll_runs
-		    SET run_key = $1, status = 'executing', executed_at = now()
-		  WHERE id = $2 AND account_id = $3 AND status = 'draft'
-		  RETURNING treasury_currency`,
-		runKey, runID, principal.AccountID,
-	).Scan(&treasury)
+	err := h.claimRun(ctx, runID, principal.AccountID, runKey, "draft", &treasury)
 
 	if err != nil {
 		// A duplicate key means this exact run key was already used. Answering
 		// with the run it belongs to rather than a bare error, because the
 		// caller retrying almost certainly wants to know what happened to it.
 		var existingID, existingStatus string
+		// Looked up in payroll_run_keys, not payroll_runs.run_key.
+		//
+		// That column is overwritten when a stalled run is resumed, so after a
+		// resume it no longer names the run that consumed the ORIGINAL key --
+		// and this lookup found nothing, turning a perfectly correct refusal
+		// into a 500. The key table is the authoritative record of what was
+		// consumed and by which run, which is exactly the question here.
 		if lookupErr := h.Pool.QueryRow(ctx,
-			`SELECT id, status FROM payroll_runs WHERE account_id = $1 AND run_key = $2`,
+			`SELECT r.id, r.status
+			   FROM payroll_run_keys k
+			   JOIN payroll_runs r ON r.id = k.run_id
+			  WHERE k.account_id = $1 AND k.run_key = $2`,
 			principal.AccountID, runKey,
 		).Scan(&existingID, &existingStatus); lookupErr == nil {
 			e := apierrors.E(apierrors.CodePayrollKeyReused, "run_key")
@@ -192,6 +196,24 @@ func (h *PayrollRuns) Execute(w http.ResponseWriter, r *http.Request) {
 		Legs:    legs,
 	})
 }
+
+// payrollResumeMinAge is how long a run must have sat still before it may be
+// resumed.
+//
+// The number is a judgement about people, not machines: it has to outlast a
+// merchant reading a wallet prompt, checking an amount, and approving it, plus
+// the time the transaction takes to confirm. Shorter and a resume races a
+// browser that is still working, and two live sessions build legs from the
+// same pending rows -- whichever confirms second pays people the first already
+// paid. Longer and somebody whose tab genuinely crashed waits for no reason.
+const payrollResumeMinAge = 10 * time.Minute
+
+// payrollStallThreshold is when a run stuck in 'executing' stops being slow and
+// starts being a problem somebody must be told about.
+//
+// Deliberately longer than payrollResumeMinAge: the merchant should be able to
+// fix it themselves before a webhook announces it as an incident.
+const payrollStallThreshold = 30 * time.Minute
 
 // maxPayrollRecipients mirrors ConduitPayroll.MAX_RECIPIENTS.
 //
@@ -420,11 +442,160 @@ func (h *PayrollRuns) RecordLeg(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// This run just moved. Recorded so the sweeper can tell a payroll that is
+	// progressing slowly -- a merchant working through five wallet prompts --
+	// from one nobody is driving any more. executed_at cannot say that: it is
+	// set once and never again.
+	_, _ = h.Pool.Exec(ctx,
+		`UPDATE payroll_runs SET last_progress_at = now(), stalled_at = NULL WHERE id = $1`, runID)
+
 	if e := h.settleRunStatus(ctx, runID, principal.AccountID); e != nil {
 		writeErr(w, e)
 		return
 	}
 	h.writeRun(w, r, runID, principal.AccountID, false)
+}
+
+// claimRun takes a run from `fromStatus` to 'executing' and BURNS the key.
+//
+// One transaction, so two requests arriving together cannot both pass: the
+// primary key on payroll_run_keys rejects the loser, and the status guard
+// rejects a run somebody already executed.
+//
+// The key is burned in a separate table rather than by writing it to
+// payroll_runs.run_key. That column gets overwritten on resume, and uniqueness
+// living there would mean the ORIGINAL key became replayable the moment a
+// stalled run was recovered -- turning a recovery into a way to re-run a
+// payroll.
+func (h *PayrollRuns) claimRun(
+	ctx context.Context, runID, accountID, runKey, fromStatus string, treasury *string,
+) error {
+	tx, err := h.Pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO payroll_run_keys (account_id, run_key, run_id) VALUES ($1,$2,$3)`,
+		accountID, runKey, runID); err != nil {
+		return err
+	}
+	if err := tx.QueryRow(ctx,
+		`UPDATE payroll_runs
+		    SET run_key = $1, status = 'executing',
+		        executed_at = COALESCE(executed_at, now()),
+		        last_progress_at = now(),
+		        stalled_at = NULL
+		  WHERE id = $2 AND account_id = $3 AND status = $4
+		  RETURNING treasury_currency`,
+		runKey, runID, accountID, fromStatus,
+	).Scan(treasury); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+// Resume is POST /v1/payroll_runs/{id}/resume.
+//
+// A run claimed with 'executing' and then abandoned -- tab closed, wallet hung,
+// merchant walked away -- could never move again: Execute requires 'draft',
+// settleRunStatus returns early while anything is pending, and the original key
+// cannot be reused. Nothing recovered it and nothing said which employees had
+// been paid. On a payroll that is somebody not getting their salary with no
+// explanation available.
+//
+// Rebuilds legs from the still-pending items ONLY. buildLegs already filters
+// `WHERE status = 'pending'`, which is exactly right and is why nobody already
+// paid can be paid twice by a resume.
+func (h *PayrollRuns) Resume(w http.ResponseWriter, r *http.Request) {
+	principal, ok := auth.FromContext(r.Context())
+	if !ok {
+		writeErr(w, apierrors.E(apierrors.CodeUnauthorized, ""))
+		return
+	}
+	if strings.TrimSpace(h.PayrollContract) == "" {
+		writeErr(w, apierrors.E(apierrors.CodePayrollNotConfigured, ""))
+		return
+	}
+	runID := pathParam(r, "id")
+	var req struct {
+		RunKey string `json:"run_key"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || strings.TrimSpace(req.RunKey) == "" {
+		writeErr(w, apierrors.E(apierrors.CodeInvalidRequest, "run_key"))
+		return
+	}
+	runKey := strings.TrimSpace(req.RunKey)
+	ctx := r.Context()
+
+	// Old enough to be abandoned rather than slow.
+	//
+	// Without this, resume races the browser that is still signing: two live
+	// sessions building legs from the same pending rows, and whichever wallet
+	// confirms second pays people the first already paid. The wait is the whole
+	// safety property -- a signature prompt a merchant is reading is not a
+	// stalled run.
+	var status string
+	var age time.Duration
+	var lastProgress *time.Time
+	if err := h.Pool.QueryRow(ctx,
+		`SELECT status, last_progress_at FROM payroll_runs WHERE id = $1 AND account_id = $2`,
+		runID, principal.AccountID).Scan(&status, &lastProgress); err != nil {
+		writeErr(w, apierrors.E(apierrors.CodeNotFound, "id"))
+		return
+	}
+	if status != "executing" {
+		// Only a stalled run can be resumed. A draft is executed, and a
+		// finished one is finished.
+		writeErr(w, apierrors.E(apierrors.CodeInvalidRequest,
+			"only a run stuck in 'executing' can be resumed; this one is '"+status+"'"))
+		return
+	}
+	if lastProgress != nil {
+		age = time.Since(*lastProgress)
+	}
+	if age < payrollResumeMinAge {
+		writeErr(w, apierrors.E(apierrors.CodeInvalidRequest,
+			fmt.Sprintf(
+				"this run last moved %s ago; a resume is only allowed after %s, so it cannot race a browser that is still signing",
+				age.Round(time.Second), payrollResumeMinAge,
+			)))
+		return
+	}
+
+	var treasury string
+	if err := h.claimRun(ctx, runID, principal.AccountID, runKey, "executing", &treasury); err != nil {
+		// Almost always the key: the same one twice, or one already used on
+		// another run.
+		writeErr(w, apierrors.E(apierrors.CodePayrollKeyReused, "run_key"))
+		return
+	}
+
+	legs, e := h.buildLegs(ctx, runID, treasury)
+	if e != nil {
+		writeErr(w, e)
+		return
+	}
+	if len(legs) == 0 {
+		// Everything already landed. Resolve it rather than leaving it stuck
+		// again -- this is the case where the browser paid everybody and only
+		// the final report was lost.
+		if e := h.settleRunStatus(ctx, runID, principal.AccountID); e != nil {
+			writeErr(w, e)
+			return
+		}
+		writeJSON(w, http.StatusOK, executeResponse{
+			RunID: runID, Spender: h.PayrollContract, Legs: []payrollLeg{},
+		})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, executeResponse{
+		RunID:   runID,
+		Spender: h.PayrollContract,
+		Legs:    legs,
+	})
 }
 
 // settleRunStatus recomputes the run's own status from its lines, and fires the

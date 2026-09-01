@@ -653,6 +653,21 @@ export function createPayrollRun(amounts?: Record<string, string>, groupId?: str
   });
 }
 
+/**
+ * Recover a run stranded in `executing`.
+ *
+ * Needs a NEW run key — the original stays permanently burned, so a recovery
+ * cannot double as a way to replay the original request. Refused until the run
+ * has sat still long enough that it cannot be racing a browser still signing,
+ * and it rebuilds legs from the unpaid people only.
+ */
+export function resumePayrollRun(id: string, runKey: string) {
+  return request<{ run_id: string; status: string; spender: string; legs: PayrollLeg[] }>(`/v1/payroll_runs/${id}/resume`, {
+    method: "POST",
+    body: { run_key: runKey },
+  });
+}
+
 export function getPayrollRun(id: string) {
   return request<PayrollRun>(`/v1/payroll_runs/${id}`);
 }

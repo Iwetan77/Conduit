@@ -559,6 +559,10 @@ func New(cfg Config) http.Handler {
 			r.Delete("/payroll_runs/{id}", payrollRunsH.Discard)
 			r.Post("/payroll_runs/{id}/execute", payrollRunsH.Execute)
 			r.Post("/payroll_runs/{id}/legs", payrollRunsH.RecordLeg)
+			// Recovers a run stranded in 'executing'. Needs a NEW run key, and
+			// only after the run has sat still long enough that it cannot be
+			// racing a browser still signing.
+			r.Post("/payroll_runs/{id}/resume", payrollRunsH.Resume)
 			// Ends every session for the account. Authenticated because it acts
 			// on the caller's own account, and only meaningful to a session
 			// caller -- see Accounts.Logout.
@@ -718,6 +722,14 @@ func StartBackgroundWorkers(ctx context.Context, pool *pgxpool.Pool, arcRPC, rou
 			}
 		}
 	}()
+
+	// Reports payroll runs abandoned mid-execution, so a merchant learns from a
+	// webhook rather than from an employee asking where their salary is.
+	go (&handlers.PayrollSweeper{
+		Pool:     pool,
+		Webhooks: dispatcher,
+		Interval: workerInterval("CONDUIT_PAYROLL_SWEEP_INTERVAL", 15*time.Minute),
+	}).Run(ctx)
 
 	if bridgeH, err := newBridgeHandler(bridgeCfg, fx.NewStableFXProvider(bridgeCfg.StableFXBase, bridgeCfg.StableFXKey), dispatcher); err == nil {
 		go func() {

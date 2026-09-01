@@ -233,3 +233,58 @@ satisfy it, the property it was reaching for is checked directly:
     PY
 
 That reports none.
+
+## Does B2 speed up EVERY kind of payment? No — and here is the measurement
+
+A fair question, and the answer matters because it decides what to do next.
+B2 fixed one thing: **waiting for a transaction receipt.** So it helps exactly
+those paths whose time is spent in `tx.wait()`, and no others.
+
+Cross-stable, traced again with the fix applied (`--polling=500`):
+
+    cross.post_prepare   5049ms, 5538ms
+    cross.post_confirm   5533ms, 4894ms
+    total                11.9s, 11.5s   — against an 11.1s baseline
+
+**Unchanged.** Because cross-stable's time is not the browser waiting on Arc,
+it is the API waiting on Circle:
+
+| Path | Where its seconds go | Helped by B2? |
+|---|---|---|
+| Same-currency | 2 receipt waits | **Yes — 12.7s → 6.1s** |
+| Payroll leg | 2 receipt waits | **Yes — 13.5s → 6.6s** |
+| Cross-stable (USDC→QCAD, →EURC, …) | `prepare` + `confirm`, server polling Circle | **No** |
+| Cross-chain (Gateway/CCTP) | attestation window + `time.Sleep(5s)` ×2 | Partly — its on-chain deposit has receipts |
+| Payment link / request-payment | whichever of the above the currencies pick | Inherits that path's answer |
+
+A payment link is not a fourth kind of payment. It creates a settlement intent
+and the payer settles it — same currency on both sides takes the same-currency
+path and is now twice as fast; different currencies take the cross-stable path
+and are not. **The link itself adds nothing measurable; what it costs is
+whichever path it resolves to.**
+
+### What actually fixes cross-stable
+
+The sleeps the work order predicted are all present, at the lines it named:
+
+    internal/fx/stablefx.go:218       time.Sleep(500 * time.Millisecond)   // sleep BEFORE checking
+    internal/fx/stablefx.go:353       time.Sleep(1 * time.Second)          // sleep BEFORE checking
+    internal/handlers/bridge.go:291   time.Sleep(5 * time.Second)
+    internal/handlers/bridge.go:297   time.Sleep(5 * time.Second)
+    internal/arcrpc/client.go:69      ChainID() liveness probe on EVERY Get
+
+Both FX sleeps are at the TOP of their poll loops, so the code waits even when
+the answer is already available — a guaranteed 500ms in `prepare` and a
+guaranteed full second in `confirm`, before the first check. That is Phase B4.1
+and it is the same class of mistake B2 just fixed, one layer down: sleeping on
+a fixed timer instead of asking.
+
+The larger win is B4.2. `confirm` holds the browser's socket while the API
+polls Circle to completion — the 5.4s measured above — against a server
+`WriteTimeout` of 30s and a poll deadline of 60s. Returning `202` the moment
+Circle accepts, and letting a background worker finish, takes the payer's wait
+from "until Circle settles" to "until Circle answers": roughly one round trip.
+
+So the honest projection for cross-stable, and it is a projection until traced:
+~11.5s today, of which about 1.5s is guaranteed dead sleep (B4.1) and about 5s
+is the browser being held open for work it does not need to watch (B4.2).

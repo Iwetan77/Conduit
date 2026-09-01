@@ -15,7 +15,6 @@ interface DeploymentFile {
   chainId?: number;
   conduitRouter?: string;
   declarationRegistry?: string;
-  stableFXAdapter?: string;
   atomicSettler?: string;
   currencyRegistry?: string;
   settlementPreferenceRegistry?: string;
@@ -55,7 +54,6 @@ const deployment = loadDeploymentFile();
 const ENV_ADDRESSES: Record<string, string | undefined> = {
   NEXT_PUBLIC_CONDUIT_ROUTER: process.env.NEXT_PUBLIC_CONDUIT_ROUTER,
   NEXT_PUBLIC_DECLARATION_REGISTRY: process.env.NEXT_PUBLIC_DECLARATION_REGISTRY,
-  NEXT_PUBLIC_STABLEFX_ADAPTER: process.env.NEXT_PUBLIC_STABLEFX_ADAPTER,
   NEXT_PUBLIC_ATOMIC_SETTLER: process.env.NEXT_PUBLIC_ATOMIC_SETTLER,
   NEXT_PUBLIC_CURRENCY_REGISTRY: process.env.NEXT_PUBLIC_CURRENCY_REGISTRY,
   NEXT_PUBLIC_SETTLEMENT_PREFERENCE_REGISTRY: process.env.NEXT_PUBLIC_SETTLEMENT_PREFERENCE_REGISTRY,
@@ -97,9 +95,6 @@ export const ARC_TESTNET = {
     },
     get declarationRegistry(): Address {
       return resolveAddress("NEXT_PUBLIC_DECLARATION_REGISTRY", "declarationRegistry", "DeclarationRegistry");
-    },
-    get stableFXAdapter(): Address {
-      return resolveAddress("NEXT_PUBLIC_STABLEFX_ADAPTER", "stableFXAdapter", "StableFXAdapter");
     },
     get atomicSettler(): Address {
       return resolveAddress("NEXT_PUBLIC_ATOMIC_SETTLER", "atomicSettler", "AtomicSettler");
@@ -159,8 +154,12 @@ export const ERC20_ABI = [
 export const ROUTER_ABI = [
   // Same-currency direct send
   "function execute((address payer, address recipient, address payerToken, address recipientToken, uint256 amount, uint256 deadline, bytes32 declarationId) instruction) external returns (bytes32 receiptId)",
-  // Cross-currency via Circle StableFX + Permit2 funding data
-  "function executeWithFX((address payer, address recipient, address payerToken, address recipientToken, uint256 amount, uint256 deadline, bytes32 declarationId) instruction, ((address token, uint256 amount) permitted, uint256 nonce, uint256 deadline) permit, (address to, uint256 requestedAmount) transferDetails, bytes32 witness, string witnessTypeString, bytes fundingSignature) external returns (bytes32 receiptId)",
+  // Cross-currency is NOT on this contract. It goes through Circle's REST
+  // fund endpoint and their relayer settling on FxEscrow -- see
+  // packages/api/internal/fx. The router entry point that claimed to do it was
+  // deleted: it could never redeem a real StableFX signature, and being
+  // external with no sender check it let anyone emit a settlement event for a
+  // merchant's full invoice while moving one unit of any token.
   "function quote((address payer, address recipient, address payerToken, address recipientToken, uint256 amount, uint256 deadline, bytes32 declarationId) instruction) external view returns (uint256 payerAmount)",
   "event PaymentSettled(bytes32 indexed receiptId, address indexed payer, address indexed recipient, address payerToken, address recipientToken, uint256 payerAmount, uint256 recipientAmount, bytes32 declarationId, uint256 settledAt)",
   // Custom errors, so a revert arrives decoded instead of as raw bytes. Without

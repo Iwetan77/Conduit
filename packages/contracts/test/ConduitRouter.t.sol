@@ -6,7 +6,6 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ConduitRouter} from "../src/ConduitRouter.sol";
 import {DeclarationRegistry} from "../src/DeclarationRegistry.sol";
 import {AtomicSettler} from "../src/AtomicSettler.sol";
-import {StableFXAdapter} from "../src/StableFXAdapter.sol";
 import {IConduitRouter} from "../src/interfaces/IConduitRouter.sol";
 import {SettlementPreferenceRegistry} from "../src/SettlementPreferenceRegistry.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
@@ -27,7 +26,6 @@ contract ConduitRouterTest is Test {
     MockERC20 eurc;
 
     DeclarationRegistry registry;
-    StableFXAdapter fxAdapter;
     AtomicSettler settler;
     ConduitRouter router;
 
@@ -42,12 +40,10 @@ contract ConduitRouterTest is Test {
         // Deploy protocol
         vm.startPrank(OWNER);
         registry  = new DeclarationRegistry(OWNER);
-        fxAdapter = new StableFXAdapter(OWNER);
-        settler   = new AtomicSettler(OWNER, address(fxAdapter));
-        router    = new ConduitRouter(OWNER, address(registry), address(settler), address(fxAdapter));
+        settler   = new AtomicSettler(OWNER);
+        router    = new ConduitRouter(OWNER, address(registry), address(settler));
 
         // Wire authorizations
-        fxAdapter.setAuthorizedCaller(address(settler), true);
         settler.setAuthorizedRouter(address(router), true);
         vm.stopPrank();
 
@@ -67,9 +63,8 @@ contract ConduitRouterTest is Test {
         vm.expectRevert(bytes("zero: registry"));
         router.setDeclarationRegistry(address(0));
 
-        vm.expectRevert(bytes("zero: adapter"));
-        router.setStableFXAdapter(address(0));
-
+        // setStableFXAdapter's case was here. The setter went with
+        // executeWithFX in Phase A1.
         vm.expectRevert(bytes("zero: settler"));
         router.setAtomicSettler(address(0));
 
@@ -382,9 +377,11 @@ contract ConduitRouterTest is Test {
     // question these ask -- what happens when someone else calls -- had never
     // been put to the contract.
     //
-    // executeWithFX is deliberately not covered: Permit2 verifies the payer's
-    // signature there, which is the authorization, and the contract's own
-    // comment explains why a msg.sender check would be strictly worse.
+    // executeWithFX no longer exists. Phase A1 deleted it: it could never
+    // settle a real StableFX signature (Permit2 requires msg.sender to equal
+    // the spender Circle signed, which is their relayer), and being external
+    // with no sender check it let anyone emit PaymentSettled for a merchant's
+    // full invoice while moving one unit of any token.
 
     function test_execute_revertsWhenCallerIsNotPayer() public {
         address attacker = makeAddr("attacker");

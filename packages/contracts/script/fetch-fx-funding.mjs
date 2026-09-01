@@ -96,7 +96,7 @@ async function main() {
   // the architecture finding this script's testing surfaced: the permit's
   // "spender" is Circle's own relayer contract, so only Circle's backend can
   // successfully call Permit2.permitWitnessTransferFrom with this signature.
-  // ConduitRouter.executeWithFX (which tries to call Permit2 directly from
+  // The deleted router FX entry point (which tried to call Permit2 from
   // OUR contract) can never succeed against a real StableFX signature.
   await postJSON("/v1/exchange/stablefx/fund", {
     type: "taker",

@@ -3,7 +3,6 @@ pragma solidity ^0.8.24;
 
 import {Script, console2} from "forge-std/Script.sol";
 import {DeclarationRegistry} from "../src/DeclarationRegistry.sol";
-import {StableFXAdapter} from "../src/StableFXAdapter.sol";
 import {AtomicSettler} from "../src/AtomicSettler.sol";
 import {ConduitRouter} from "../src/ConduitRouter.sol";
 import {CurrencyRegistry} from "../src/CurrencyRegistry.sol";
@@ -20,11 +19,11 @@ import {SettlementPreferenceRegistry} from "../src/SettlementPreferenceRegistry.
 ///      prints them for convenience).
 ///
 /// Deployment order matches the dependency graph:
-///   DeclarationRegistry → StableFXAdapter → AtomicSettler → ConduitRouter →
+///   DeclarationRegistry → AtomicSettler → ConduitRouter →
 ///   CurrencyRegistry → SettlementPreferenceRegistry → wire authorizations →
 ///   register currencies confirmed live in docs/fx-capability.md
 ///
-/// CCTPAdapter.sol is intentionally NOT deployed here — cross-chain is parked for
+/// Cross-chain is parked for
 /// v1 per the architecture delta. The file still exists in src/ as a future hook.
 contract Deploy is Script {
     // ── Arc Testnet Config ────────────────────────────────────────────────────
@@ -64,20 +63,15 @@ contract Deploy is Script {
         DeclarationRegistry registry = new DeclarationRegistry(owner);
         console2.log("DeclarationRegistry:            ", address(registry));
 
-        // ── 2. StableFXAdapter ────────────────────────────────────────────────
-        StableFXAdapter fxAdapter = new StableFXAdapter(owner);
-        console2.log("StableFXAdapter:                ", address(fxAdapter));
-
-        // ── 3. AtomicSettler ──────────────────────────────────────────────────
-        AtomicSettler settler = new AtomicSettler(owner, address(fxAdapter));
+        // ── 2. AtomicSettler ──────────────────────────────────────────────────
+        AtomicSettler settler = new AtomicSettler(owner);
         console2.log("AtomicSettler:                  ", address(settler));
 
-        // ── 4. ConduitRouter ──────────────────────────────────────────────────
+        // ── 3. ConduitRouter ──────────────────────────────────────────────────
         ConduitRouter router = new ConduitRouter(
             owner,
             address(registry),
-            address(settler),
-            address(fxAdapter)
+            address(settler)
         );
         console2.log("ConduitRouter:                  ", address(router));
 
@@ -90,7 +84,6 @@ contract Deploy is Script {
         console2.log("SettlementPreferenceRegistry:    ", address(prefRegistry));
 
         // ── 7. Wire Authorizations ────────────────────────────────────────────
-        fxAdapter.setAuthorizedCaller(address(settler), true);
         settler.setAuthorizedRouter(address(router), true);
         router.setSettlementPreferenceRegistry(address(prefRegistry));
 
@@ -126,7 +119,6 @@ contract Deploy is Script {
         vm.serializeUint(json, "chainId", ARC_CHAIN_ID);
         vm.serializeAddress(json, "deployer", deployer);
         vm.serializeAddress(json, "declarationRegistry", address(registry));
-        vm.serializeAddress(json, "stableFXAdapter", address(fxAdapter));
         vm.serializeAddress(json, "atomicSettler", address(settler));
         vm.serializeAddress(json, "conduitRouter", address(router));
         vm.serializeAddress(json, "currencyRegistry", address(currencyRegistry));

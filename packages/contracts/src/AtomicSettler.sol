@@ -6,8 +6,6 @@ import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import {IPermit2SignatureTransfer} from "./interfaces/IFxEscrow.sol";
-import {StableFXAdapter} from "./StableFXAdapter.sol";
 
 /// @title AtomicSettler
 /// @notice Settlement engine for Conduit. Two paths:
@@ -27,7 +25,6 @@ contract AtomicSettler is ReentrancyGuard, Ownable2Step {
 
     // ── State ─────────────────────────────────────────────────────────────────
 
-    StableFXAdapter public stableFXAdapter;
     mapping(address => bool) public authorizedRouters;
 
     // ── Events ────────────────────────────────────────────────────────────────
@@ -56,13 +53,7 @@ contract AtomicSettler is ReentrancyGuard, Ownable2Step {
 
     // ── Constructor ───────────────────────────────────────────────────────────
 
-    constructor(
-        address initialOwner,
-        address _stableFXAdapter
-    ) Ownable(initialOwner) {
-        if (_stableFXAdapter == address(0)) revert ZeroAddress();
-        stableFXAdapter = StableFXAdapter(_stableFXAdapter);
-    }
+    constructor(address initialOwner) Ownable(initialOwner) {}
 
     // ── Admin ─────────────────────────────────────────────────────────────────
 
@@ -71,11 +62,6 @@ contract AtomicSettler is ReentrancyGuard, Ownable2Step {
         emit RouterAuthorized(router, authorized);
     }
 
-    function setStableFXAdapter(address adapter) external onlyOwner {
-        if (adapter == address(0)) revert ZeroAddress();
-        stableFXAdapter = StableFXAdapter(adapter);
-        emit AdapterUpdated(adapter);
-    }
 
     // ── Path 1: Same-currency direct settlement ────────────────────────────────
 
@@ -111,36 +97,15 @@ contract AtomicSettler is ReentrancyGuard, Ownable2Step {
     }
 
     // ── Path 2: Cross-currency via Circle StableFX + Permit2 ──────────────────
+    // The cross-currency settle path was removed with the router entry point
+    // that was its only caller.
+    //
+    // It could not have worked: Permit2 authenticates the caller as msg.sender
+    // and requires it to equal the spender Circle signed, which is Circle's own
+    // relayer -- never this contract. What it DID do was serve as the money-
+    // movement half of a forged settlement, letting a caller emit a payment
+    // event for an arbitrary amount while transferring one unit. Cross-currency
+    // settles through Circle's REST fund endpoint and their relayer; see
+    // packages/api/internal/fx.
 
-    /// @notice Submit Permit2 funding for a Circle StableFX trade.
-    /// @dev The SDK has already called the Circle StableFX API off-chain and obtained:
-    ///        - permit: token, amount, nonce, deadline (from /quotes response)
-    ///        - witness: keccak256(abi.encode(SingleTradeWitness)) (from /presign)
-    ///        - witnessTypeString: EIP-712 type string (from /presign)
-    ///        - signature: taker's signed funding typed data
-    ///      FxEscrow is transferDetails.to — it receives takerToken and delivers makerToken.
-    ///      Full revert on failure.
-    function settleViaFX(
-        IPermit2SignatureTransfer.PermitTransferFrom calldata permit,
-        IPermit2SignatureTransfer.SignatureTransferDetails calldata transferDetails,
-        address taker,
-        bytes32 witness,
-        string calldata witnessTypeString,
-        bytes calldata signature
-    ) external nonReentrant {
-        if (!authorizedRouters[msg.sender]) revert UnauthorizedRouter(msg.sender);
-        if (permit.permitted.amount == 0) revert ZeroAmount();
-        if (taker == address(0)) revert ZeroAddress();
-
-        stableFXAdapter.submitFXFunding(
-            permit,
-            transferDetails,
-            taker,
-            witness,
-            witnessTypeString,
-            signature
-        );
-
-        emit FXSettlementSubmitted(taker, permit.permitted.token, permit.permitted.amount);
-    }
 }

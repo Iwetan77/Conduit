@@ -37,7 +37,6 @@ interface IConduitRouter {
     );
 
     event DeclarationRegistrySet(address indexed registry);
-    event StableFXAdapterSet(address indexed adapter);
     event AtomicSettlerSet(address indexed settler);
     event SettlementPreferenceRegistrySet(address indexed registry);
     /// @notice Emitted when the protocol fee changes. Every other admin action
@@ -69,7 +68,6 @@ interface IConduitRouter {
     // ── Admin Functions ────────────────────────────────────────────────────────
 
     function setDeclarationRegistry(address registry) external;
-    function setStableFXAdapter(address adapter) external;
     function setAtomicSettler(address settler) external;
     function setProtocolFee(uint256 bps) external; // max 30 bps
     function withdrawFees(address token, address to) external;

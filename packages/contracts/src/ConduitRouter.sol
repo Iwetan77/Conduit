@@ -7,10 +7,8 @@ import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {IConduitRouter} from "./interfaces/IConduitRouter.sol";
-import {IPermit2SignatureTransfer} from "./interfaces/IFxEscrow.sol";
 import {DeclarationRegistry} from "./DeclarationRegistry.sol";
 import {AtomicSettler} from "./AtomicSettler.sol";
-import {StableFXAdapter} from "./StableFXAdapter.sol";
 import {SettlementPreferenceRegistry} from "./SettlementPreferenceRegistry.sol";
 
 
@@ -20,7 +18,6 @@ import {SettlementPreferenceRegistry} from "./SettlementPreferenceRegistry.sol";
 ///         Two settlement paths:
 ///           - Same-currency (USDC→USDC, EURC→EURC): execute()
 ///             Payer approves this contract. AtomicSettler pulls + pushes.
-///           - Cross-currency (USDC↔EURC): executeWithFX()
 ///             SDK calls Circle StableFX API off-chain, passes signed Permit2
 ///             funding data here. FxEscrow settles atomically via Permit2.
 ///
@@ -41,7 +38,6 @@ contract ConduitRouter is IConduitRouter, ReentrancyGuard, Ownable2Step {
 
     DeclarationRegistry public declarationRegistry;
     AtomicSettler public atomicSettler;
-    StableFXAdapter public stableFXAdapter;
     SettlementPreferenceRegistry public settlementPreferenceRegistry;
 
     uint256 public protocolFeeBps;
@@ -58,16 +54,13 @@ contract ConduitRouter is IConduitRouter, ReentrancyGuard, Ownable2Step {
     constructor(
         address initialOwner,
         address _declarationRegistry,
-        address _atomicSettler,
-        address _stableFXAdapter
+        address _atomicSettler
     ) Ownable(initialOwner) {
         require(_declarationRegistry != address(0), "zero: registry");
         require(_atomicSettler != address(0), "zero: settler");
-        require(_stableFXAdapter != address(0), "zero: adapter");
 
         declarationRegistry = DeclarationRegistry(_declarationRegistry);
         atomicSettler = AtomicSettler(_atomicSettler);
-        stableFXAdapter = StableFXAdapter(_stableFXAdapter);
     }
 
     // ── Path 1: Same-currency execute ─────────────────────────────────────────
@@ -88,13 +81,10 @@ contract ConduitRouter is IConduitRouter, ReentrancyGuard, Ownable2Step {
         // name someone else as payer and send that person's balance wherever
         // they liked.
         //
-        // executeWithFX deliberately has no equivalent check; see the comment
-        // there. Permit2 verifies the payer's signature on that path, which is
-        // a stronger authorization than msg.sender and survives relaying.
         require(msg.sender == instruction.payer, "not payer");
         require(
             instruction.payerToken == instruction.recipientToken,
-            "use executeWithFX for cross-currency"
+            "this router settles same-currency only"
         );
 
         uint256 feeAmount  = (instruction.amount * protocolFeeBps) / BPS_DENOMINATOR;
@@ -140,106 +130,30 @@ contract ConduitRouter is IConduitRouter, ReentrancyGuard, Ownable2Step {
         );
     }
 
-    // ── Path 2: Cross-currency execute via Circle StableFX + Permit2 ──────────
-
-    /// @notice Execute a cross-currency payment.
-    /// @dev NON-FUNCTIONAL AGAINST REAL STABLEFX SIGNATURES — kept for reference,
-    ///      do not wire the API layer to call this for StableFX-routed payments.
-    ///      Verified empirically (real signature, real Arc testnet call): the
-    ///      funding permit StableFX's presign endpoint returns is an EIP-712
-    ///      Permit2 witness-transfer signed with `spender` = Circle's own relayer
-    ///      contract (observed: 0xd68256f4d69c6bbecb873d8588ae0dc6b8e22e10 on Arc
-    ///      testnet), not this router or AtomicSettler. Permit2.permitWitnessTransferFrom
-    ///      authenticates the caller as `msg.sender` and requires it to equal the
-    ///      signed `spender` — so a call originating from AtomicSettler (as this
-    ///      function is wired to do, via settleViaFX) always reverts on signature
-    ///      verification. There is no way to make OUR contract the valid caller
-    ///      for a signature Circle's presign endpoint issued; only Circle's own
-    ///      relayer can redeem it. Confirmed the actual working flow instead:
-    ///      submit the funding signature to Circle's own
-    ///      `POST /v1/exchange/stablefx/fund` REST endpoint; their relayer settles
-    ///      on FxEscrow directly (recordTrade → takerDeliver → makerDeliver, all
-    ///      real on-chain txs, none of them calling this router). The Go API
-    ///      layer (packages/api/internal/fx) implements this correct path — see
-    ///      its package doc comment. This function and the on-chain
-    ///      AtomicSettler.settleViaFX / StableFXAdapter.submitFXFunding path it
-    ///      depends on are consequently dead code for the StableFX rail; left in
-    ///      place rather than deleted since removing them is a larger, separate
-    ///      change (would also touch AtomicSettler/StableFXAdapter/tests) and
-    ///      this is a documentation-first flag, not a rewrite, given how late in
-    ///      the build this was discovered. Flagged in STATUS.md.
-    ///
-    /// @dev The SDK calls the Circle StableFX API off-chain before invoking this:
-    ///        POST /v1/exchange/stablefx/quotes      → quote + EIP-712 typedData
-    ///        POST /v1/exchange/stablefx/trades       → contractTradeId
-    ///        POST /v1/exchange/stablefx/signatures/funding/presign → funding typedData
-    ///      The taker signs the funding typed data, SDK passes it here.
-    ///      Permit2 transfers takerToken → FxEscrow, FxEscrow delivers makerToken → recipient.
-    ///
-    /// @param instruction       Payment parameters (payerToken != recipientToken).
-    /// @param permit            Permit2 transfer authorization (takerToken, amount, nonce, deadline).
-    /// @param transferDetails   to = FxEscrow address, requestedAmount = takerAmount.
-    /// @param witness           keccak256(abi.encode(SingleTradeWitness { id: contractTradeId })).
-    /// @param witnessTypeString EIP-712 type string from Circle presign response.
-    /// @param fundingSignature  Taker's EIP-712 signature over funding typed data.
-    function executeWithFX(
-        PaymentInstruction calldata instruction,
-        IPermit2SignatureTransfer.PermitTransferFrom calldata permit,
-        IPermit2SignatureTransfer.SignatureTransferDetails calldata transferDetails,
-        bytes32 witness,
-        string calldata witnessTypeString,
-        bytes calldata fundingSignature
-    ) external nonReentrant returns (bytes32 receiptId) {
-        _validateInstruction(instruction);
-        require(
-            instruction.payerToken != instruction.recipientToken,
-            "use execute() for same-currency"
-        );
-        // No msg.sender/tx.origin check on the payer here — deliberately.
-        // Permit2.permitWitnessTransferFrom (called inside atomicSettler.settleViaFX)
-        // verifies `fundingSignature` against `instruction.payer` as the signing
-        // owner; that signature IS the payer's authorization, independent of who
-        // submits this transaction. A msg.sender/tx.origin check would just be a
-        // weaker, spoofable proxy for something Permit2 already checks
-        // cryptographically — and it would block third-party/relayer submission,
-        // which is exactly what Phase 5 (gas-sponsored settlement, so the payer
-        // never needs a gas token) requires. Submission is intentionally open;
-        // fund authorization is Permit2's signature check, not msg.sender.
-        require(
-            permit.deadline >= block.timestamp,
-            "permit expired"
-        );
-        // transferDetails.to must be FxEscrow — the SDK enforces this
-        require(
-            transferDetails.to == stableFXAdapter.FX_ESCROW(),
-            "transferDetails.to must be FxEscrow"
-        );
-
-        // Submit Permit2 funding → FxEscrow settles atomically
-        // After this call, recipient has received makerToken directly from FxEscrow
-        atomicSettler.settleViaFX(
-            permit,
-            transferDetails,
-            instruction.payer,
-            witness,
-            witnessTypeString,
-            fundingSignature
-        );
-
-        receiptId = _mintReceipt(instruction);
-
-        emit PaymentSettled(
-            receiptId,
-            instruction.payer,
-            instruction.recipient,
-            instruction.payerToken,
-            instruction.recipientToken,
-            permit.permitted.amount, // payerAmount (takerAmount)
-            instruction.amount,       // recipientAmount (makerAmount)
-            instruction.declarationId,
-            block.timestamp
-        );
-    }
+    // Path 2 was cross-currency via Circle StableFX + Permit2. Removed.
+    //
+    // It never worked, and it was the single most dangerous function in this
+    // repo. Its own doc comment recorded the first half: Circle's presign
+    // endpoint issues a Permit2 witness-transfer signed with `spender` = their
+    // own relayer, and Permit2 requires msg.sender to equal that spender, so a
+    // call arriving through AtomicSettler always reverted on signature
+    // verification. The working path is Circle's REST fund endpoint and their
+    // relayer settling on FxEscrow -- three real Arc transactions, none of them
+    // touching this router. packages/api/internal/fx implements it.
+    //
+    // The second half is why it could not simply be left there. It was
+    // `external` with no msg.sender check, and it emitted PaymentSettled
+    // populated entirely from the caller's own calldata. Every field
+    // _validateInstruction checked against DeclarationRegistry is public
+    // on-chain state readable off any victim's declaration, and the money
+    // movement was governed by an unrelated permit whose only constraint was
+    // that it paid FxEscrow. So anyone could sign a permit for ONE UNIT of any
+    // token and emit a settlement event carrying a merchant's declaration id
+    // and the full invoice amount. Nothing reverted. The indexer recorded it,
+    // the webhook fired, and the merchant's checkout said "payment received".
+    // Cost to the attacker: dust plus gas.
+    //
+    // Nothing replaces it here. Cross-currency does not touch this contract.
 
     // Path 3 was a cross-currency AMM fallback (executeWithAmm), removed.
     //
@@ -272,12 +186,6 @@ contract ConduitRouter is IConduitRouter, ReentrancyGuard, Ownable2Step {
         require(registry != address(0), "zero: registry");
         declarationRegistry = DeclarationRegistry(registry);
         emit DeclarationRegistrySet(registry);
-    }
-
-    function setStableFXAdapter(address adapter) external override onlyOwner {
-        require(adapter != address(0), "zero: adapter");
-        stableFXAdapter = StableFXAdapter(adapter);
-        emit StableFXAdapterSet(adapter);
     }
 
     function setAtomicSettler(address settler) external override onlyOwner {

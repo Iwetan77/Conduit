@@ -160,7 +160,17 @@ export async function runFxCheckout(
   intentId: string,
   payCurrency: string,
   onStage: (stage: string) => void,
-  connector?: Connector
+  connector?: Connector,
+  /**
+   * Convert from THIS address rather than the connected one.
+   *
+   * Used by payroll, where the money being converted is the business's and
+   * lives in its settlement wallet — a different Circle wallet from the one the
+   * owner signed in with, though the same Circle user owns both. Absent on a
+   * payer's own checkout, where the connected wallet is the right answer.
+   * See lib/settlement-signer.
+   */
+  spendFrom?: string
 ): Promise<FxCheckoutResult> {
   const { quoteSettlementIntent, prepareSettlementIntent, confirmSettlementIntent } = await import(
     "@/lib/conduit-api"
@@ -168,11 +178,12 @@ export async function runFxCheckout(
   const { signTypedDataWithWallet, recoverTypedDataSigner } = await import(
     "@/lib/sign-typed-data"
   );
-  const { getWalletProvider } = await import("@/lib/wallet-provider");
 
   // Resolve the connected wallet once, up front: both signatures must come
   // from the same account the payment is funded from.
-  const wallet = await getWalletProvider(connector);
+  const wallet = spendFrom
+    ? await (await import("@/lib/settlement-signer")).getSettlementProvider(connector, spendFrom)
+    : await (await import("@/lib/wallet-provider")).getWalletProvider(connector);
 
   // Read the payer address off the very provider that is about to sign, rather
   // than accepting it from the caller. Circle recovers the signer from the

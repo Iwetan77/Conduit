@@ -230,18 +230,20 @@ function GroupBar({
             <button type="button" onClick={() => onSelect(g.id)} className={tab(selected === g.id)}>
               {g.name} <span className="text-ink-dim/70">{g.members}</span>
             </button>
-            {/* Only on the open group, so a row of tabs is not a row of
-                delete buttons waiting to be mis-clicked. */}
+            {/* Labelled, and only on the open group.
+                A bare × is the kind of control that gets missed until somebody
+                asks where it is, and a row of them beside every tab is a row of
+                mis-clicks waiting on a destructive action. One, named, on the
+                group you are actually looking at. */}
             {selected === g.id && (
               <button
                 type="button"
                 onClick={() => remove(g)}
                 disabled={busy}
-                aria-label={`Delete the group ${g.name}`}
                 title={`Delete the group ${g.name}`}
-                className="border border-l-0 border-border px-2 py-1.5 text-xs text-ink-dim hover:text-danger hover:border-danger disabled:opacity-50"
+                className="border border-l-0 border-border px-2.5 py-1.5 text-xs text-ink-dim hover:text-danger hover:border-danger disabled:opacity-50"
               >
-                ×
+                Delete group
               </button>
             )}
           </span>

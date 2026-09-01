@@ -115,7 +115,17 @@ export default function PayrollPage() {
           // The settlement address the run itself was built against, so the
           // wallet that signs is the wallet the draft costed and checked the
           // balance of. Reading it from anywhere else risks the two disagreeing.
-          const txHash = await payPayrollLeg(res.spender, leg, connector, treasury);
+          const txHash = await payPayrollLeg(
+            res.spender,
+            leg,
+            connector,
+            treasury,
+            // A leg in a currency the treasury does not hold is converted
+            // first, in the browser, right before its approve. The merchant
+            // presses send once; the conversion is a step, not a chore.
+            run.treasury_currency,
+            (stage) => setProgress((p) => ({ ...p, [leg.currency]: stage })),
+          );
           await recordPayrollLeg(run.id, { currency: leg.currency, tx_hash: txHash });
           setProgress((p) => ({ ...p, [leg.currency]: "paid" }));
         } catch (err) {
@@ -306,10 +316,18 @@ function Preview({
               <TokenIcon currency={isoToToken(g.currency) as Currency} px={18} />
               <span className="font-mono text-xs">{isoToToken(g.currency)}</span>
               {g.needs_conversion && (
-                // Said plainly. A group in a currency the business does not hold
-                // cannot be paid without converting first, and finding that out
-                // at the signature is finding it out too late.
-                <span className="text-ink-dim text-xs">needs converting first</span>
+                // A step, not a warning.
+                //
+                // This used to read "needs converting first" beside a button
+                // that could not do it -- the conversion was advertised here
+                // and unimplemented, so the leg reached a signature, reverted
+                // on insufficient balance, and reported a generic wallet
+                // error. It is built now (convertForLeg in lib/payroll-sign),
+                // runs in the browser immediately before the approve, and the
+                // merchant presses send once.
+                <span className="text-ink-dim text-xs">
+                  converted from {isoToToken(run.treasury_currency)} automatically
+                </span>
               )}
             </span>
             <span className="font-mono text-xs">

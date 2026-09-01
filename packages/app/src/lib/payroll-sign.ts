@@ -21,6 +21,49 @@ const PAYROLL_ABI = [
 ];
 
 /**
+ * Convert the treasury into a leg's currency, on the way to paying it.
+ *
+ * A merchant holding USDC with a EURC-paid employee has to acquire EURC before
+ * the batch contract can move any. The API has always reported this as
+ * `needs_conversion` and the browser has always stopped there, so the feature
+ * was advertised in the UI and absent from the code: the leg reached a wallet
+ * prompt that could not succeed and reverted on insufficient balance, reported
+ * as a generic wallet failure.
+ *
+ * Done HERE, in the browser, immediately before the approve — not on the
+ * server. A StableFX quote lives about three and a half seconds, which does not
+ * survive a server round trip plus a human reading a prompt. The payer and the
+ * recipient are both the merchant: this buys EURC with USDC and settles it to
+ * the business's own address, which is a settlement intent like any other and
+ * needs no special case in fx-checkout.
+ */
+async function convertForLeg(
+  leg: PayrollLeg,
+  treasuryCurrency: string,
+  settleAddress: string,
+  connector: Connector | undefined,
+  onStage: (stage: string) => void,
+): Promise<void> {
+  const { createSettlementIntent } = await import("@/lib/conduit-api");
+  const { runFxCheckout } = await import("@/lib/fx-checkout");
+
+  onStage(`converting ${treasuryCurrency} into ${leg.currency}…`);
+
+  // Settling to the merchant's OWN address, in the leg's currency, for exactly
+  // the leg total. Not a penny more: leftover foreign currency sitting in a
+  // treasury is a balance nobody chose to hold and nobody is watching.
+  const intent = await createSettlementIntent({
+    amount: leg.total,
+    settle_currency: leg.currency,
+    settle_address: settleAddress,
+    accept_currencies: [treasuryCurrency],
+    reference: `payroll conversion ${leg.run_id_hash}`,
+  });
+
+  await runFxCheckout(intent.id, treasuryCurrency, onStage, connector, settleAddress);
+}
+
+/**
  * Pays one leg and returns the disperse transaction hash.
  *
  * `connector` is wagmi's, and it is not optional in practice even though the
@@ -41,7 +84,18 @@ export async function payPayrollLeg(
   leg: PayrollLeg,
   connector: Connector | undefined,
   settleAddress: string,
+  treasuryCurrency: string,
+  onStage: (stage: string) => void = () => {},
 ): Promise<string> {
+  // Convert first, if this leg is not in the currency the treasury holds.
+  //
+  // Before the approve, deliberately. Approving and then discovering there is
+  // nothing to approve AN ALLOWANCE OVER costs the merchant a signature and a
+  // transaction fee for a run that was never going to work.
+  if (leg.currency !== treasuryCurrency) {
+    await convertForLeg(leg, treasuryCurrency, settleAddress, connector, onStage);
+  }
+
   const { ethers } = await import("ethers");
   // The BUSINESS's wallet, not the person's.
   //
@@ -60,9 +114,12 @@ export async function payPayrollLeg(
   // contract that moves salaries is a standing permission nobody remembers
   // granting, and this contract needs none between runs — it pulls and pushes
   // inside one call.
+  onStage("waiting for you to approve the transfer…");
   const token = new ethers.Contract(leg.token, ERC20_ABI, signer);
   const approve = await token["approve"](spender, BigInt(leg.total));
   await approve.wait();
+
+  onStage("paying…");
 
   const payroll = new ethers.Contract(spender, PAYROLL_ABI, signer);
   const tx = await payroll["disperse"](

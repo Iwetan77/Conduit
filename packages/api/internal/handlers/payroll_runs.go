@@ -38,6 +38,7 @@ import (
 	"github.com/kzn-labs/conduit/api/internal/arcrpc"
 	"github.com/kzn-labs/conduit/api/internal/auth"
 	"github.com/kzn-labs/conduit/api/internal/currency"
+	"github.com/kzn-labs/conduit/api/internal/fx"
 	apierrors "github.com/kzn-labs/conduit/api/internal/errors"
 	"github.com/kzn-labs/conduit/api/internal/models"
 	"github.com/kzn-labs/conduit/api/internal/webhooks"
@@ -51,6 +52,13 @@ type PayrollRuns struct {
 	// drafted and read but not executed -- the same opt-in shape the bridge
 	// uses, so a deployment without the address degrades rather than panics.
 	PayrollContract string
+	// StableFX prices the conversion legs so affordability can count them.
+	//
+	// Optional, and the fallback is deliberately pessimistic rather than
+	// optimistic: see convertedNeed. A quote here is indicative -- the real one
+	// is taken in the browser microseconds before the trade -- and it is used
+	// only to decide whether to let somebody start a run, never to price one.
+	StableFX *fx.StableFXProvider
 }
 
 type payrollItem struct {
@@ -90,6 +98,10 @@ type payrollRunResponse struct {
 	WalletBalance   *string `json:"wallet_balance,omitempty"`
 	EstimatedGas    *string `json:"estimated_gas,omitempty"`
 	BalanceCovers   *bool   `json:"balance_covers,omitempty"`
+	// True when part of what the wallet must cover was priced by fallback
+	// rather than by a real quote — a conversion leg whose rate could not be
+	// fetched. Says so rather than presenting an estimate as a measurement.
+	BalanceEstimated bool `json:"balance_estimated,omitempty"`
 	SettleAddress   string  `json:"settle_address,omitempty"`
 	ContractAddress string  `json:"payroll_contract,omitempty"`
 }
@@ -468,6 +480,7 @@ func (h *PayrollRuns) writeRun(w http.ResponseWriter, r *http.Request, runID, ac
 			p.WalletBalance = &balStr
 			covers := a.covers()
 			p.BalanceCovers = &covers
+			p.BalanceEstimated = a.estimated
 		}
 	}
 	writeJSON(w, http.StatusOK, p)
@@ -481,11 +494,26 @@ func (h *PayrollRuns) writeRun(w http.ResponseWriter, r *http.Request, runID, ac
 // preview saying the run is covered and the execute call refusing it — which
 // reads as a broken product rather than an empty wallet.
 type payrollAffordability struct {
-	// need is the treasury-currency total plus gas. Groups in OTHER currencies
-	// are excluded deliberately: they are not spendable from this balance and
-	// have to be converted first, so counting them here would refuse runs that
-	// are perfectly affordable.
+	// need is the treasury-currency total plus gas, INCLUDING what the
+	// non-treasury groups will cost once converted.
+	//
+	// Those used to be excluded, on the reasoning that they "are not spendable
+	// from this balance and have to be converted first". That was true while
+	// conversion did not exist and such a leg simply failed. It is false now:
+	// the browser converts out of THIS balance immediately before paying the
+	// leg (convertForLeg in lib/payroll-sign), so every group is funded from
+	// this one wallet.
+	//
+	// Leaving them out after that change is the worse of the two errors. An
+	// over-strict check refuses a run somebody could have made; an under-strict
+	// one lets a run start, pay the treasury groups, drain the wallet, and fail
+	// the conversion for the rest -- half a payroll, which is the exact failure
+	// the preview's own warning describes.
 	need *big.Int
+	// True when a conversion leg had to be priced by fallback rather than by a
+	// real quote. The preview says so; a number nobody can source should not
+	// look like one that was measured.
+	estimated bool
 	have *big.Int
 	gas  *big.Int
 	// False when the balance could not be read at all. Callers decide what to
@@ -512,16 +540,58 @@ func (h *PayrollRuns) affordability(ctx context.Context, p *payrollRunResponse, 
 	}
 	a.need = new(big.Int).Set(a.gas)
 	for _, g := range p.Groups {
-		if g.Currency == p.TreasuryCurrency {
-			t, _ := new(big.Int).SetString(g.Total, 10)
-			a.need.Add(a.need, t)
+		t, ok := new(big.Int).SetString(g.Total, 10)
+		if !ok {
+			continue
 		}
+		if g.Currency == p.TreasuryCurrency {
+			a.need.Add(a.need, t)
+			continue
+		}
+		cost, estimated := h.convertedNeed(ctx, g.Currency, p.TreasuryCurrency, t)
+		if estimated {
+			a.estimated = true
+		}
+		a.need.Add(a.need, cost)
 	}
 	if bal, err := h.treasuryBalance(ctx, settleAddress, p.TreasuryCurrency); err == nil {
 		a.have = bal
 		a.balanceKnown = true
 	}
 	return a
+}
+
+// convertedNeed prices one non-treasury group in treasury currency.
+//
+// An indicative StableFX quote when one can be had. When it cannot -- the
+// provider is down, the pair has no route, the amount is under a minimum --
+// this does NOT skip the group and it does not guess a rate. It falls back to
+// treating the amount as 1:1 with a margin, which is wrong in the safe
+// direction: the preview may say a run is short when it is affordable, and the
+// merchant sees why. The opposite mistake starts a payroll that cannot finish.
+//
+// The margin also absorbs the gap between this quote and the real one taken in
+// the browser seconds later. Rates move; a preview that is exact to the minor
+// unit would refuse or admit runs on noise.
+func (h *PayrollRuns) convertedNeed(ctx context.Context, from, to string, amount *big.Int) (*big.Int, bool) {
+	withMargin := func(n *big.Int) *big.Int {
+		// 2%. Enough to cover ordinary movement between the preview and the
+		// trade without being a tax on the merchant's own headroom.
+		out := new(big.Int).Mul(n, big.NewInt(102))
+		return out.Div(out, big.NewInt(100))
+	}
+	if h.StableFX != nil {
+		fromInfo, okF := currency.ByISO(from)
+		toInfo, okT := currency.ByISO(to)
+		if okF && okT {
+			q, err := h.StableFX.Quote(ctx, toInfo.Symbol, fromInfo.Symbol, amount, indicativeRecipient)
+			if err == nil && q.FromAmount != nil && q.FromAmount.Sign() > 0 {
+				return withMargin(q.FromAmount), false
+			}
+		}
+	}
+	// No quote. Count it at par plus the margin rather than at zero.
+	return withMargin(amount), true
 }
 
 func (h *PayrollRuns) treasuryBalance(ctx context.Context, address, iso string) (*big.Int, error) {

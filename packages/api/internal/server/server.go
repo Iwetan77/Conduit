@@ -193,6 +193,10 @@ func New(cfg Config) http.Handler {
 	payrollRunsH := &handlers.PayrollRuns{
 		Pool: cfg.Pool, Webhooks: dispatcher,
 		ArcRPC: arcRPCForBalances, PayrollContract: payrollContract,
+		// Prices the conversion legs, so "can this wallet cover this run"
+		// counts groups that have to be converted out of the same balance
+		// rather than pretending they cost nothing.
+		StableFX: stableFX,
 	}
 	paymentLinksH := &handlers.PaymentLinks{Pool: cfg.Pool, AppBaseURL: cfg.AppBaseURL}
 	bridgeH, err := newBridgeHandler(cfg, stableFX, dispatcher)

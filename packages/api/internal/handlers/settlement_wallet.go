@@ -85,8 +85,27 @@ func (h *SettlementWallet) load(r *http.Request, accountID string) (*settlementA
 	return &a, nil
 }
 
+// ready reports whether this business has an address of its OWN.
+//
+// The last clause is the one that was missing, and it is the whole point of
+// provisioning: one person, two Circle wallets, personal money and business
+// money in different places. A row marked 'provisioned' while still pointing at
+// the wallet its owner signs in with is not provisioned -- it is the default
+// this feature exists to replace, wearing the label of the fix.
+//
+// Reporting it as not-ready is what lets the provisioner run again. Without
+// this, such an account is stuck: the dashboard gates provisioning on this
+// answer, so it never retries, and the merchant sees one address in /send and
+// the merchant dashboard forever while business income lands in a personal
+// wallet.
 func (a *settlementAccount) ready() bool {
-	return a.settleWalletID != nil && a.source != nil && *a.source == sourceProvisioned
+	if a.settleWalletID == nil || a.source == nil || *a.source != sourceProvisioned {
+		return false
+	}
+	if a.loginWallet != nil && strings.EqualFold(a.settleAddress, *a.loginWallet) {
+		return false
+	}
+	return true
 }
 
 const (
@@ -112,12 +131,18 @@ const (
 func settlementWalletReady(ctx context.Context, pool *pgxpool.Pool, accountID string) *apierrors.APIError {
 	var source *string
 	var hasIdentity bool
+	// same_as_login is the check that was missing here too. A business whose
+	// settle_address IS its owner's login wallet has not been given an address
+	// of its own, whatever the source column says -- and taking payments in
+	// that state is exactly what this function exists to refuse.
+	var sameAsLogin bool
 	err := pool.QueryRow(ctx,
 		`SELECT settle_address_source,
-		        (privy_user_id IS NOT NULL OR auth_subject IS NOT NULL) AS has_identity
+		        (privy_user_id IS NOT NULL OR auth_subject IS NOT NULL) AS has_identity,
+		        (login_wallet IS NOT NULL AND lower(settle_address) = lower(login_wallet)) AS same_as_login
 		   FROM accounts WHERE id = COALESCE((SELECT parent_id FROM accounts WHERE id = $1), $1)`,
 		accountID,
-	).Scan(&source, &hasIdentity)
+	).Scan(&source, &hasIdentity, &sameAsLogin)
 	if err != nil {
 		// A missing account is not this check's problem to report -- the caller
 		// is about to fail on it far more precisely.
@@ -126,7 +151,13 @@ func settlementWalletReady(ctx context.Context, pool *pgxpool.Pool, accountID st
 	if !hasIdentity {
 		return nil
 	}
-	if source != nil && (*source == sourceProvisioned || *source == sourceExternal) {
+	// 'external' is a decision somebody made: they named an address, and it may
+	// legitimately be any address. Only 'provisioned' carries the promise that
+	// the business has its own, so only it has to prove the addresses differ.
+	if source != nil && *source == sourceExternal {
+		return nil
+	}
+	if source != nil && *source == sourceProvisioned && !sameAsLogin {
 		return nil
 	}
 	return apierrors.E(apierrors.CodeSettlementWalletRequired, "")
@@ -269,7 +300,28 @@ func (h *SettlementWallet) Provision(w http.ResponseWriter, r *http.Request) {
 	                  -- back to, and the server cannot ask Circle for it again.
 	                  provisioned_address = $2,
 	                  settle_address_source = 'provisioned'
-	            WHERE id = $3 AND settle_wallet_id IS NULL`
+	            WHERE id = $3
+	              AND (
+	                    -- Never provisioned. The ordinary case.
+	                    settle_wallet_id IS NULL
+	                    -- Or provisioned to the sign-in wallet, which is not
+	                    -- provisioned at all -- it is the default wearing the
+	                    -- label of the fix.
+	                    --
+	                    -- Without this clause the account is trapped. ready()
+	                    -- now reports such a row as not-ready so the provisioner
+	                    -- retries, and this WHERE would refuse every retry
+	                    -- because settle_wallet_id is already set: a loop that
+	                    -- runs forever and changes nothing, which is worse than
+	                    -- the state it was trying to leave.
+	                    --
+	                    -- Safe because the only new value that reaches here has
+	                    -- already been read back from Circle for this user's own
+	                    -- token AND checked not to be the login wallet, twenty
+	                    -- lines above.
+	                    OR (login_wallet IS NOT NULL
+	                        AND lower(settle_address) = lower(login_wallet))
+	                  )`
 	tag, err := h.Pool.Exec(r.Context(), q, found.ID, found.Address, principal.AccountID)
 	if err != nil {
 		writeErr(w, apierrors.E(apierrors.CodeInternal, ""))

@@ -44,8 +44,8 @@ export default function LinksPage() {
     try {
       const { ConduitClient } = await import("@conduit/sdk");
       const { ethers } = await import("ethers");
-      const { getWalletProvider } = await import("@/lib/wallet-provider");
-      const browserProvider = new ethers.BrowserProvider(await getWalletProvider(connector));
+      const { browserProviderFor } = await import("@/lib/wallet-provider");
+      const browserProvider = await browserProviderFor(connector);
       const client = ConduitClient.fromBrowserProvider(browserProvider, "", undefined, ARC_RPC_URL);
       await client.deactivateLink(declarationId as `0x${string}`);
       await loadDeclarations();

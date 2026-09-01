@@ -38,6 +38,7 @@ async function assertCanAfford(
 ): Promise<void> {
   try {
     const { ethers } = await import("ethers");
+  const { browserProviderFrom } = await import("@/lib/wallet-provider");
     const { arcReadProvider } = await import("@/lib/arc-provider");
     const { CURRENCIES } = await import("@conduit/sdk/lite");
     const { formatAmount } = await import("@/lib/format");
@@ -126,7 +127,8 @@ async function ensurePermit2Allowance(
   if (current >= THRESHOLD) return;
 
   onStage("One-time token approval — confirm in your wallet");
-  const browserProvider = new ethers.BrowserProvider(wallet);
+  const { browserProviderFrom } = await import("@/lib/wallet-provider");
+  const browserProvider = await browserProviderFrom(wallet);
   const signer = await browserProvider.getSigner();
   const erc20 = new ethers.Contract(
     token,

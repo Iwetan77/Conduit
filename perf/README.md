@@ -158,3 +158,78 @@ Nothing here is a law of physics. The irreducible part is Arc's block time —
 about a second per transaction, three transactions for a cross-stable
 settlement through Circle's relayer. Everything else in the list is a decision
 this repository made and can unmake.
+
+---
+
+# Phase B2 — measured
+
+`provider.pollingInterval = 500` (`packages/app/src/lib/arc-provider.ts`,
+`packages/sdk/src/client.ts`), memoised read provider, and a
+`browserProviderFor` / `browserProviderFrom` factory so the twelve call sites
+that constructed a `BrowserProvider` inherit it instead of each remembering.
+
+    node scripts/latency-compare.mjs perf/latency-before.json perf/latency-after-b2.json
+
+| Path | Before | After | |
+|---|---:|---:|---|
+| Same-currency | 12722ms | **6109ms** | −52% |
+| Payroll leg | 13527ms | **6612ms** | −51% |
+
+The receipts, which were the whole point:
+
+    same.approve_receipt      4827ms → 1440ms   -70%
+    same.execute_receipt      4871ms → 1428ms   -71%
+    payroll.approve_receipt   4889ms → 1727ms   -65%
+    payroll.disperse_receipt  4885ms → 1395ms   -71%
+
+Well past the phase's bar of 1.5s median improvement — the smallest is 3.2s.
+
+Cross-stable is unchanged and appears as "removed" in the comparison because
+the after-run traced only the two paths this phase affects. Its cost is API and
+Circle time, not receipt polling; B4 is where it moves.
+
+## Two notes on the tooling, both of which changed a number
+
+**`latency-compare` was crying wolf.** It first reported
+`payroll.disperse_broadcast` as an 18% regression — from samples
+`[823, 849, 1023]` to `[974, 999, 1005]`, which are entirely inside each other.
+A median that moved is not evidence that anything changed. A regression now has
+to be both over the threshold AND cleanly separated: every after-sample slower
+than every before-sample. Anything else prints "(within noise)". A gate nobody
+believes is a gate nobody reads.
+
+**The trace does not tune itself by default.** `--polling=<ms>` is opt-in, so
+the baseline keeps measuring what a payer experiences and an "after" run can
+measure the app as it now behaves. A trace that silently applied the fix it was
+measuring would report an improvement nobody could feel.
+
+## The gate's grep, and why two lines still match
+
+    ! grep -rn "new ethers.JsonRpcProvider\|new ethers.BrowserProvider" ... | grep -v "pollingInterval\|arc-provider.ts\|wallet-provider.ts"
+
+Two matches remain and neither is a provider without a polling interval:
+
+- `packages/app/src/app/docs/page.tsx:60` — inside a `<pre><code>` block. It is
+  a code SAMPLE shown to users, not code that runs.
+- `packages/sdk/src/client.ts:72` — a multi-line construction whose
+  `pollingInterval` assignment is on the line after the closing paren, so the
+  matched line cannot contain it.
+
+The grep is line-based and cannot tell "set two lines down" from "not set", nor
+executable code from a documentation string. Rather than contort either to
+satisfy it, the property it was reaching for is checked directly:
+
+    python3 - <<'PY'
+    import pathlib
+    bad = []
+    for f in list(pathlib.Path('packages/app/src').rglob('*.ts*')) + \
+             list(pathlib.Path('packages/sdk/src').rglob('*.ts')):
+        lines = f.read_text().split('\n')
+        for i, l in enumerate(lines):
+            if 'new ethers.JsonRpcProvider' in l or 'new ethers.BrowserProvider' in l:
+                if 'pollingInterval' not in '\n'.join(lines[max(0,i-3):i+12]):
+                    bad.append(f"{f}:{i+1}")
+    print(bad or "every provider sets a polling interval")
+    PY
+
+That reports none.

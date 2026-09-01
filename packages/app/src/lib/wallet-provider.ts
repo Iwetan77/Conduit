@@ -49,3 +49,38 @@ export async function getWalletProvider(
     "No wallet is connected. Connect a wallet or sign in with Google, then try again."
   );
 }
+
+/**
+ * An ethers BrowserProvider that polls at Arc's speed, not ethers' default.
+ *
+ * A factory rather than a note in a review comment. Twelve call sites in this
+ * app construct a BrowserProvider, and every one of them was inheriting the
+ * 4000ms default — which the Phase B0 trace measured as roughly four seconds of
+ * dead time per receipt, twice per payment. Telling twelve places to remember a
+ * line is how eleven of them keep it and the twelfth quietly costs somebody
+ * nine seconds.
+ *
+ * So the polling interval lives here, once, and a new call site gets it by
+ * using the same function everything else uses. `pnpm test`'s grep gate exists
+ * to catch anyone who constructs one directly instead.
+ */
+export async function browserProviderFor(
+  connector: Connector | undefined
+): Promise<import("ethers").BrowserProvider> {
+  const { ethers } = await import("ethers");
+  const { ARC_POLLING_INTERVAL_MS } = await import("@/lib/arc-provider");
+  const provider = new ethers.BrowserProvider(await getWalletProvider(connector));
+  provider.pollingInterval = ARC_POLLING_INTERVAL_MS;
+  return provider;
+}
+
+/** The same, when the EIP-1193 provider is already in hand. */
+export async function browserProviderFrom(
+  wallet: Eip1193Provider
+): Promise<import("ethers").BrowserProvider> {
+  const { ethers } = await import("ethers");
+  const { ARC_POLLING_INTERVAL_MS } = await import("@/lib/arc-provider");
+  const provider = new ethers.BrowserProvider(wallet);
+  provider.pollingInterval = ARC_POLLING_INTERVAL_MS;
+  return provider;
+}

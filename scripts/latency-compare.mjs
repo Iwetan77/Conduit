@@ -43,7 +43,24 @@ for (const [name, b] of beforeByName) {
   }
   const delta = a.ms - b.ms;
   const pct = b.ms === 0 ? 0 : delta / b.ms;
-  const regressed = b.ms >= NOISE_FLOOR_MS && pct > REGRESSION_THRESHOLD;
+
+  // A median that moved is not evidence that anything changed.
+  //
+  // Both runs are three samples of a network-bound operation. If their ranges
+  // OVERLAP, the same span on the same code could have produced either median,
+  // and calling that a regression makes this tool cry wolf — which is worse
+  // than not having it, because a gate nobody believes is a gate nobody reads.
+  // Measured for real: payroll.disperse_broadcast went 849ms to 999ms, which
+  // is 18% and looks alarming, from samples [823, 849, 1023] to
+  // [974, 999, 1005]. Entirely inside each other.
+  //
+  // A regression has to be BOTH more than the threshold and cleanly separated:
+  // every after-sample slower than every before-sample.
+  const separated =
+    Array.isArray(a.samples) && Array.isArray(b.samples) && a.samples.length && b.samples.length
+      ? Math.min(...a.samples) > Math.max(...b.samples)
+      : true;
+  const regressed = b.ms >= NOISE_FLOOR_MS && pct > REGRESSION_THRESHOLD && separated;
   if (regressed) regressions++;
   rows.push({ name, before: b.ms, after: a.ms, delta, pct, regressed });
 }
@@ -66,7 +83,11 @@ for (const r of rows) {
     continue;
   }
   const sign = r.delta > 0 ? "+" : "";
-  const mark = r.regressed ? "  REGRESSED" : "";
+  const mark = r.regressed
+    ? "  REGRESSED"
+    : r.pct > REGRESSION_THRESHOLD && r.before >= NOISE_FLOOR_MS
+      ? "  (within noise)"
+      : "";
   console.log(
     `${r.name.padEnd(34)} ${pad(r.before + "ms", 9)} ${pad(r.after + "ms", 9)} ` +
       `${pad(sign + r.delta + "ms", 9)} ${(r.pct * 100).toFixed(0)}%${mark}`,

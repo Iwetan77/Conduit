@@ -122,10 +122,14 @@ async function api(path, { method = "GET", body, key } = {}) {
 // ── Providers ───────────────────────────────────────────────────────────────
 
 const provider = new ethers.JsonRpcProvider(RPC, undefined, { staticNetwork: true });
-// NOT tuned. This trace measures what a payer experiences TODAY, and ethers'
-// 4000ms default polling interval is one of the things under suspicion — Phase
-// B2 exists to change it. Setting it here would hide the very cost the trace is
-// meant to expose and make the "after" comparison meaningless.
+// Untuned by DEFAULT, on purpose: the baseline has to measure what a payer
+// experiences today, and ethers' 4000ms polling is the thing under suspicion.
+// Setting it unconditionally would hide the very cost this exists to expose.
+//
+// --polling=<ms> opts in, so the same script can measure the app AFTER Phase
+// B2 tuned it — the app sets 500ms in lib/arc-provider, and an "after" trace
+// still polling at 4000 would report no improvement that a user will see.
+if (args.polling) provider.pollingInterval = Number(args.polling);
 const payer = new ethers.Wallet(PAYER_KEY, provider);
 
 const ERC20 = [

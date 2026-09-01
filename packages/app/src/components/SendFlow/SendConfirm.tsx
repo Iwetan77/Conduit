@@ -122,7 +122,8 @@ export function SendConfirm({
             spendFrom,
           )
         : await (await import("@/lib/wallet-provider")).getWalletProvider(connector);
-      const browserProvider = new ethers.BrowserProvider(wallet);
+      const { browserProviderFrom } = await import("@/lib/wallet-provider");
+      const browserProvider = await browserProviderFrom(wallet);
       const client = ConduitClient.fromBrowserProvider(browserProvider, "", undefined, ARC_RPC_URL);
 
       const result = await client.pay({

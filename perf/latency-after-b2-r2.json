@@ -1,0 +1,122 @@
+{
+  "prefix": "after-b2-r2",
+  "startedAt": "2026-09-01T03:25:29.586Z",
+  "finishedAt": "2026-09-01T03:25:46.174Z",
+  "api": "https://conduit-z56x.onrender.com",
+  "rpc": "https://rpc.testnet.arc.network",
+  "router": "0x2Bd51BB0CA986703A4449796EdCeCAB81126899C",
+  "payer": "0x1f38f7A2e5Cb55d6AfbF44934BC62cF791015C99",
+  "cold": false,
+  "spans": [
+    {
+      "name": "floor.healthz_median",
+      "ms": 239,
+      "samples": [
+        182,
+        207,
+        239,
+        599,
+        675
+      ],
+      "note": "API round-trip floor: /healthz does no work, so this is TLS + distance alone"
+    },
+    {
+      "name": "floor.arc_rpc_median",
+      "ms": 242,
+      "samples": [
+        232,
+        241,
+        242,
+        260,
+        677
+      ],
+      "note": "Arc RPC round-trip floor, measured directly rather than proxied"
+    },
+    {
+      "name": "setup.create_account",
+      "ms": 219,
+      "startedAt": "2026-09-01T03:25:33.144Z"
+    },
+    {
+      "name": "same.create_intent",
+      "ms": 204,
+      "startedAt": "2026-09-01T03:25:33.363Z"
+    },
+    {
+      "name": "same.get_signer",
+      "ms": 0,
+      "startedAt": "2026-09-01T03:25:33.567Z"
+    },
+    {
+      "name": "same.allowance_read",
+      "ms": 232,
+      "startedAt": "2026-09-01T03:25:33.571Z"
+    },
+    {
+      "name": "same.approve_broadcast",
+      "ms": 1108,
+      "startedAt": "2026-09-01T03:25:33.803Z"
+    },
+    {
+      "name": "same.approve_receipt",
+      "ms": 1440,
+      "startedAt": "2026-09-01T03:25:34.911Z",
+      "note": "ethers polls at its 4000ms default; Phase B2 is about this number"
+    },
+    {
+      "name": "same.execute_broadcast",
+      "ms": 952,
+      "startedAt": "2026-09-01T03:25:36.353Z"
+    },
+    {
+      "name": "same.execute_receipt",
+      "ms": 1428,
+      "startedAt": "2026-09-01T03:25:37.305Z"
+    },
+    {
+      "name": "same.post_record",
+      "ms": 767,
+      "startedAt": "2026-09-01T03:25:38.732Z"
+    },
+    {
+      "name": "payroll.add_employee",
+      "ms": 302,
+      "startedAt": "2026-09-01T03:25:39.500Z"
+    },
+    {
+      "name": "payroll.create_run",
+      "ms": 298,
+      "startedAt": "2026-09-01T03:25:39.802Z"
+    },
+    {
+      "name": "payroll.post_execute",
+      "ms": 302,
+      "startedAt": "2026-09-01T03:25:40.100Z"
+    },
+    {
+      "name": "payroll.approve_broadcast",
+      "ms": 941,
+      "startedAt": "2026-09-01T03:25:40.403Z"
+    },
+    {
+      "name": "payroll.approve_receipt",
+      "ms": 562,
+      "startedAt": "2026-09-01T03:25:41.344Z"
+    },
+    {
+      "name": "payroll.disperse_broadcast",
+      "ms": 999,
+      "startedAt": "2026-09-01T03:25:41.906Z"
+    },
+    {
+      "name": "payroll.disperse_receipt",
+      "ms": 2234,
+      "startedAt": "2026-09-01T03:25:42.905Z"
+    },
+    {
+      "name": "payroll.post_legs",
+      "ms": 1035,
+      "startedAt": "2026-09-01T03:25:45.139Z"
+    }
+  ]
+}

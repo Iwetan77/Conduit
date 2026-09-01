@@ -118,8 +118,8 @@ export function ArcSettlePanel({
         if (!intentIdRef.current) intentIdRef.current = await ensureIntentId();
         const { ConduitClient } = await import("@conduit/sdk");
         const { ethers } = await import("ethers");
-        const { getWalletProvider } = await import("@/lib/wallet-provider");
-        const browserProvider = new ethers.BrowserProvider(await getWalletProvider(connector));
+        const { browserProviderFor } = await import("@/lib/wallet-provider");
+        const browserProvider = await browserProviderFor(connector);
         const client = ConduitClient.fromBrowserProvider(browserProvider, "", undefined, ARC_RPC_URL);
         const result = await client.pay({
           recipient: settleAddress as `0x${string}`,

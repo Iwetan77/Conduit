@@ -26,9 +26,10 @@ export async function signUsernameClaim(
   provider: Eip1193Provider,
 ): Promise<{ timestamp: number; signature: string }> {
   const { ethers } = await import("ethers");
+  const { browserProviderFrom } = await import("@/lib/wallet-provider");
   const timestamp = Math.floor(Date.now() / 1000);
   const message = usernameClaimMessage(wallet, username, timestamp);
-  const browserProvider = new ethers.BrowserProvider(provider);
+  const browserProvider = await browserProviderFrom(provider);
   const signer = await browserProvider.getSigner();
   const signature = await signer.signMessage(message);
   return { timestamp, signature };

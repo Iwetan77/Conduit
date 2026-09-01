@@ -1,0 +1,209 @@
+{
+  "prefix": "after-b2",
+  "medianOf": 3,
+  "sources": [
+    "perf/latency-after-b2-r1.json",
+    "perf/latency-after-b2-r2.json",
+    "perf/latency-after-b2-r3.json"
+  ],
+  "generatedAt": "2026-09-01T03:26:03.376Z",
+  "api": "https://conduit-z56x.onrender.com",
+  "rpc": "https://rpc.testnet.arc.network",
+  "router": "0x2Bd51BB0CA986703A4449796EdCeCAB81126899C",
+  "payer": "0x1f38f7A2e5Cb55d6AfbF44934BC62cF791015C99",
+  "spans": [
+    {
+      "name": "floor.healthz_median",
+      "ms": 239,
+      "runs": 3,
+      "samples": [
+        216,
+        239,
+        280
+      ],
+      "note": "API round-trip floor: /healthz does no work, so this is TLS + distance alone"
+    },
+    {
+      "name": "floor.arc_rpc_median",
+      "ms": 241,
+      "runs": 3,
+      "samples": [
+        228,
+        241,
+        242
+      ],
+      "note": "Arc RPC round-trip floor, measured directly rather than proxied"
+    },
+    {
+      "name": "setup.create_account",
+      "ms": 239,
+      "runs": 3,
+      "samples": [
+        219,
+        239,
+        852
+      ]
+    },
+    {
+      "name": "same.create_intent",
+      "ms": 204,
+      "runs": 3,
+      "samples": [
+        202,
+        204,
+        207
+      ]
+    },
+    {
+      "name": "same.get_signer",
+      "ms": 0,
+      "runs": 3,
+      "samples": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "name": "same.allowance_read",
+      "ms": 232,
+      "runs": 3,
+      "samples": [
+        219,
+        232,
+        254
+      ]
+    },
+    {
+      "name": "same.approve_broadcast",
+      "ms": 1108,
+      "runs": 3,
+      "samples": [
+        934,
+        1108,
+        1123
+      ]
+    },
+    {
+      "name": "same.approve_receipt",
+      "ms": 1440,
+      "runs": 3,
+      "samples": [
+        1376,
+        1440,
+        1472
+      ],
+      "note": "ethers polls at its 4000ms default; Phase B2 is about this number"
+    },
+    {
+      "name": "same.execute_broadcast",
+      "ms": 955,
+      "runs": 3,
+      "samples": [
+        952,
+        955,
+        959
+      ]
+    },
+    {
+      "name": "same.execute_receipt",
+      "ms": 1428,
+      "runs": 3,
+      "samples": [
+        1412,
+        1428,
+        1481
+      ]
+    },
+    {
+      "name": "same.post_record",
+      "ms": 742,
+      "runs": 3,
+      "samples": [
+        651,
+        742,
+        767
+      ]
+    },
+    {
+      "name": "payroll.add_employee",
+      "ms": 274,
+      "runs": 3,
+      "samples": [
+        256,
+        274,
+        302
+      ]
+    },
+    {
+      "name": "payroll.create_run",
+      "ms": 311,
+      "runs": 3,
+      "samples": [
+        298,
+        311,
+        368
+      ]
+    },
+    {
+      "name": "payroll.post_execute",
+      "ms": 301,
+      "runs": 3,
+      "samples": [
+        290,
+        301,
+        302
+      ]
+    },
+    {
+      "name": "payroll.approve_broadcast",
+      "ms": 941,
+      "runs": 3,
+      "samples": [
+        850,
+        941,
+        965
+      ]
+    },
+    {
+      "name": "payroll.approve_receipt",
+      "ms": 1727,
+      "runs": 3,
+      "samples": [
+        562,
+        1727,
+        2149
+      ]
+    },
+    {
+      "name": "payroll.disperse_broadcast",
+      "ms": 999,
+      "runs": 3,
+      "samples": [
+        974,
+        999,
+        1005
+      ]
+    },
+    {
+      "name": "payroll.disperse_receipt",
+      "ms": 1395,
+      "runs": 3,
+      "samples": [
+        1324,
+        1395,
+        2234
+      ]
+    },
+    {
+      "name": "payroll.post_legs",
+      "ms": 664,
+      "runs": 3,
+      "samples": [
+        651,
+        664,
+        1035
+      ]
+    }
+  ]
+}

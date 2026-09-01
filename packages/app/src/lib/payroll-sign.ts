@@ -105,7 +105,8 @@ export async function payPayrollLeg(
   // signed as the owner personally, which is the wrong account's money for a
   // screen that says the business is paying. See lib/settlement-signer.
   const { getSettlementProvider } = await import("@/lib/settlement-signer");
-  const provider = new ethers.BrowserProvider(
+  const { browserProviderFrom } = await import("@/lib/wallet-provider");
+  const provider = await browserProviderFrom(
     await getSettlementProvider(connector, settleAddress),
   );
   const signer = await provider.getSigner();

@@ -22,6 +22,7 @@ export async function signTypedDataWithWallet(
   wallet: Eip1193Provider
 ): Promise<string> {
   const { ethers } = await import("ethers");
+  const { browserProviderFrom } = await import("@/lib/wallet-provider");
   if (!wallet) throw new Error("No wallet found in this browser.");
 
   const td = (typeof payload === "string" ? JSON.parse(payload) : payload) as TypedDataPayload;
@@ -35,7 +36,7 @@ export async function signTypedDataWithWallet(
   const message = td.message ?? td.value;
   if (!message) throw new Error("The FX provider returned a payload with no message.");
 
-  const provider = new ethers.BrowserProvider(wallet);
+  const provider = await browserProviderFrom(wallet);
   const signer = await provider.getSigner();
   return signer.signTypedData(
     td.domain,

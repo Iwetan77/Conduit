@@ -38,9 +38,9 @@ export function PayConfirm({ declaration, openAmount }: PayConfirmProps) {
     try {
       const { ConduitClient } = await import("@conduit/sdk");
       const { ethers } = await import("ethers");
-      const { getWalletProvider } = await import("@/lib/wallet-provider");
+      const { browserProviderFor } = await import("@/lib/wallet-provider");
 
-      const browserProvider = new ethers.BrowserProvider(await getWalletProvider(connector));
+      const browserProvider = await browserProviderFor(connector);
       const client = ConduitClient.fromBrowserProvider(browserProvider, "", undefined, ARC_RPC_URL);
 
       const result = await client.fulfill(declaration);

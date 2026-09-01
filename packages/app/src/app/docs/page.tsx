@@ -60,6 +60,8 @@ import { ethers } from "ethers";
 const provider = new ethers.JsonRpcProvider(
   "https://rpc.testnet.arc.network"
 );
+// Arc blocks in ~1s; ethers polls at 4000ms by default. See lib/arc-provider.
+provider.pollingInterval = 500;
 const signer = new ethers.Wallet(process.env.PRIVATE_KEY!, provider);
 
 const conduit = new ConduitClient({

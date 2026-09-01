@@ -231,8 +231,8 @@ export default function SettingsPage() {
       // Loaded on click, not on page load: this page is 500+ kB otherwise
       // and ethers is only needed once the merchant actually signs.
       const { ethers } = await import("ethers");
-      const { getWalletProvider } = await import("@/lib/wallet-provider");
-      const provider = new ethers.BrowserProvider(await getWalletProvider(connector));
+      const { browserProviderFor } = await import("@/lib/wallet-provider");
+      const provider = await browserProviderFor(connector);
       const signer = await provider.getSigner();
       const contract = new ethers.Contract(SETTLEMENT_PREFERENCE_REGISTRY, PREF_REGISTRY_ABI, signer);
       const tokenAddress = CURRENCIES[tokenSymbol].token;
@@ -254,8 +254,8 @@ export default function SettingsPage() {
     setBusy(true);
     try {
       const { ethers } = await import("ethers");
-      const { getWalletProvider } = await import("@/lib/wallet-provider");
-      const provider = new ethers.BrowserProvider(await getWalletProvider(connector));
+      const { browserProviderFor } = await import("@/lib/wallet-provider");
+      const provider = await browserProviderFor(connector);
       const signer = await provider.getSigner();
       const contract = new ethers.Contract(SETTLEMENT_PREFERENCE_REGISTRY, PREF_REGISTRY_ABI, signer);
       const tx = await contract["clearPreference"]();

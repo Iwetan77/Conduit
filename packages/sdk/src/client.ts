@@ -28,6 +28,16 @@ import type {
 /// Server usage:
 ///   const conduit = new ConduitClient({ privateKey: process.env.PRIVATE_KEY, kitKey: "..." });
 ///   await conduit.pay({ recipient, amount: 10_000_000n, currency: "USDC" });
+/**
+ * How often to ask whether a transaction has landed.
+ *
+ * ethers defaults to 4000ms and Arc produces blocks in about a second, so the
+ * default spends roughly four seconds asleep on every receipt. 500ms rather
+ * than less: Arc's public RPC rate-limits, and polling faster than blocks are
+ * produced spends requests to learn nothing.
+ */
+export const ARC_POLLING_INTERVAL_MS = 500;
+
 export class ConduitClient {
   private provider: ethers.JsonRpcProvider;
   private signerProvider: ethers.BrowserProvider | ethers.JsonRpcProvider;
@@ -54,11 +64,17 @@ export class ConduitClient {
     // staticNetwork skips an eth_chainId probe on every call, and
     // batchMaxCount:1 disables request batching (another thing the public
     // endpoint rejects under load).
+    // Arc produces blocks in about a second; ethers polls at 4000ms by
+    // default, so every tx.wait() in this SDK spent roughly four seconds
+    // asleep. Set on the CONSTRUCTOR so every call site inherits it rather
+    // than each one remembering -- the Phase B0 trace measured 4.9s per
+    // receipt, twice per payment, as the largest single cost in the product.
     this.provider = new ethers.JsonRpcProvider(
       rpc,
       { chainId: ARC_TESTNET.chainId, name: "arc-testnet" },
       { staticNetwork: true, batchMaxCount: 1 }
     );
+    this.provider.pollingInterval = ARC_POLLING_INTERVAL_MS;
 
     this.signerProvider = this.provider;
     this.appUrl = config.appUrl ?? DEFAULT_APP_URL;

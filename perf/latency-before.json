@@ -1,0 +1,303 @@
+{
+  "prefix": "before",
+  "medianOf": 3,
+  "sources": [
+    "perf/latency-before-r1.json",
+    "perf/latency-before-r2.json",
+    "perf/latency-before-r3.json"
+  ],
+  "generatedAt": "2026-09-01T03:08:22.061Z",
+  "api": "https://conduit-z56x.onrender.com",
+  "rpc": "https://rpc.testnet.arc.network",
+  "router": "0x2Bd51BB0CA986703A4449796EdCeCAB81126899C",
+  "payer": "0x1f38f7A2e5Cb55d6AfbF44934BC62cF791015C99",
+  "spans": [
+    {
+      "name": "floor.healthz_median",
+      "ms": 231,
+      "runs": 3,
+      "samples": [
+        214,
+        231,
+        233
+      ],
+      "note": "API round-trip floor: /healthz does no work, so this is TLS + distance alone"
+    },
+    {
+      "name": "floor.arc_rpc_median",
+      "ms": 242,
+      "runs": 3,
+      "samples": [
+        210,
+        242,
+        266
+      ],
+      "note": "Arc RPC round-trip floor, measured directly rather than proxied"
+    },
+    {
+      "name": "setup.create_account",
+      "ms": 242,
+      "runs": 3,
+      "samples": [
+        207,
+        242,
+        247
+      ]
+    },
+    {
+      "name": "same.create_intent",
+      "ms": 246,
+      "runs": 3,
+      "samples": [
+        212,
+        246,
+        256
+      ]
+    },
+    {
+      "name": "same.get_signer",
+      "ms": 0,
+      "runs": 3,
+      "samples": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "name": "same.allowance_read",
+      "ms": 235,
+      "runs": 3,
+      "samples": [
+        231,
+        235,
+        242
+      ]
+    },
+    {
+      "name": "same.approve_broadcast",
+      "ms": 927,
+      "runs": 3,
+      "samples": [
+        925,
+        927,
+        1036
+      ]
+    },
+    {
+      "name": "same.approve_receipt",
+      "ms": 4827,
+      "runs": 3,
+      "samples": [
+        238,
+        4827,
+        4938
+      ],
+      "note": "ethers polls at its 4000ms default; Phase B2 is about this number"
+    },
+    {
+      "name": "same.execute_broadcast",
+      "ms": 928,
+      "runs": 3,
+      "samples": [
+        926,
+        928,
+        1138
+      ]
+    },
+    {
+      "name": "same.execute_receipt",
+      "ms": 4871,
+      "runs": 3,
+      "samples": [
+        4793,
+        4871,
+        4954
+      ]
+    },
+    {
+      "name": "same.post_record",
+      "ms": 688,
+      "runs": 3,
+      "samples": [
+        611,
+        688,
+        725
+      ]
+    },
+    {
+      "name": "cross.permit2_allowance_read",
+      "ms": 222,
+      "runs": 3,
+      "samples": [
+        221,
+        222,
+        224
+      ]
+    },
+    {
+      "name": "cross.permit2_approve_skipped",
+      "ms": 0,
+      "runs": 3,
+      "samples": [
+        0,
+        0,
+        0
+      ],
+      "note": "already approved"
+    },
+    {
+      "name": "cross.create_intent",
+      "ms": 199,
+      "runs": 3,
+      "samples": [
+        188,
+        199,
+        226
+      ]
+    },
+    {
+      "name": "cross.post_quote",
+      "ms": 505,
+      "runs": 3,
+      "samples": [
+        384,
+        505,
+        520
+      ]
+    },
+    {
+      "name": "cross.balance_read",
+      "ms": 220,
+      "runs": 3,
+      "samples": [
+        218,
+        220,
+        229
+      ]
+    },
+    {
+      "name": "cross.sign_quote",
+      "ms": 11,
+      "runs": 3,
+      "samples": [
+        10,
+        11,
+        19
+      ],
+      "note": "key-signed; a human wallet prompt adds seconds on top"
+    },
+    {
+      "name": "cross.post_prepare",
+      "ms": 4547,
+      "runs": 3,
+      "samples": [
+        4206,
+        4547,
+        6340
+      ],
+      "note": "server-side: trade POST + contractTradeId poll + presign POST"
+    },
+    {
+      "name": "cross.sign_funding",
+      "ms": 5,
+      "runs": 3,
+      "samples": [
+        4,
+        5,
+        6
+      ]
+    },
+    {
+      "name": "cross.post_confirm",
+      "ms": 5399,
+      "runs": 3,
+      "samples": [
+        4885,
+        5399,
+        5491
+      ],
+      "note": "browser-visible wait: fund POST + status polling + makerDeliver"
+    },
+    {
+      "name": "payroll.add_employee",
+      "ms": 255,
+      "runs": 3,
+      "samples": [
+        237,
+        255,
+        279
+      ]
+    },
+    {
+      "name": "payroll.create_run",
+      "ms": 284,
+      "runs": 3,
+      "samples": [
+        255,
+        284,
+        350
+      ]
+    },
+    {
+      "name": "payroll.post_execute",
+      "ms": 295,
+      "runs": 3,
+      "samples": [
+        265,
+        295,
+        309
+      ]
+    },
+    {
+      "name": "payroll.approve_broadcast",
+      "ms": 1375,
+      "runs": 3,
+      "samples": [
+        1244,
+        1375,
+        1485
+      ]
+    },
+    {
+      "name": "payroll.approve_receipt",
+      "ms": 4889,
+      "runs": 3,
+      "samples": [
+        4866,
+        4889,
+        4891
+      ]
+    },
+    {
+      "name": "payroll.disperse_broadcast",
+      "ms": 849,
+      "runs": 3,
+      "samples": [
+        823,
+        849,
+        1023
+      ]
+    },
+    {
+      "name": "payroll.disperse_receipt",
+      "ms": 4885,
+      "runs": 3,
+      "samples": [
+        4860,
+        4885,
+        4888
+      ]
+    },
+    {
+      "name": "payroll.post_legs",
+      "ms": 695,
+      "runs": 3,
+      "samples": [
+        668,
+        695,
+        909
+      ]
+    }
+  ]
+}

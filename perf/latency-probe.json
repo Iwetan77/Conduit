@@ -1,0 +1,82 @@
+{
+  "prefix": "probe",
+  "startedAt": "2026-09-01T02:59:44.844Z",
+  "finishedAt": "2026-09-01T03:00:00.603Z",
+  "api": "https://conduit-z56x.onrender.com",
+  "rpc": "https://rpc.testnet.arc.network",
+  "router": "0x2Bd51BB0CA986703A4449796EdCeCAB81126899C",
+  "payer": "0x1f38f7A2e5Cb55d6AfbF44934BC62cF791015C99",
+  "cold": false,
+  "spans": [
+    {
+      "name": "floor.healthz_median",
+      "ms": 210,
+      "samples": [
+        203,
+        206,
+        210,
+        604,
+        606
+      ],
+      "note": "API round-trip floor: /healthz does no work, so this is TLS + distance alone"
+    },
+    {
+      "name": "floor.arc_rpc_median",
+      "ms": 0,
+      "samples": [
+        0,
+        0,
+        0,
+        212,
+        619
+      ],
+      "note": "Arc RPC round-trip floor, measured directly rather than proxied"
+    },
+    {
+      "name": "setup.create_account",
+      "ms": 288,
+      "startedAt": "2026-09-01T02:59:47.510Z"
+    },
+    {
+      "name": "same.create_intent",
+      "ms": 218,
+      "startedAt": "2026-09-01T02:59:47.801Z"
+    },
+    {
+      "name": "same.get_signer",
+      "ms": 0,
+      "startedAt": "2026-09-01T02:59:48.019Z"
+    },
+    {
+      "name": "same.allowance_read",
+      "ms": 209,
+      "startedAt": "2026-09-01T02:59:48.029Z"
+    },
+    {
+      "name": "same.approve_broadcast",
+      "ms": 863,
+      "startedAt": "2026-09-01T02:59:48.238Z"
+    },
+    {
+      "name": "same.approve_receipt",
+      "ms": 4941,
+      "startedAt": "2026-09-01T02:59:49.101Z",
+      "note": "ethers polls at its 4000ms default; Phase B2 is about this number"
+    },
+    {
+      "name": "same.execute_broadcast",
+      "ms": 863,
+      "startedAt": "2026-09-01T02:59:54.043Z"
+    },
+    {
+      "name": "same.execute_receipt",
+      "ms": 4956,
+      "startedAt": "2026-09-01T02:59:54.906Z"
+    },
+    {
+      "name": "same.post_record",
+      "ms": 741,
+      "startedAt": "2026-09-01T02:59:59.863Z"
+    }
+  ]
+}

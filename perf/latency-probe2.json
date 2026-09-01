@@ -1,0 +1,81 @@
+{
+  "prefix": "probe2",
+  "startedAt": "2026-09-01T03:02:29.751Z",
+  "finishedAt": "2026-09-01T03:02:46.756Z",
+  "api": "https://conduit-z56x.onrender.com",
+  "rpc": "https://rpc.testnet.arc.network",
+  "router": "0x2Bd51BB0CA986703A4449796EdCeCAB81126899C",
+  "payer": "0x1f38f7A2e5Cb55d6AfbF44934BC62cF791015C99",
+  "cold": false,
+  "spans": [
+    {
+      "name": "floor.healthz_median",
+      "ms": 219,
+      "samples": [
+        203,
+        205,
+        219,
+        555,
+        685
+      ],
+      "note": "API round-trip floor: /healthz does no work, so this is TLS + distance alone"
+    },
+    {
+      "name": "floor.arc_rpc_median",
+      "ms": 218,
+      "samples": [
+        213,
+        217,
+        218,
+        218,
+        612
+      ],
+      "note": "Arc RPC round-trip floor, measured directly rather than proxied"
+    },
+    {
+      "name": "setup.create_account",
+      "ms": 259,
+      "startedAt": "2026-09-01T03:02:33.100Z"
+    },
+    {
+      "name": "payroll.add_employee",
+      "ms": 308,
+      "startedAt": "2026-09-01T03:02:33.360Z"
+    },
+    {
+      "name": "payroll.create_run",
+      "ms": 365,
+      "startedAt": "2026-09-01T03:02:33.668Z"
+    },
+    {
+      "name": "payroll.post_execute",
+      "ms": 311,
+      "startedAt": "2026-09-01T03:02:34.033Z"
+    },
+    {
+      "name": "payroll.approve_broadcast",
+      "ms": 999,
+      "startedAt": "2026-09-01T03:02:34.348Z"
+    },
+    {
+      "name": "payroll.approve_receipt",
+      "ms": 4914,
+      "startedAt": "2026-09-01T03:02:35.347Z"
+    },
+    {
+      "name": "payroll.disperse_broadcast",
+      "ms": 869,
+      "startedAt": "2026-09-01T03:02:40.262Z"
+    },
+    {
+      "name": "payroll.disperse_receipt",
+      "ms": 4917,
+      "startedAt": "2026-09-01T03:02:41.131Z"
+    },
+    {
+      "name": "payroll.post_legs",
+      "ms": 707,
+      "startedAt": "2026-09-01T03:02:46.048Z"
+    }
+  ]
+}

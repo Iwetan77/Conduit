@@ -1,0 +1,170 @@
+{
+  "prefix": "before-r1",
+  "startedAt": "2026-09-01T03:03:34.935Z",
+  "finishedAt": "2026-09-01T03:04:12.091Z",
+  "api": "https://conduit-z56x.onrender.com",
+  "rpc": "https://rpc.testnet.arc.network",
+  "router": "0x2Bd51BB0CA986703A4449796EdCeCAB81126899C",
+  "payer": "0x1f38f7A2e5Cb55d6AfbF44934BC62cF791015C99",
+  "cold": false,
+  "spans": [
+    {
+      "name": "floor.healthz_median",
+      "ms": 214,
+      "samples": [
+        197,
+        207,
+        214,
+        672,
+        748
+      ],
+      "note": "API round-trip floor: /healthz does no work, so this is TLS + distance alone"
+    },
+    {
+      "name": "floor.arc_rpc_median",
+      "ms": 242,
+      "samples": [
+        230,
+        237,
+        242,
+        242,
+        654
+      ],
+      "note": "Arc RPC round-trip floor, measured directly rather than proxied"
+    },
+    {
+      "name": "setup.create_account",
+      "ms": 242,
+      "startedAt": "2026-09-01T03:03:38.585Z"
+    },
+    {
+      "name": "same.create_intent",
+      "ms": 246,
+      "startedAt": "2026-09-01T03:03:38.827Z"
+    },
+    {
+      "name": "same.get_signer",
+      "ms": 0,
+      "startedAt": "2026-09-01T03:03:39.074Z"
+    },
+    {
+      "name": "same.allowance_read",
+      "ms": 231,
+      "startedAt": "2026-09-01T03:03:39.076Z"
+    },
+    {
+      "name": "same.approve_broadcast",
+      "ms": 925,
+      "startedAt": "2026-09-01T03:03:39.307Z"
+    },
+    {
+      "name": "same.approve_receipt",
+      "ms": 238,
+      "startedAt": "2026-09-01T03:03:40.233Z",
+      "note": "ethers polls at its 4000ms default; Phase B2 is about this number"
+    },
+    {
+      "name": "same.execute_broadcast",
+      "ms": 926,
+      "startedAt": "2026-09-01T03:03:40.471Z"
+    },
+    {
+      "name": "same.execute_receipt",
+      "ms": 4954,
+      "startedAt": "2026-09-01T03:03:41.397Z"
+    },
+    {
+      "name": "same.post_record",
+      "ms": 688,
+      "startedAt": "2026-09-01T03:03:46.352Z"
+    },
+    {
+      "name": "cross.permit2_allowance_read",
+      "ms": 222,
+      "startedAt": "2026-09-01T03:03:47.047Z"
+    },
+    {
+      "name": "cross.permit2_approve_skipped",
+      "ms": 0,
+      "note": "already approved"
+    },
+    {
+      "name": "cross.create_intent",
+      "ms": 199,
+      "startedAt": "2026-09-01T03:03:47.269Z"
+    },
+    {
+      "name": "cross.post_quote",
+      "ms": 505,
+      "startedAt": "2026-09-01T03:03:47.468Z"
+    },
+    {
+      "name": "cross.balance_read",
+      "ms": 218,
+      "startedAt": "2026-09-01T03:03:47.973Z"
+    },
+    {
+      "name": "cross.sign_quote",
+      "ms": 10,
+      "startedAt": "2026-09-01T03:03:48.191Z",
+      "note": "key-signed; a human wallet prompt adds seconds on top"
+    },
+    {
+      "name": "cross.post_prepare",
+      "ms": 4547,
+      "startedAt": "2026-09-01T03:03:48.201Z",
+      "note": "server-side: trade POST + contractTradeId poll + presign POST"
+    },
+    {
+      "name": "cross.sign_funding",
+      "ms": 6,
+      "startedAt": "2026-09-01T03:03:52.748Z"
+    },
+    {
+      "name": "cross.post_confirm",
+      "ms": 5491,
+      "startedAt": "2026-09-01T03:03:52.754Z",
+      "note": "browser-visible wait: fund POST + status polling + makerDeliver"
+    },
+    {
+      "name": "payroll.add_employee",
+      "ms": 255,
+      "startedAt": "2026-09-01T03:03:58.246Z"
+    },
+    {
+      "name": "payroll.create_run",
+      "ms": 350,
+      "startedAt": "2026-09-01T03:03:58.502Z"
+    },
+    {
+      "name": "payroll.post_execute",
+      "ms": 295,
+      "startedAt": "2026-09-01T03:03:58.852Z"
+    },
+    {
+      "name": "payroll.approve_broadcast",
+      "ms": 1485,
+      "startedAt": "2026-09-01T03:03:59.147Z"
+    },
+    {
+      "name": "payroll.approve_receipt",
+      "ms": 4866,
+      "startedAt": "2026-09-01T03:04:00.632Z"
+    },
+    {
+      "name": "payroll.disperse_broadcast",
+      "ms": 823,
+      "startedAt": "2026-09-01T03:04:05.499Z"
+    },
+    {
+      "name": "payroll.disperse_receipt",
+      "ms": 4860,
+      "startedAt": "2026-09-01T03:04:06.322Z"
+    },
+    {
+      "name": "payroll.post_legs",
+      "ms": 909,
+      "startedAt": "2026-09-01T03:04:11.182Z"
+    }
+  ]
+}

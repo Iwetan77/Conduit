@@ -4,6 +4,7 @@ pragma solidity ^0.8.24;
 import {Test, console2} from "forge-std/Test.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ConduitRouter} from "../src/ConduitRouter.sol";
+import {CurrencyRegistry} from "../src/CurrencyRegistry.sol";
 import {DeclarationRegistry} from "../src/DeclarationRegistry.sol";
 import {IConduitRouter} from "../src/interfaces/IConduitRouter.sol";
 import {SettlementPreferenceRegistry} from "../src/SettlementPreferenceRegistry.sol";
@@ -25,6 +26,7 @@ contract ConduitRouterTest is Test {
     MockERC20 eurc;
 
     DeclarationRegistry registry;
+    CurrencyRegistry currencies;
     ConduitRouter router;
 
     function setUp() public {
@@ -37,8 +39,14 @@ contract ConduitRouterTest is Test {
 
         // Deploy protocol
         vm.startPrank(OWNER);
-        registry  = new DeclarationRegistry(OWNER);
-        router    = new ConduitRouter(OWNER, address(registry));
+        registry   = new DeclarationRegistry(OWNER);
+        currencies = new CurrencyRegistry(OWNER);
+        router     = new ConduitRouter(OWNER, address(registry), address(currencies));
+
+        // The router now refuses anything the registry does not know, so the
+        // test tokens have to be registered for any payment to work at all.
+        currencies.registerCurrency("USD", address(usdc), 6);
+        currencies.registerCurrency("EUR", address(eurc), 6);
         vm.stopPrank();
 
         // Fund payer

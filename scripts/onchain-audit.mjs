@@ -199,14 +199,21 @@ async function main() {
   say("| Contract | Address | owner() | Kind | pendingOwner() |");
   say("|---|---|---|---|---|");
 
-  const owned = {
-    ConduitRouter: deployments.conduitRouter,
-    AtomicSettler: deployments.atomicSettler,
-    StableFXAdapter: deployments.stableFXAdapter,
-    DeclarationRegistry: deployments.declarationRegistry,
-    CurrencyRegistry: deployments.currencyRegistry,
-    SettlementPreferenceRegistry: deployments.settlementPreferenceRegistry,
-  };
+  // Only what the deployments file still names. AtomicSettler and
+  // StableFXAdapter were deleted in Phases A1 and A3 and their keys removed --
+  // but the OLD instances are still deployed on chain until A6 abandons the
+  // router, so an operator auditing a pre-A6 deployment still wants them.
+  // Filtered rather than hardcoded, so this reports what is actually tracked.
+  const owned = Object.fromEntries(
+    [
+      ["ConduitRouter", deployments.conduitRouter],
+      ["AtomicSettler", deployments.atomicSettler],
+      ["StableFXAdapter", deployments.stableFXAdapter],
+      ["DeclarationRegistry", deployments.declarationRegistry],
+      ["CurrencyRegistry", deployments.currencyRegistry],
+      ["SettlementPreferenceRegistry", deployments.settlementPreferenceRegistry],
+    ].filter(([, addr]) => !!addr),
+  );
   const owners = {};
   for (const [name, addr] of Object.entries(owned)) {
     const o = await ownership(name, addr);
@@ -325,7 +332,7 @@ async function main() {
   for (const [name, addr] of [
     ["AtomicSettler", deployments.atomicSettler],
     ["ConduitPayroll", deployments.conduitPayroll],
-  ]) {
+  ].filter(([, a]) => !!a)) {
     for (const key of tokenKeys) {
       const bal = dec(
         "balanceOf",
@@ -340,7 +347,7 @@ async function main() {
   // ── The authorization graph ───────────────────────────────────────────────
   say("## The authorization graph, as deployed");
   say();
-  const routerAuthed = dec(
+  const routerAuthed = deployments.atomicSettler === undefined ? null : dec(
     "authorizedRouters",
     await call(
       deployments.atomicSettler,
@@ -348,7 +355,7 @@ async function main() {
       "settler.authorizedRouters(router)",
     ),
   );
-  const settlerAuthed = dec(
+  const settlerAuthed = deployments.stableFXAdapter === undefined ? null : dec(
     "authorizedCallers",
     await call(
       deployments.stableFXAdapter,
@@ -384,7 +391,7 @@ async function main() {
     ["CurrencyRegistry", "currencyRegistry"],
     ["SettlementPreferenceRegistry", "settlementPreferenceRegistry"],
     ["ConduitPayroll", "conduitPayroll"],
-  ]) {
+  ].filter(([, k]) => !!deployments[k])) {
     const size = await codeSize(deployments[key]);
     say(
       `| ${name} | \`${deployments[key]}\` | ${size === 0 ? "**NOT DEPLOYED**" : size + " bytes"} |`,

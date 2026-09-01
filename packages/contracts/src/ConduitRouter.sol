@@ -4,9 +4,11 @@ pragma solidity 0.8.24;
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
+import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {IConduitRouter} from "./interfaces/IConduitRouter.sol";
+import {CurrencyRegistry} from "./CurrencyRegistry.sol";
 import {DeclarationRegistry} from "./DeclarationRegistry.sol";
 import {SettlementPreferenceRegistry} from "./SettlementPreferenceRegistry.sol";
 
@@ -25,7 +27,20 @@ import {SettlementPreferenceRegistry} from "./SettlementPreferenceRegistry.sol";
 ///
 /// @dev All amounts: 6-decimal ERC-20 units. Never 18-decimal native gas values.
 ///      Protocol params owned by 2-of-3 multisig (Ownable in v1).
-contract ConduitRouter is IConduitRouter, ReentrancyGuard, Ownable2Step {
+/// @dev NON-CUSTODIAL BETWEEN TRANSACTIONS. Every payment pulls from the payer
+///      and pays the recipient inside one call; the only balance this contract
+///      holds across transactions is `accumulatedFees`, and `withdrawFees`
+///      reaches that even while paused.
+///
+///      That is the reason the guardian pause is not itself a risk. A pause on
+///      a custodial contract traps user funds, and handing a hot key the power
+///      to do that would be worse than the finding it protects against. Here it
+///      stops new payments and strands nothing.
+///
+///      If a future change makes this contract hold user funds between
+///      transactions, that reasoning no longer holds and the pause must be
+///      revisited with it.
+contract ConduitRouter is IConduitRouter, ReentrancyGuard, Ownable2Step, Pausable {
     using SafeERC20 for IERC20;
 
     // ── Constants ─────────────────────────────────────────────────────────────
@@ -37,6 +52,22 @@ contract ConduitRouter is IConduitRouter, ReentrancyGuard, Ownable2Step {
 
     DeclarationRegistry public declarationRegistry;
     SettlementPreferenceRegistry public settlementPreferenceRegistry;
+
+    /// @notice The set of tokens this router will move.
+    /// @dev Consulted on every payment. Before this the registry was consulted
+    ///      by nothing on-chain, so ANY ERC-20 routed through here — including a
+    ///      fee-on-transfer token, which breaks fee accounting outright: the
+    ///      router pulls `payerAmount`, receives less than that, then pays out
+    ///      the full `instruction.amount` from a pot other payers funded.
+    CurrencyRegistry public currencyRegistry;
+
+    /// @notice May call `pause()` and nothing else.
+    /// @dev Deliberately asymmetric with `owner`. This is a HOT key, so that a
+    ///      response can be fast, and it therefore holds no positive power: it
+    ///      cannot unpause, move funds, or change a parameter. Everything it can
+    ///      do is a subtraction. Releasing the brake takes the owner's full
+    ///      quorum.
+    address public guardian;
 
     uint256 public protocolFeeBps;
     mapping(address => uint256) public accumulatedFees;
@@ -51,10 +82,13 @@ contract ConduitRouter is IConduitRouter, ReentrancyGuard, Ownable2Step {
 
     constructor(
         address initialOwner,
-        address _declarationRegistry
+        address _declarationRegistry,
+        address _currencyRegistry
     ) Ownable(initialOwner) {
         require(_declarationRegistry != address(0), "zero: registry");
+        require(_currencyRegistry != address(0), "zero: currency registry");
         declarationRegistry = DeclarationRegistry(_declarationRegistry);
+        currencyRegistry = CurrencyRegistry(_currencyRegistry);
     }
 
     // ── Path 1: Same-currency execute ─────────────────────────────────────────
@@ -66,6 +100,7 @@ contract ConduitRouter is IConduitRouter, ReentrancyGuard, Ownable2Step {
         external
         override
         nonReentrant
+        whenNotPaused
         returns (bytes32 receiptId)
     {
         _validateInstruction(instruction);
@@ -190,6 +225,34 @@ contract ConduitRouter is IConduitRouter, ReentrancyGuard, Ownable2Step {
     }
 
 
+    function setCurrencyRegistry(address registry) external onlyOwner {
+        require(registry != address(0), "zero: currency registry");
+        currencyRegistry = CurrencyRegistry(registry);
+        emit CurrencyRegistrySet(registry);
+    }
+
+    /// @notice Name the address that may pause payments.
+    /// @dev Owner-only, and setting it to zero is allowed: revoking a
+    ///      compromised guardian must not require having a replacement ready.
+    function setGuardian(address newGuardian) external onlyOwner {
+        guardian = newGuardian;
+        emit GuardianSet(newGuardian);
+    }
+
+    /// @notice Stop `execute`. Callable by the guardian or the owner.
+    function pause() external {
+        require(msg.sender == guardian || msg.sender == owner(), "not guardian");
+        _pause();
+        emit PausedBy(msg.sender);
+    }
+
+    /// @notice Resume `execute`. OWNER ONLY — the guardian cannot undo its own
+    ///         brake, which is what makes handing that key out survivable.
+    function unpause() external onlyOwner {
+        _unpause();
+        emit UnpausedBy(msg.sender);
+    }
+
     function setSettlementPreferenceRegistry(address registry) external onlyOwner {
         require(registry != address(0), "zero: preference registry");
         settlementPreferenceRegistry = SettlementPreferenceRegistry(registry);
@@ -209,9 +272,14 @@ contract ConduitRouter is IConduitRouter, ReentrancyGuard, Ownable2Step {
     ///      most ERC-20s -- it is an ordinary balance update, not a revert --
     ///      so a mistyped recipient burns the accumulated fees irreversibly
     ///      after the balance has already been zeroed.
+    /// @dev Reachable WHILE PAUSED, deliberately. The pause stops payments; it
+    ///      is not a freeze on money already owed. See the contract header.
     function withdrawFees(address token, address to) external override onlyOwner {
         require(to != address(0), "zero: to");
         uint256 amount = accumulatedFees[token];
+        // A zero withdrawal emits an event saying fees were withdrawn and moves
+        // nothing, which is a lie in the log an indexer will faithfully record.
+        require(amount > 0, "no fees");
         accumulatedFees[token] = 0;
         IERC20(token).safeTransfer(to, amount);
         emit FeesWithdrawn(token, to, amount);
@@ -220,6 +288,14 @@ contract ConduitRouter is IConduitRouter, ReentrancyGuard, Ownable2Step {
     // ── Internal ──────────────────────────────────────────────────────────────
 
     function _validateInstruction(PaymentInstruction calldata instruction) internal view {
+        // The registry is now load-bearing rather than decorative. An
+        // unregistered or disabled token cannot be routed at all, which is what
+        // keeps a fee-on-transfer or rebasing token out of the fee accounting
+        // it would otherwise corrupt.
+        require(
+            currencyRegistry.isEnabledToken(instruction.payerToken),
+            "token not enabled"
+        );
         require(instruction.recipient != address(0), "zero recipient");
         require(instruction.payer != address(0), "zero payer");
         require(instruction.amount > 0, "zero amount");

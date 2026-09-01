@@ -62,13 +62,19 @@ contract Deploy is Script {
         DeclarationRegistry registry = new DeclarationRegistry(owner);
         console2.log("DeclarationRegistry:            ", address(registry));
 
-        // ── 2. ConduitRouter ──────────────────────────────────────────────────
-        ConduitRouter router = new ConduitRouter(owner, address(registry));
-        console2.log("ConduitRouter:                  ", address(router));
-
-        // ── 5. CurrencyRegistry ───────────────────────────────────────────────
+        // ── 2. CurrencyRegistry ───────────────────────────────────────────────
+        // Before the router, because the router now REQUIRES it: an
+        // unregistered token cannot be routed at all.
         CurrencyRegistry currencyRegistry = new CurrencyRegistry(owner);
         console2.log("CurrencyRegistry:                ", address(currencyRegistry));
+
+        // ── 3. ConduitRouter ──────────────────────────────────────────────────
+        ConduitRouter router = new ConduitRouter(
+            owner,
+            address(registry),
+            address(currencyRegistry)
+        );
+        console2.log("ConduitRouter:                  ", address(router));
 
         // ── 6. SettlementPreferenceRegistry ───────────────────────────────────
         SettlementPreferenceRegistry prefRegistry = new SettlementPreferenceRegistry();

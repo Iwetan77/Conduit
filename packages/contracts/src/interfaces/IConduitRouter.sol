@@ -38,6 +38,14 @@ interface IConduitRouter {
 
     event DeclarationRegistrySet(address indexed registry);
     event SettlementPreferenceRegistrySet(address indexed registry);
+    event CurrencyRegistrySet(address indexed registry);
+    /// @notice Who may pause payments. Emitted on every change, including to
+    ///         address(0), which revokes.
+    event GuardianSet(address indexed guardian);
+    /// @notice OpenZeppelin's Pausable emits Paused()/Unpaused() with no
+    ///         caller. Who pulled the brake is the first question anyone asks.
+    event PausedBy(address indexed by);
+    event UnpausedBy(address indexed by);
     /// @notice Emitted when the protocol fee changes. Every other admin action
     ///         announced itself; a fee change — the one that alters what every
     ///         payer is charged — did not, so it was invisible to any indexer.

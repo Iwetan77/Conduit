@@ -7,8 +7,8 @@ document confirms or refutes it.
 
 - RPC: `https://rpc.testnet.arc.network`
 - Chain id: `5042002` (deployments file says `5042002`)
-- Block at audit: `59852618`
-- Generated: 2026-09-01T00:13:19.809Z
+- Block at audit: `59863080`
+- Generated: 2026-09-01T01:44:18.385Z
 
 ## Ownership
 
@@ -18,15 +18,13 @@ document confirms or refutes it.
 
 | Contract | Address | owner() | Kind | pendingOwner() |
 |---|---|---|---|---|
-| ConduitRouter | `0x80f996e86C003AF309635B67A53dC6e63e623318` | `0xf04a181eaB4CfABf7D13CCe64737782737cD0b22` | an EOA (no code) | `0x0000000000000000000000000000000000000000` |
-| AtomicSettler | `0x22eb1affd62b65D3F06Ce9Bd9c1EEabCc047CC0b` | `0xf04a181eaB4CfABf7D13CCe64737782737cD0b22` | an EOA (no code) | `0x0000000000000000000000000000000000000000` |
-| StableFXAdapter | `0xC49B990B7797Ba066F7CdDEa176616e68E0af7DF` | `0xf04a181eaB4CfABf7D13CCe64737782737cD0b22` | an EOA (no code) | `0x0000000000000000000000000000000000000000` |
+| ConduitRouter | `0x2Bd51BB0CA986703A4449796EdCeCAB81126899C` | `0xf04a181eaB4CfABf7D13CCe64737782737cD0b22` | an EOA (no code) | `0x0000000000000000000000000000000000000000` |
 | DeclarationRegistry | `0x97F4595dF5D68c5d1D14A6678e4e94b5E58E1598` | `0xf04a181eaB4CfABf7D13CCe64737782737cD0b22` | an EOA (no code) | `0x0000000000000000000000000000000000000000` |
 | CurrencyRegistry | `0x9aCd34c9E922903DBcB074A7Fb140D857ccA6F2B` | `0xf04a181eaB4CfABf7D13CCe64737782737cD0b22` | an EOA (no code) | `0x0000000000000000000000000000000000000000` |
 | SettlementPreferenceRegistry | `0x799F838F5D4Ca302E436a0C53ab0E1F51A5A3D1b` | — | no owner() — not Ownable | `0x0` (none pending) |
 
 The deployments file names `0xf04a181eaB4CfABf7D13CCe64737782737cD0b22` as both deployer and owner.
-**Confirmed for 5 of 6:** ConduitRouter, AtomicSettler, StableFXAdapter, DeclarationRegistry, CurrencyRegistry.
+**Confirmed for 3 of 4:** ConduitRouter, DeclarationRegistry, CurrencyRegistry.
 That address is an EOA (no code).
 
 ## Is recipient-preference enforcement real?
@@ -73,8 +71,8 @@ calls. Anything here is a balance somebody can be paid out of, or lose.
 
 ## The authorization graph, as deployed
 
-- `AtomicSettler.authorizedRouters(0x80f996e86C003AF309635B67A53dC6e63e623318)` = **true**
-- `StableFXAdapter.authorizedCallers(0x22eb1affd62b65D3F06Ce9Bd9c1EEabCc047CC0b)` = **true**
+- `AtomicSettler.authorizedRouters(0x2Bd51BB0CA986703A4449796EdCeCAB81126899C)` = **reverted**
+- `StableFXAdapter.authorizedCallers(undefined)` = **reverted**
 
 Both true means the forgery path described in Phase A0 is wired end to
 end on the live deployment.
@@ -83,9 +81,7 @@ end on the live deployment.
 
 | Contract | Address | Code size |
 |---|---|---|
-| ConduitRouter | `0x80f996e86C003AF309635B67A53dC6e63e623318` | 6485 bytes |
-| AtomicSettler | `0x22eb1affd62b65D3F06Ce9Bd9c1EEabCc047CC0b` | 2088 bytes |
-| StableFXAdapter | `0xC49B990B7797Ba066F7CdDEa176616e68E0af7DF` | 2085 bytes |
+| ConduitRouter | `0x2Bd51BB0CA986703A4449796EdCeCAB81126899C` | 4971 bytes |
 | DeclarationRegistry | `0x97F4595dF5D68c5d1D14A6678e4e94b5E58E1598` | 1792 bytes |
 | CurrencyRegistry | `0x9aCd34c9E922903DBcB074A7Fb140D857ccA6F2B` | 2660 bytes |
 | SettlementPreferenceRegistry | `0x799F838F5D4Ca302E436a0C53ab0E1F51A5A3D1b` | 473 bytes |
@@ -102,25 +98,16 @@ Filtering on `0x03fc22af315318d5de14e4936cee37313564befbf9c2b46a244aef403fa816ea
 signature rather than written down, so a zero result means zero logs and
 not a mistyped topic.
 
-Router deployed at block **57213328**, found by binary search on
-`eth_getCode`. Scanning 57213328 → 59852618 in 20000-block chunks —
+Router deployed at block **59862873**, found by binary search on
+`eth_getCode`. Scanning 59862873 → 59863080 in 20000-block chunks —
 the router's entire history, not a recent window.
 
-Logs found: **8**
+Logs found: **0**
 
-| Block | Tx | Tokens | Selector | Verdict |
-|---|---|---|---|---|
-| 57225788 | `0x3a1d09e26c65a4520fffd20863d13ee565fb24e65e924f601f401294603c2ca1` | same | `pruned` | `execute()` — moves tokens in the same call |
-| 57562083 | `0xf04170ec7ab91bc0914b7bf005d7fe2441a45102c66cd6e5036f76c1515711c2` | same | `pruned` | `execute()` — moves tokens in the same call |
-| 57805521 | `0x22dba97054c102703c8ca072027111e92a5cc842206b11b22341dc510f3b7147` | same | `pruned` | `execute()` — moves tokens in the same call |
-| 57871282 | `0x5342b683cb8781508abe9f47239e940021b8b4e07206c66477cb027310606fd0` | same | `pruned` | `execute()` — moves tokens in the same call |
-| 58151126 | `0x73f2f3110a353f590a220d0d976c4499a80010e9ac853c1d2597e3b4c41ed0f5` | same | `pruned` | `execute()` — moves tokens in the same call |
-| 59183264 | `0x2ecdb5781d77432f2f5306400207b66ba4abcb2fb67437f4df91dc678b47ba1b` | same | `0x0488a4e2` | `execute()` — moves tokens in the same call |
-| 59189101 | `0xe77019954c85eb2bdc4ca74d5afc0f64f7691182a50f4b735617ca792ec381f3` | same | `0x0488a4e2` | `execute()` — moves tokens in the same call |
-| 59213076 | `0x756a7fb53fa2e2ac6c1a017be2d7a47f28c2452235b63c759c3996824e26f3a8` | same | `0x0488a4e2` | `execute()` — moves tokens in the same call |
-
-Every emission came from `execute()`, which performs its own
-transfer in the same call. **No forged settlement has occurred.**
+No `PaymentSettled` has ever been emitted by this router, across its
+whole history. **No forged settlement has occurred** — and no genuine
+one either, which is consistent with `RecordDirectSettlement` being
+the path the browser actually uses.
 
 Phase A1 is therefore **prevention, not incident response**.
 
@@ -136,3 +123,55 @@ moment Phase A4 makes `isEnabledToken` load-bearing in `execute()`.
 
 None. Every field above was filled from a real call.
 
+
+---
+
+## ABANDONED — never point anything at this again
+
+`0x80f996e86C003AF309635B67A53dC6e63e623318` was the ConduitRouter until Phase
+A6. It is abandoned, not upgraded — it has no pause and no migration path, and
+A0 confirmed it holds nothing (`protocolFeeBps` is 0 and every
+`accumulatedFees` entry is zero), so nothing had to be withdrawn before walking
+away from it.
+
+**It must never be set as `CONDUIT_ROUTER_ADDRESS` again.** It still carries
+`executeWithFX`, which is `external` with no `msg.sender` check and emits
+`PaymentSettled` populated entirely from caller-supplied calldata — a
+settlement event for any amount, over a transaction that moved one unit of any
+token. Phase A2 means a forged event would now be dropped rather than believed,
+but pointing at that contract would be reintroducing the thing this work
+removed.
+
+Its replacement is `0x2Bd51BB0CA986703A4449796EdCeCAB81126899C`.
+`DeclarationRegistry`, `CurrencyRegistry` and `SettlementPreferenceRegistry`
+keep their addresses, so every declaration registered against the old router
+still resolves.
+
+## NOT DONE — ownership is still a single hot key
+
+The table above is the finding, restated so it is not lost in a table:
+`0xf04a181eaB4CfABf7D13CCe64737782737cD0b22` owns the router,
+`DeclarationRegistry` and `CurrencyRegistry`, and **has no code**. It is an
+EOA. `ConduitRouter.sol`'s header claim of a 2-of-3 multisig is false.
+
+That same key signed every deployment, holds the testnet funds, is read by
+`scripts/e2e.sh` out of `packages/contracts/.env`, and has therefore been in a
+shell history. Operationally it should be treated as compromised.
+
+Three things remain, and none of them can be done from a repository:
+
+1. **Deploy a 2-of-3 Safe** and `transferOwnership` to it on every
+   `Ownable2Step` contract, then `acceptOwnership` FROM the Safe. A
+   half-finished two-step transfer is worse than not starting — the old owner
+   still holds everything and the new one holds nothing.
+2. **Rotate the deployer key.** A replacement generated by tooling that logs is
+   not a rotation; it reproduces the defect under a new address.
+3. **Split the e2e payer from the owner.** A test wallet must never be able to
+   change protocol parameters.
+
+`guardian()` is currently `address(0)` — no worse than the old router, which
+had no pause at all, but the improvement Phase A4 built is not yet switched on.
+Set it with `setGuardian` once there is a key to hold it.
+
+`scripts/RedeployRouter.s.sol` takes `ROUTER_OWNER` and `ROUTER_GUARDIAN`, so
+the next deployment can be born owned correctly rather than transferred.

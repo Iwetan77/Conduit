@@ -47,8 +47,17 @@ services:
       # Conduit's own router on Arc testnet. The settlement indexer watches it
       # for PaymentSettled, so leaving it unset silently disables that path.
       # Not a secret -- it is a public contract address.
+      #
+      # Repointed in Phase A6. The previous router,
+      # 0x80f996e86C003AF309635B67A53dC6e63e623318, is ABANDONED and must never
+      # be set here again: it still carries executeWithFX, which is externally
+      # callable with no sender check and emits a settlement event for any
+      # amount while moving one unit of any token. The indexer verifies
+      # transfers now (Phase A2), so a forged event would be dropped rather than
+      # believed -- but pointing at that contract would be reintroducing the
+      # thing this work removed.
       - key: CONDUIT_ROUTER_ADDRESS
-        value: "0x80f996e86C003AF309635B67A53dC6e63e623318"
+        value: "0x2Bd51BB0CA986703A4449796EdCeCAB81126899C"
 
       # The batch payroll contract. Also a public address, and also pinned
       # here rather than left to the dashboard -- it was left to the dashboard,

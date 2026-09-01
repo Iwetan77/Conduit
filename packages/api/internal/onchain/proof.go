@@ -48,15 +48,20 @@ type Proof struct {
 	//
 	// This is the bug the extraction had to not carry forward. The old code
 	// took Topics[1] of the matched transfer and called it "the payer, straight
-	// from the chain". But execute() transfers to AtomicSettler, which
-	// transfers to the recipient — so the log that pays the merchant has the
-	// SETTLER as its sender, and every direct settlement recorded to date has a
-	// contract address in its payer column.
+	// from the chain". But the router used to pay out through a separate
+	// settler contract, so the log that reached the merchant had that
+	// CONTRACT as its sender — and every settlement recorded before Phase A3
+	// has a contract address in its payer column.
+	//
+	// Phase A3 removed that hop: the router now pays the recipient directly, so
+	// for any payment made after it the transfer's own sender IS the payer.
+	// The walk-back below is kept for the settlements made before that, which
+	// the reconciler can still re-read, and for any future path that routes
+	// through an intermediary.
 	//
 	// Empty when it cannot be determined honestly. A blank payer is a gap
 	// somebody can notice; a contract address sitting in that column looks like
-	// an answer and is not one. Phase A3 removes the second hop entirely, at
-	// which point the first transfer's sender IS the payer.
+	// an answer and is not one.
 	Payer string
 }
 
@@ -101,10 +106,12 @@ func FindSettlementTransfer(
 // originatingPayer walks BACK from the transfer that paid the merchant to the
 // transfer that funded it, and returns the sender of that one.
 //
-// The shape it is unwinding: execute() pulls `amount + fee` from the payer to
-// the router, the router forwards `amount` to AtomicSettler, and the settler
-// pays the recipient. The last hop's sender is the settler, which is what the
-// old code recorded. The FIRST hop's sender is the person who paid.
+// The shape it is unwinding: the router pulls `amount + fee` from the payer,
+// then (before Phase A3) forwarded `amount` to a settler contract which paid
+// the recipient. The last hop's sender was that contract, which is what the old
+// code recorded. The FIRST hop's sender is the person who paid.
+//
+// Post-A3 there is only one hop and this returns its sender immediately.
 //
 // Matched by value rather than by position, since a receipt may carry unrelated
 // logs. An earlier transfer of the same token, for at least this amount, to a

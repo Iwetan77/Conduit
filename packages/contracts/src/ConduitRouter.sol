@@ -8,7 +8,6 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {IConduitRouter} from "./interfaces/IConduitRouter.sol";
 import {DeclarationRegistry} from "./DeclarationRegistry.sol";
-import {AtomicSettler} from "./AtomicSettler.sol";
 import {SettlementPreferenceRegistry} from "./SettlementPreferenceRegistry.sol";
 
 
@@ -17,7 +16,7 @@ import {SettlementPreferenceRegistry} from "./SettlementPreferenceRegistry.sol";
 ///
 ///         Two settlement paths:
 ///           - Same-currency (USDC→USDC, EURC→EURC): execute()
-///             Payer approves this contract. AtomicSettler pulls + pushes.
+///             Payer approves this contract, which pulls and pays out in one call.
 ///             SDK calls Circle StableFX API off-chain, passes signed Permit2
 ///             funding data here. FxEscrow settles atomically via Permit2.
 ///
@@ -37,7 +36,6 @@ contract ConduitRouter is IConduitRouter, ReentrancyGuard, Ownable2Step {
     // ── State ─────────────────────────────────────────────────────────────────
 
     DeclarationRegistry public declarationRegistry;
-    AtomicSettler public atomicSettler;
     SettlementPreferenceRegistry public settlementPreferenceRegistry;
 
     uint256 public protocolFeeBps;
@@ -53,14 +51,10 @@ contract ConduitRouter is IConduitRouter, ReentrancyGuard, Ownable2Step {
 
     constructor(
         address initialOwner,
-        address _declarationRegistry,
-        address _atomicSettler
+        address _declarationRegistry
     ) Ownable(initialOwner) {
         require(_declarationRegistry != address(0), "zero: registry");
-        require(_atomicSettler != address(0), "zero: settler");
-
         declarationRegistry = DeclarationRegistry(_declarationRegistry);
-        atomicSettler = AtomicSettler(_atomicSettler);
     }
 
     // ── Path 1: Same-currency execute ─────────────────────────────────────────
@@ -102,15 +96,22 @@ contract ConduitRouter is IConduitRouter, ReentrancyGuard, Ownable2Step {
             accumulatedFees[instruction.payerToken] += feeAmount;
         }
 
-        // Push payment portion to settler, settler delivers to recipient.
+        // Straight to the recipient. This contract already holds the tokens.
+        //
+        // There used to be a second hop here: push to a separate settler
+        // contract, which then pushed to the recipient. It bought nothing. That
+        // contract's only guard was an owner-managed router allowlist, and it
+        // pushed tokens it "already held" with no verification it had been
+        // funded for that call -- so it was a second trust boundary,
+        // a second authorization surface an owner could widen, and a second
+        // ERC-20 transfer of gas on every single payment.
+        //
+        // It also corrupted the payer field of every settlement ever recorded.
+        // The API matches the transfer that reaches the merchant and reads its
+        // sender as the payer; with the settler in the middle, that sender was
+        // the settler's own address. One hop makes that reading correct by
+        // construction.
         IERC20(instruction.recipientToken).safeTransfer(
-            address(atomicSettler),
-            instruction.amount
-        );
-
-        atomicSettler.settleDirect(
-            instruction.recipientToken,
-            instruction.payer,
             instruction.recipient,
             instruction.amount
         );
@@ -136,7 +137,7 @@ contract ConduitRouter is IConduitRouter, ReentrancyGuard, Ownable2Step {
     // repo. Its own doc comment recorded the first half: Circle's presign
     // endpoint issues a Permit2 witness-transfer signed with `spender` = their
     // own relayer, and Permit2 requires msg.sender to equal that spender, so a
-    // call arriving through AtomicSettler always reverted on signature
+    // call arriving through the settler always reverted on signature
     // verification. The working path is Circle's REST fund endpoint and their
     // relayer settling on FxEscrow -- three real Arc transactions, none of them
     // touching this router. packages/api/internal/fx implements it.
@@ -188,11 +189,6 @@ contract ConduitRouter is IConduitRouter, ReentrancyGuard, Ownable2Step {
         emit DeclarationRegistrySet(registry);
     }
 
-    function setAtomicSettler(address settler) external override onlyOwner {
-        require(settler != address(0), "zero: settler");
-        atomicSettler = AtomicSettler(settler);
-        emit AtomicSettlerSet(settler);
-    }
 
     function setSettlementPreferenceRegistry(address registry) external onlyOwner {
         require(registry != address(0), "zero: preference registry");

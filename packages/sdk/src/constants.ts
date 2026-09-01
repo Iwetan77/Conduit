@@ -15,7 +15,6 @@ interface DeploymentFile {
   chainId?: number;
   conduitRouter?: string;
   declarationRegistry?: string;
-  atomicSettler?: string;
   currencyRegistry?: string;
   settlementPreferenceRegistry?: string;
 }
@@ -54,7 +53,6 @@ const deployment = loadDeploymentFile();
 const ENV_ADDRESSES: Record<string, string | undefined> = {
   NEXT_PUBLIC_CONDUIT_ROUTER: process.env.NEXT_PUBLIC_CONDUIT_ROUTER,
   NEXT_PUBLIC_DECLARATION_REGISTRY: process.env.NEXT_PUBLIC_DECLARATION_REGISTRY,
-  NEXT_PUBLIC_ATOMIC_SETTLER: process.env.NEXT_PUBLIC_ATOMIC_SETTLER,
   NEXT_PUBLIC_CURRENCY_REGISTRY: process.env.NEXT_PUBLIC_CURRENCY_REGISTRY,
   NEXT_PUBLIC_SETTLEMENT_PREFERENCE_REGISTRY: process.env.NEXT_PUBLIC_SETTLEMENT_PREFERENCE_REGISTRY,
 };
@@ -95,9 +93,6 @@ export const ARC_TESTNET = {
     },
     get declarationRegistry(): Address {
       return resolveAddress("NEXT_PUBLIC_DECLARATION_REGISTRY", "declarationRegistry", "DeclarationRegistry");
-    },
-    get atomicSettler(): Address {
-      return resolveAddress("NEXT_PUBLIC_ATOMIC_SETTLER", "atomicSettler", "AtomicSettler");
     },
     get currencyRegistry(): Address {
       return resolveAddress("NEXT_PUBLIC_CURRENCY_REGISTRY", "currencyRegistry", "CurrencyRegistry");

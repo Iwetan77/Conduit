@@ -3,7 +3,6 @@ pragma solidity ^0.8.24;
 
 import {Script, console2} from "forge-std/Script.sol";
 import {DeclarationRegistry} from "../src/DeclarationRegistry.sol";
-import {AtomicSettler} from "../src/AtomicSettler.sol";
 import {ConduitRouter} from "../src/ConduitRouter.sol";
 import {CurrencyRegistry} from "../src/CurrencyRegistry.sol";
 import {SettlementPreferenceRegistry} from "../src/SettlementPreferenceRegistry.sol";
@@ -19,7 +18,7 @@ import {SettlementPreferenceRegistry} from "../src/SettlementPreferenceRegistry.
 ///      prints them for convenience).
 ///
 /// Deployment order matches the dependency graph:
-///   DeclarationRegistry → AtomicSettler → ConduitRouter →
+///   DeclarationRegistry → ConduitRouter →
 ///   CurrencyRegistry → SettlementPreferenceRegistry → wire authorizations →
 ///   register currencies confirmed live in docs/fx-capability.md
 ///
@@ -63,16 +62,8 @@ contract Deploy is Script {
         DeclarationRegistry registry = new DeclarationRegistry(owner);
         console2.log("DeclarationRegistry:            ", address(registry));
 
-        // ── 2. AtomicSettler ──────────────────────────────────────────────────
-        AtomicSettler settler = new AtomicSettler(owner);
-        console2.log("AtomicSettler:                  ", address(settler));
-
-        // ── 3. ConduitRouter ──────────────────────────────────────────────────
-        ConduitRouter router = new ConduitRouter(
-            owner,
-            address(registry),
-            address(settler)
-        );
+        // ── 2. ConduitRouter ──────────────────────────────────────────────────
+        ConduitRouter router = new ConduitRouter(owner, address(registry));
         console2.log("ConduitRouter:                  ", address(router));
 
         // ── 5. CurrencyRegistry ───────────────────────────────────────────────
@@ -84,7 +75,6 @@ contract Deploy is Script {
         console2.log("SettlementPreferenceRegistry:    ", address(prefRegistry));
 
         // ── 7. Wire Authorizations ────────────────────────────────────────────
-        settler.setAuthorizedRouter(address(router), true);
         router.setSettlementPreferenceRegistry(address(prefRegistry));
 
         // ── 8. Register currencies confirmed live in Phase 0 ─────────────────
@@ -119,7 +109,6 @@ contract Deploy is Script {
         vm.serializeUint(json, "chainId", ARC_CHAIN_ID);
         vm.serializeAddress(json, "deployer", deployer);
         vm.serializeAddress(json, "declarationRegistry", address(registry));
-        vm.serializeAddress(json, "atomicSettler", address(settler));
         vm.serializeAddress(json, "conduitRouter", address(router));
         vm.serializeAddress(json, "currencyRegistry", address(currencyRegistry));
         vm.serializeAddress(json, "settlementPreferenceRegistry", address(prefRegistry));

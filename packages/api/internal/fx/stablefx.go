@@ -301,7 +301,7 @@ type fundTokenPermissions struct {
 // DISCOVERY (verified live on Arc testnet, real signature, real balance delta
 // confirmed exact): the funding permit StableFX's presign endpoint returns is
 // signed with `spender` = Circle's own relayer contract, not our
-// AtomicSettler. Permit2.permitWitnessTransferFrom authenticates the caller as
+// our own contracts. Permit2.permitWitnessTransferFrom authenticates the caller as
 // msg.sender and requires it to equal the signed spender — a call from our own
 // contract (as ConduitRouter.executeWithFX attempts) always reverts on
 // signature verification; only Circle's relayer can ever redeem this

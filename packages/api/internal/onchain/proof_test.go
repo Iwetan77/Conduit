@@ -16,13 +16,13 @@ import (
 )
 
 var (
-	token      = common.HexToAddress("0x3600000000000000000000000000000000000000")
-	merchant   = common.HexToAddress("0x08894c27115a63063a710b152a441fffb43d90e3")
-	payer      = common.HexToAddress("0x1111111111111111111111111111111111111111")
-	settler    = common.HexToAddress("0x22eb1affd62b65D3F06Ce9Bd9c1EEabCc047CC0b")
-	router     = common.HexToAddress("0x80f996e86C003AF309635B67A53dC6e63e623318")
-	otherTok   = common.HexToAddress("0x89B50855Aa3bE2F677cD6303Cec089B5F319D72a")
-	oneHundred = big.NewInt(100_000000)
+	token        = common.HexToAddress("0x3600000000000000000000000000000000000000")
+	merchant     = common.HexToAddress("0x08894c27115a63063a710b152a441fffb43d90e3")
+	payer        = common.HexToAddress("0x1111111111111111111111111111111111111111")
+	intermediary = common.HexToAddress("0x22eb1affd62b65D3F06Ce9Bd9c1EEabCc047CC0b")
+	router       = common.HexToAddress("0x80f996e86C003AF309635B67A53dC6e63e623318")
+	otherTok     = common.HexToAddress("0x89B50855Aa3bE2F677cD6303Cec089B5F319D72a")
+	oneHundred   = big.NewInt(100_000000)
 )
 
 func transferLog(index uint, tok, from, to common.Address, amount *big.Int) *types.Log {
@@ -108,24 +108,26 @@ func TestAMatchingTransferIsAccepted(t *testing.T) {
 
 // The payer bug this extraction had to not carry forward.
 //
-// execute() pulls amount+fee from the payer to the router, the router forwards
-// to AtomicSettler, and the settler pays the merchant. The log that pays the
-// merchant has the SETTLER as its sender -- so reading Topics[1] off it, which
-// is what the old code did and called "the payer, straight from the chain",
-// records a contract address as the person who paid.
+// Before Phase A3 the router forwarded to a settler contract, which paid the
+// merchant. The log that paid the merchant had that CONTRACT as its sender --
+// so reading Topics[1] off it, which is what the old code did and called "the
+// payer, straight from the chain", records a contract as the person who paid.
+//
+// A3 removed the hop, so new payments are single-hop. This still has to hold
+// for the settlements recorded before it.
 func TestThePayerIsTheSourceNotTheLastHop(t *testing.T) {
 	withFee := big.NewInt(101_000000)
 	r := receiptWith(
-		transferLog(0, token, payer, router, withFee),        // payer funds the router
-		transferLog(1, token, router, settler, oneHundred),   // router forwards
-		transferLog(2, token, settler, merchant, oneHundred), // settler pays out
+		transferLog(0, token, payer, router, withFee),             // payer funds the router
+		transferLog(1, token, router, intermediary, oneHundred),   // router forwards
+		transferLog(2, token, intermediary, merchant, oneHundred), // intermediary pays out
 	)
 	p := FindSettlementTransfer(r, token, merchant, oneHundred)
 	if p == nil {
 		t.Fatal("rejected a genuine three-hop settlement")
 	}
-	if p.Payer == settler.Hex() {
-		t.Fatal("recorded the AtomicSettler as the payer -- the original bug")
+	if p.Payer == intermediary.Hex() {
+		t.Fatal("recorded the intermediary contract as the payer -- the original bug")
 	}
 	if p.Payer != router.Hex() && p.Payer != "" {
 		t.Errorf("payer = %s, want the funding source or empty, never the last hop", p.Payer)

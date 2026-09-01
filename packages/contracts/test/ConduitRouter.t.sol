@@ -5,7 +5,6 @@ import {Test, console2} from "forge-std/Test.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ConduitRouter} from "../src/ConduitRouter.sol";
 import {DeclarationRegistry} from "../src/DeclarationRegistry.sol";
-import {AtomicSettler} from "../src/AtomicSettler.sol";
 import {IConduitRouter} from "../src/interfaces/IConduitRouter.sol";
 import {SettlementPreferenceRegistry} from "../src/SettlementPreferenceRegistry.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
@@ -26,7 +25,6 @@ contract ConduitRouterTest is Test {
     MockERC20 eurc;
 
     DeclarationRegistry registry;
-    AtomicSettler settler;
     ConduitRouter router;
 
     function setUp() public {
@@ -40,11 +38,7 @@ contract ConduitRouterTest is Test {
         // Deploy protocol
         vm.startPrank(OWNER);
         registry  = new DeclarationRegistry(OWNER);
-        settler   = new AtomicSettler(OWNER);
-        router    = new ConduitRouter(OWNER, address(registry), address(settler));
-
-        // Wire authorizations
-        settler.setAuthorizedRouter(address(router), true);
+        router    = new ConduitRouter(OWNER, address(registry));
         vm.stopPrank();
 
         // Fund payer
@@ -63,11 +57,8 @@ contract ConduitRouterTest is Test {
         vm.expectRevert(bytes("zero: registry"));
         router.setDeclarationRegistry(address(0));
 
-        // setStableFXAdapter's case was here. The setter went with
-        // executeWithFX in Phase A1.
-        vm.expectRevert(bytes("zero: settler"));
-        router.setAtomicSettler(address(0));
-
+        // The adapter and settler setters were here. Both went with the
+        // contracts they pointed at, in Phases A1 and A3.
         vm.expectRevert(bytes("zero: preference registry"));
         router.setSettlementPreferenceRegistry(address(0));
         vm.stopPrank();

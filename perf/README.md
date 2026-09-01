@@ -91,3 +91,70 @@ the trace wins. It does, twice:
   reasons from is not what this client sees. Record `/healthz` from a Nigerian
   mobile connection before moving the API region, exactly as B1 itself says to,
   because the trace cannot answer that question from here.
+
+---
+
+# Why a phone takes 22-29s when this trace takes 12
+
+The baseline above was measured from a laptop, signing with a raw key, reading
+Arc directly. A phone does none of those things. Each difference was measured
+rather than guessed, and together they account for the gap.
+
+## 1. Every chain read is 3.5x slower through the proxy
+
+The browser does not talk to Arc. It talks to `POST /v1/rpc`, which relays to
+Arc — so a read goes browser → Oregon → Arc → Oregon → browser, and pays the
+distance twice.
+
+    direct to Arc:        242ms   (perf/latency-before.json, floor.arc_rpc_median)
+    through /v1/rpc:      850ms   (median of 5, from this machine)
+
+A payment makes a dozen or more reads — nonce, gas estimate, fee history,
+balance, allowance, then receipt polling. **At roughly 600ms of added cost each,
+that alone is several seconds a phone pays and this trace does not.**
+
+## 2. A single payment rate-limits itself
+
+`POST /v1/rpc` sits behind the shared public limiter: `publicRatePerSecond = 5`,
+`publicBurst = 20`, keyed on IP (`internal/server/ratelimit.go`).
+
+Thirty rapid calls — the volume of one payment — measured against production:
+
+    200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200
+    429 429 429 429 429 200 200 429 200 200 429 429 429
+
+**Nine of thirty rejected.** Every one of those is a retry, a backoff, or a
+failed read that the browser has to make again. One payer, on their own,
+exhausts the bucket.
+
+**This is the "22s for me, 29s for my friends" finding, and it is now
+reproduced rather than hypothesised.** Nigerian mobile carriers use CGNAT
+heavily, so several people on the same network share one IP and therefore one
+bucket of 5/second. A second payer does not double the load, they halve
+everybody's allowance. The work order guessed this; the numbers above are the
+proof.
+
+## 3. Signing is 11ms here and seconds on a phone
+
+The trace signs with a raw key. A Circle wallet signs by opening Circle's UI,
+taking a PIN, and completing a challenge over the network — several round trips
+with a person in the middle. The trace's `cross.sign_quote` at 11ms is not what
+a merchant experiences, and the quote it is racing lives about 3.5 seconds.
+
+## What this means
+
+**The 22-29s is explainable and most of it is ours to fix.** In rough order of
+what it is worth:
+
+| Cause | Cost | Fixed by |
+|---|---|---|
+| `ethers` 4s polling on receipts | ~9.7s | B2 — one line |
+| RPC rate limiter rejecting a payment's own reads | seconds, unbounded | B1.3 — its own limiter |
+| Proxy doubling every read | ~600ms x reads | B1.2 region, B4.3 parallelism |
+| `confirm` holding the socket | 5.4s perceived | B4.2 — return 202 |
+| Two transactions where one would do | ~5s | B3 |
+
+Nothing here is a law of physics. The irreducible part is Arc's block time —
+about a second per transaction, three transactions for a cross-stable
+settlement through Circle's relayer. Everything else in the list is a decision
+this repository made and can unmake.

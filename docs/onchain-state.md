@@ -7,8 +7,8 @@ document confirms or refutes it.
 
 - RPC: `https://rpc.testnet.arc.network`
 - Chain id: `5042002` (deployments file says `5042002`)
-- Block at audit: `59850175`
-- Generated: 2026-08-31T23:52:04.847Z
+- Block at audit: `59852618`
+- Generated: 2026-09-01T00:13:19.809Z
 
 ## Ownership
 
@@ -103,24 +103,26 @@ signature rather than written down, so a zero result means zero logs and
 not a mistyped topic.
 
 Router deployed at block **57213328**, found by binary search on
-`eth_getCode`. Scanning 57213328 → 59850175 in 20000-block chunks —
+`eth_getCode`. Scanning 57213328 → 59852618 in 20000-block chunks —
 the router's entire history, not a recent window.
 
 Logs found: **8**
 
-| Block | Tx | Selector | Function |
-|---|---|---|---|
-| 57225788 | `0x3a1d09e26c65a4520fffd20863d13ee565fb24e65e924f601f401294603c2ca1` | `?` | unrecognised — decode by hand |
-| 57562083 | `0xf04170ec7ab91bc0914b7bf005d7fe2441a45102c66cd6e5036f76c1515711c2` | `?` | unrecognised — decode by hand |
-| 57805521 | `0x22dba97054c102703c8ca072027111e92a5cc842206b11b22341dc510f3b7147` | `?` | unrecognised — decode by hand |
-| 57871282 | `0x5342b683cb8781508abe9f47239e940021b8b4e07206c66477cb027310606fd0` | `?` | unrecognised — decode by hand |
-| 58151126 | `0x73f2f3110a353f590a220d0d976c4499a80010e9ac853c1d2597e3b4c41ed0f5` | `?` | unrecognised — decode by hand |
-| 59183264 | `0x2ecdb5781d77432f2f5306400207b66ba4abcb2fb67437f4df91dc678b47ba1b` | `0x0488a4e2` | unrecognised — decode by hand |
-| 59189101 | `0xe77019954c85eb2bdc4ca74d5afc0f64f7691182a50f4b735617ca792ec381f3` | `0x0488a4e2` | unrecognised — decode by hand |
-| 59213076 | `0x756a7fb53fa2e2ac6c1a017be2d7a47f28c2452235b63c759c3996824e26f3a8` | `0x0488a4e2` | unrecognised — decode by hand |
+| Block | Tx | Tokens | Selector | Verdict |
+|---|---|---|---|---|
+| 57225788 | `0x3a1d09e26c65a4520fffd20863d13ee565fb24e65e924f601f401294603c2ca1` | same | `pruned` | `execute()` — moves tokens in the same call |
+| 57562083 | `0xf04170ec7ab91bc0914b7bf005d7fe2441a45102c66cd6e5036f76c1515711c2` | same | `pruned` | `execute()` — moves tokens in the same call |
+| 57805521 | `0x22dba97054c102703c8ca072027111e92a5cc842206b11b22341dc510f3b7147` | same | `pruned` | `execute()` — moves tokens in the same call |
+| 57871282 | `0x5342b683cb8781508abe9f47239e940021b8b4e07206c66477cb027310606fd0` | same | `pruned` | `execute()` — moves tokens in the same call |
+| 58151126 | `0x73f2f3110a353f590a220d0d976c4499a80010e9ac853c1d2597e3b4c41ed0f5` | same | `pruned` | `execute()` — moves tokens in the same call |
+| 59183264 | `0x2ecdb5781d77432f2f5306400207b66ba4abcb2fb67437f4df91dc678b47ba1b` | same | `0x0488a4e2` | `execute()` — moves tokens in the same call |
+| 59189101 | `0xe77019954c85eb2bdc4ca74d5afc0f64f7691182a50f4b735617ca792ec381f3` | same | `0x0488a4e2` | `execute()` — moves tokens in the same call |
+| 59213076 | `0x756a7fb53fa2e2ac6c1a017be2d7a47f28c2452235b63c759c3996824e26f3a8` | same | `0x0488a4e2` | `execute()` — moves tokens in the same call |
 
 Every emission came from `execute()`, which performs its own
-transfer. **No forged settlement has occurred.**
+transfer in the same call. **No forged settlement has occurred.**
+
+Phase A1 is therefore **prevention, not incident response**.
 
 ## Does CurrencyRegistry match what the API serves?
 

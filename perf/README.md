@@ -288,3 +288,51 @@ from "until Circle settles" to "until Circle answers": roughly one round trip.
 So the honest projection for cross-stable, and it is a projection until traced:
 ~11.5s today, of which about 1.5s is guaranteed dead sleep (B4.1) and about 5s
 is the browser being held open for work it does not need to watch (B4.2).
+
+## Clicking a link: where 24.5s goes
+
+The traces above start at "create intent" and end at the receipt. A payer
+clicking a link pays for a good deal that happens before any of that, and it
+was never measured. It is now.
+
+Measured against production (`useconduit.xyz` → `conduit-z56x.onrender.com`):
+
+    1. GET /pay/<id> page HTML       1.91s   (16.5KB, server-rendered on demand)
+    2. GET public intent             0.53s
+    3. GET currencies                0.70s
+    4. one proxied chain read        0.57s
+       home page TTFB                1.45s
+
+Plus roughly **500KB of JavaScript** to download, parse and hydrate before any
+of the above can even be requested — the pay route's first-load JS is 224KB
+compressed across a dozen chunks, and wagmi's connector setup runs after that.
+
+So the shape of a link click is roughly:
+
+| Stage | Cost | Fixed by |
+|---|---:|---|
+| Page HTML (dynamic, server-rendered per request) | ~1.9s | caching / static shell |
+| Bundle download + hydration + wagmi setup | seconds on mobile | bundle work, not yet a phase |
+| Intent + currencies fetch (sequential) | ~1.2s | parallelise; B4.3's reasoning |
+| Chain reads, proxied at ~850ms each, rate-limited | seconds | B1.2, B1.3 |
+| Wallet connect / Circle PIN | human + network | — |
+| The payment itself | 6.1s same-currency after B2, 11.5s cross-stable | B2 done, B4 next |
+
+**That is where 24.5s comes from, and only the last row is what the earlier
+traces measured.** B2 halved the last row for same-currency; it did nothing for
+the five rows above it, because none of them wait on a receipt.
+
+Two things stand out as cheap and not yet in any phase:
+
+- **`/pay/<id>` is server-rendered on demand** (`ƒ` in the Next build output)
+  and takes 1.9s to return HTML. A payer stares at nothing for that whole time.
+  The page needs the intent to render honestly, but it does not need to BLOCK on
+  it — a static shell with the amount streamed in would put something on screen
+  in ~200ms.
+- **Steps 2 and 3 are sequential and independent.** The intent and the currency
+  list have nothing to do with each other; fetching them together removes ~0.6s
+  for free.
+
+Neither is in the work order. Both are larger wins than the region change B1
+proposes, and they are recorded here rather than acted on because Track B has an
+order and B4 is next.

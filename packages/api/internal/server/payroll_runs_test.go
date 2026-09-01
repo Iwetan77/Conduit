@@ -525,3 +525,131 @@ func TestPayrollADraftCannotBeResumed(t *testing.T) {
 		t.Fatal("resumed a draft; drafts are executed, not resumed")
 	}
 }
+
+// ── Phase C3: paying a subset, and moving somebody's wallet ───────────────────
+
+func TestPayrollCanPayASubsetByEmployeeID(t *testing.T) {
+	t.Setenv("CONDUIT_PAYROLL_ADDRESS", "0xcC4b99a2B74DA98695d4136FB7F20988621BeB11")
+	srv, key, _ := newLinkTestServer(t, 15630)
+	hireThree(t, srv.URL, key)
+
+	list := doJSON(t, srv.URL, "GET", "/v1/employees", key, "", "")
+	var people struct {
+		Data []struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(list.body), &people); err != nil {
+		t.Fatalf("listing employees: %v", err)
+	}
+	if len(people.Data) < 3 {
+		t.Fatalf("expected three employees, got %d", len(people.Data))
+	}
+
+	// Just one of the three. Before this, paying a subset meant pausing the
+	// others and remembering to unpause them.
+	body := fmt.Sprintf(`{"employee_ids":[%q]}`, people.Data[0].ID)
+	_, run := draftRun(t, srv.URL, key, body)
+	if len(run.Items) != 1 {
+		t.Fatalf("drafted %d items for a one-person run: %+v", len(run.Items), run.Items)
+	}
+}
+
+// A payroll that quietly pays fewer people than it was asked to reports itself
+// as a success, which is the worst way for this to go wrong.
+func TestPayrollAnUnknownEmployeeIDIsRefusedNotIgnored(t *testing.T) {
+	t.Setenv("CONDUIT_PAYROLL_ADDRESS", "0xcC4b99a2B74DA98695d4136FB7F20988621BeB11")
+	srv, key, _ := newLinkTestServer(t, 15631)
+	hireThree(t, srv.URL, key)
+
+	res := doJSON(t, srv.URL, "POST", "/v1/payroll_runs", key,
+		`{"employee_ids":["emp_does_not_exist"]}`, "")
+	if res.status == http.StatusCreated || res.status == http.StatusOK {
+		t.Fatalf("accepted an employee id that is not on this payroll: %s", res.body)
+	}
+}
+
+func TestEmployeeAddressMovesOnlyWithConfirmation(t *testing.T) {
+	srv, key, p := newLinkTestServer(t, 15632)
+	hireThree(t, srv.URL, key)
+
+	list := doJSON(t, srv.URL, "GET", "/v1/employees", key, "", "")
+	var people struct {
+		Data []struct {
+			ID      string `json:"id"`
+			Address string `json:"address"`
+		} `json:"data"`
+	}
+	_ = json.Unmarshal([]byte(list.body), &people)
+	id := people.Data[0].ID
+	oldAddr := people.Data[0].Address
+	newAddr := "0x1234567890AbcdEF1234567890aBcdef12345678"
+
+	// Mismatched confirmation is the typo this exists to catch.
+	bad := doJSON(t, srv.URL, "POST", "/v1/employees/"+id+"/reassign_address", key,
+		fmt.Sprintf(`{"address":%q,"confirm_address":"0x000000000000000000000000000000000000dEaD"}`, newAddr), "")
+	if bad.status == http.StatusOK {
+		t.Fatal("moved an address without a matching confirmation")
+	}
+
+	var stillOld string
+	_ = p.QueryRow(context.Background(), `SELECT address FROM employees WHERE id = $1`, id).Scan(&stillOld)
+	if !strings.EqualFold(stillOld, oldAddr) {
+		t.Fatalf("the address moved on a refused request: %s", stillOld)
+	}
+
+	// Confirmed, so it moves.
+	ok := doJSON(t, srv.URL, "POST", "/v1/employees/"+id+"/reassign_address", key,
+		fmt.Sprintf(`{"address":%q,"confirm_address":%q,"note":"new hardware wallet"}`, newAddr, newAddr), "")
+	if ok.status != http.StatusOK {
+		t.Fatalf("reassign: status=%d body=%s", ok.status, ok.body)
+	}
+
+	var moved string
+	_ = p.QueryRow(context.Background(), `SELECT address FROM employees WHERE id = $1`, id).Scan(&moved)
+	if !strings.EqualFold(moved, newAddr) {
+		t.Fatalf("address is %s, want %s", moved, newAddr)
+	}
+
+	// And it is written down. This is the record that makes a past run's
+	// snapshotted address reconcilable against where the person is paid now.
+	var audits int
+	_ = p.QueryRow(context.Background(),
+		`SELECT count(*) FROM employee_address_changes WHERE employee_id = $1 AND lower(old_address) = lower($2) AND lower(new_address) = lower($3)`,
+		id, oldAddr, newAddr).Scan(&audits)
+	if audits != 1 {
+		t.Fatalf("audit rows = %d, want exactly 1", audits)
+	}
+}
+
+// A past run records where the money ACTUALLY went. Moving somebody's wallet
+// must not rewrite history.
+func TestMovingAnAddressDoesNotRewritePastRuns(t *testing.T) {
+	t.Setenv("CONDUIT_PAYROLL_ADDRESS", "0xcC4b99a2B74DA98695d4136FB7F20988621BeB11")
+	srv, key, p := newLinkTestServer(t, 15633)
+	hireThree(t, srv.URL, key)
+	_, run := draftRun(t, srv.URL, key, `{}`)
+
+	var before string
+	_ = p.QueryRow(context.Background(),
+		`SELECT address FROM payroll_run_items WHERE run_id = $1 ORDER BY id LIMIT 1`, run.ID).Scan(&before)
+
+	var empID string
+	_ = p.QueryRow(context.Background(),
+		`SELECT employee_id FROM payroll_run_items WHERE run_id = $1 AND address = $2`, run.ID, before).Scan(&empID)
+
+	newAddr := "0x9876543210FedCBa9876543210fEDcBA98765432"
+	res := doJSON(t, srv.URL, "POST", "/v1/employees/"+empID+"/reassign_address", key,
+		fmt.Sprintf(`{"address":%q,"confirm_address":%q}`, newAddr, newAddr), "")
+	if res.status != http.StatusOK {
+		t.Fatalf("reassign: status=%d body=%s", res.status, res.body)
+	}
+
+	var after string
+	_ = p.QueryRow(context.Background(),
+		`SELECT address FROM payroll_run_items WHERE run_id = $1 AND employee_id = $2`, run.ID, empID).Scan(&after)
+	if !strings.EqualFold(after, before) {
+		t.Fatalf("a past run's recorded address changed from %s to %s", before, after)
+	}
+}

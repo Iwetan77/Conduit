@@ -52,8 +52,8 @@ type employeeResponse struct {
 	// Which group they are in, or null for ungrouped. A run scoped to a group
 	// pays only its members; a run with no group named pays everybody, which is
 	// what every existing account gets.
-	GroupID *string `json:"group_id"`
-	Status  string  `json:"status"`
+	GroupID   *string   `json:"group_id"`
+	Status    string    `json:"status"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
@@ -373,5 +373,118 @@ func (h *Employees) Archive(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
 		return
 	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// ReassignAddress is POST /v1/employees/{id}/reassign_address.
+//
+// The one sanctioned way an employee's payment address moves.
+//
+// `Update` refuses to touch the address, and that refusal is right: changing
+// where somebody is paid is not an edit to their record, it is a different
+// destination for their salary. But with no alternative, an employee who
+// genuinely changed wallet had to be archived and re-added -- which severs the
+// link every past run holds to them, the exact history the archive rule exists
+// to protect. So this exists, separately, deliberately, and audited.
+//
+// Requires the new address TWICE. Double entry, the way a bank asks for an
+// account number twice, because this is the one field here that is
+// unrecoverable when wrong and looks identical when right: twenty bytes of
+// valid hex covers a wallet on another chain, an exchange deposit that will
+// never credit an Arc token, and every typo that happens to land in range.
+// Nothing can check it, so the only defence is making the caller say it twice.
+func (h *Employees) ReassignAddress(w http.ResponseWriter, r *http.Request) {
+	principal, ok := auth.FromContext(r.Context())
+	if !ok {
+		writeErr(w, apierrors.E(apierrors.CodeUnauthorized, ""))
+		return
+	}
+	var req struct {
+		Address string `json:"address"`
+		// Must equal Address. See above.
+		ConfirmAddress string  `json:"confirm_address"`
+		Note           *string `json:"note"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, apierrors.E(apierrors.CodeInvalidRequest, "body"))
+		return
+	}
+	addr := strings.TrimSpace(req.Address)
+	confirm := strings.TrimSpace(req.ConfirmAddress)
+
+	if !common.IsHexAddress(addr) {
+		writeErr(w, apierrors.E(apierrors.CodeInvalidRequest, "address"))
+		return
+	}
+	if !strings.EqualFold(addr, confirm) {
+		writeErr(w, apierrors.E(apierrors.CodeInvalidRequest,
+			"address and confirm_address must match — this is the check that catches a typo in the one field nothing else can verify"))
+		return
+	}
+	// Checksummed on the way in, so the stored form is canonical and two
+	// casings of one address can never become two different employees.
+	addr = common.HexToAddress(addr).Hex()
+
+	id := pathParam(r, "id")
+	ctx := r.Context()
+
+	tx, err := h.Pool.Begin(ctx)
+	if err != nil {
+		writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
+		return
+	}
+	defer tx.Rollback(ctx)
+
+	// Locked, so a concurrent reassign cannot read the same old address and
+	// write two audit rows that both claim to be the move.
+	var oldAddr, status string
+	if err := tx.QueryRow(ctx,
+		`SELECT address, status FROM employees WHERE id = $1 AND account_id = $2 FOR UPDATE`,
+		id, principal.AccountID).Scan(&oldAddr, &status); err != nil {
+		writeErr(w, apierrors.E(apierrors.CodeNotFound, "id"))
+		return
+	}
+	if status == "archived" {
+		// Archived is an end state. Moving a departed employee's address is
+		// either a mistake or somebody trying to redirect a final payment.
+		writeErr(w, apierrors.E(apierrors.CodeInvalidRequest,
+			"this employee is archived; reinstate them before moving their address"))
+		return
+	}
+	if strings.EqualFold(oldAddr, addr) {
+		writeErr(w, apierrors.E(apierrors.CodeInvalidRequest,
+			"that is already their address"))
+		return
+	}
+
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO employee_address_changes (id, employee_id, account_id, old_address, new_address, note)
+		 VALUES ($1,$2,$3,$4,$5,$6)`,
+		models.NewID("eac"), id, principal.AccountID, oldAddr, addr, req.Note); err != nil {
+		writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
+		return
+	}
+
+	// The username goes with it. It was resolved to the OLD address when they
+	// were added, so leaving it attached would display a name that now points
+	// somewhere else -- the worst possible label on a payroll line. A caller
+	// who wants the new address named can re-add the username deliberately.
+	row := tx.QueryRow(ctx,
+		`UPDATE employees SET address = $1, username = NULL, updated_at = now()
+		  WHERE id = $2 AND account_id = $3
+		  RETURNING `+employeeColumns,
+		addr, id, principal.AccountID)
+	out, err := scanEmployee(row)
+	if err != nil {
+		// The unique index on (account_id, lower(address)): somebody else on
+		// this payroll is already paid there.
+		writeErr(w, apierrors.E(apierrors.CodeEmployeeExists, "address"))
+		return
+	}
+	if err := tx.Commit(ctx); err != nil {
+		writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
+		return
+	}
+
 	writeJSON(w, http.StatusOK, out)
 }

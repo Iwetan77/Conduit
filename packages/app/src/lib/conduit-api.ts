@@ -593,6 +593,22 @@ export function updateEmployee(
   return request<Employee>(`/v1/employees/${id}`, { method: "PATCH", body });
 }
 
+/**
+ * Move somebody to a new wallet.
+ *
+ * Separate from `updateEmployee`, which deliberately refuses to touch the
+ * address — changing where somebody is paid is not an edit to their record.
+ * The address is required TWICE: it is the one field here that is
+ * unrecoverable when wrong and looks identical when right, and nothing can
+ * check it, so double entry is the only defence. Writes an audit row.
+ */
+export function reassignEmployeeAddress(id: string, address: string, note?: string) {
+  return request<Employee>(`/v1/employees/${id}/reassign_address`, {
+    method: "POST",
+    body: { address, confirm_address: address, note },
+  });
+}
+
 /** Never a delete: a removed row breaks the history of every run that paid them. */
 export function archiveEmployee(id: string) {
   return request<Employee>(`/v1/employees/${id}/archive`, { method: "POST", body: {} });
@@ -645,11 +661,26 @@ export interface PayrollLeg {
 }
 
 /** Builds a draft and returns the whole preview. Nothing is paid. */
-/** Pass a groupId to pay only that group. Omit it to pay everybody active. */
-export function createPayrollRun(amounts?: Record<string, string>, groupId?: string) {
+/**
+ * Draft a run.
+ *
+ * `groupId` scopes it to one business's staff; `employeeIds` picks specific
+ * people. Both are optional and they intersect — a group is a standing answer
+ * to who somebody works for, this is an ad-hoc one to "just these three".
+ * Omit both to pay everybody active.
+ */
+export function createPayrollRun(
+  amounts?: Record<string, string>,
+  groupId?: string,
+  employeeIds?: string[],
+) {
   return request<PayrollRun>("/v1/payroll_runs", {
     method: "POST",
-    body: { amounts: amounts ?? {}, group_id: groupId ?? "" },
+    body: {
+      amounts: amounts ?? {},
+      group_id: groupId ?? "",
+      employee_ids: employeeIds ?? [],
+    },
   });
 }
 

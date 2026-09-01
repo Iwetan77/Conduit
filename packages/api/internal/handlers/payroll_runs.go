@@ -25,6 +25,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math/big"
 	"net/http"
 	"sort"
@@ -38,8 +39,8 @@ import (
 	"github.com/kzn-labs/conduit/api/internal/arcrpc"
 	"github.com/kzn-labs/conduit/api/internal/auth"
 	"github.com/kzn-labs/conduit/api/internal/currency"
-	"github.com/kzn-labs/conduit/api/internal/fx"
 	apierrors "github.com/kzn-labs/conduit/api/internal/errors"
+	"github.com/kzn-labs/conduit/api/internal/fx"
 	"github.com/kzn-labs/conduit/api/internal/models"
 	"github.com/kzn-labs/conduit/api/internal/webhooks"
 )
@@ -95,15 +96,15 @@ type payrollRunResponse struct {
 	ExecutedAt       *time.Time     `json:"executed_at"`
 	// Preview, present on the draft. What the business needs in order to decide,
 	// rather than to find out afterwards.
-	WalletBalance   *string `json:"wallet_balance,omitempty"`
-	EstimatedGas    *string `json:"estimated_gas,omitempty"`
-	BalanceCovers   *bool   `json:"balance_covers,omitempty"`
+	WalletBalance *string `json:"wallet_balance,omitempty"`
+	EstimatedGas  *string `json:"estimated_gas,omitempty"`
+	BalanceCovers *bool   `json:"balance_covers,omitempty"`
 	// True when part of what the wallet must cover was priced by fallback
 	// rather than by a real quote — a conversion leg whose rate could not be
 	// fetched. Says so rather than presenting an estimate as a measurement.
-	BalanceEstimated bool `json:"balance_estimated,omitempty"`
-	SettleAddress   string  `json:"settle_address,omitempty"`
-	ContractAddress string  `json:"payroll_contract,omitempty"`
+	BalanceEstimated bool   `json:"balance_estimated,omitempty"`
+	SettleAddress    string `json:"settle_address,omitempty"`
+	ContractAddress  string `json:"payroll_contract,omitempty"`
 }
 
 // Gas, in USDC, because Arc charges it in USDC rather than a separate native
@@ -172,6 +173,18 @@ func (h *PayrollRuns) Create(w http.ResponseWriter, r *http.Request) {
 		// business, and paying one team used to mean pausing every other team
 		// and remembering to unpause them.
 		GroupID string `json:"group_id"`
+		// Pay only these people. Absent means everybody in scope.
+		//
+		// Different from group_id, and both are useful: a group is a standing
+		// answer to "which business does this person work for", while this is
+		// an ad-hoc one to "just these three, this once". Paying three of
+		// twenty used to mean pausing seventeen and remembering to unpause
+		// them, and the failure mode of forgetting is those seventeen not being
+		// paid next month with nothing saying why.
+		//
+		// Intersected with group_id when both are given, which is the only
+		// reading that cannot surprise somebody.
+		EmployeeIDs []string `json:"employee_ids"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&req)
 
@@ -193,13 +206,44 @@ func (h *PayrollRuns) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Refused, not silently narrowed. An id that is not this account's, or is
+	// paused, or archived, means the caller believes somebody is about to be
+	// paid who is not -- and a payroll that quietly pays fewer people than it
+	// was asked to reports itself as a success.
+	ids := make([]string, 0, len(req.EmployeeIDs))
+	for _, raw := range req.EmployeeIDs {
+		if v := strings.TrimSpace(raw); v != "" {
+			ids = append(ids, v)
+		}
+	}
+	if len(ids) > 0 {
+		var found int
+		if err := h.Pool.QueryRow(ctx,
+			`SELECT count(*) FROM employees
+			  WHERE account_id = $1 AND status = 'active' AND id = ANY($2)
+			    AND ($3 = '' OR group_id = $3)`,
+			principal.AccountID, ids, groupID).Scan(&found); err != nil {
+			writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
+			return
+		}
+		if found != len(ids) {
+			writeErr(w, apierrors.E(apierrors.CodeInvalidRequest,
+				fmt.Sprintf(
+					"%d of the %d employee_ids given are not active people on this payroll (paused, archived, in another group, or not yours)",
+					len(ids)-found, len(ids),
+				)))
+			return
+		}
+	}
+
 	rows, err := h.Pool.Query(ctx,
 		`SELECT id, name, username, address, pay_currency, pay_type, amount::text
 		   FROM employees
 		  WHERE account_id = $1 AND status = 'active'
 		    AND ($2 = '' OR group_id = $2)
+		    AND (cardinality($3::text[]) = 0 OR id = ANY($3))
 		  ORDER BY created_at`,
-		principal.AccountID, groupID)
+		principal.AccountID, groupID, ids)
 	if err != nil {
 		writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
 		return
@@ -514,8 +558,8 @@ type payrollAffordability struct {
 	// real quote. The preview says so; a number nobody can source should not
 	// look like one that was measured.
 	estimated bool
-	have *big.Int
-	gas  *big.Int
+	have      *big.Int
+	gas       *big.Int
 	// False when the balance could not be read at all. Callers decide what to
 	// do with that; neither of them may treat it as zero.
 	balanceKnown bool

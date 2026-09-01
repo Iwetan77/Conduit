@@ -541,6 +541,10 @@ func New(cfg Config) http.Handler {
 			r.Post("/employees", employeesH.Create)
 			r.Patch("/employees/{id}", employeesH.Update)
 			r.Post("/employees/{id}/archive", employeesH.Archive)
+			// The one sanctioned way a payment address moves. Update refuses
+			// to touch it; without this an employee who changed wallet had to
+			// be archived and re-added, severing their payroll history.
+			r.Post("/employees/{id}/reassign_address", employeesH.ReassignAddress)
 
 			// Groups scope a payroll run. A business that never makes one is
 			// unaffected: a run with no group named still pays everybody.

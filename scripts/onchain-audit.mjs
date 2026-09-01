@@ -571,6 +571,69 @@ async function main() {
   }
   say();
 
+  // ── What the chain cannot say ─────────────────────────────────────────────
+  //
+  // Emitted HERE rather than appended to the file by hand, because this script
+  // rewrites docs/onchain-state.md wholesale on every run. Anything hand-added
+  // survives exactly until the next audit, which is the worst possible lifetime
+  // for a warning about an abandoned contract.
+  if (deployments.conduitRouterAbandoned) {
+    say("## ABANDONED — never point anything at this again");
+    say();
+    say(`\`${deployments.conduitRouterAbandoned}\` was the ConduitRouter until`);
+    say("Phase A6. It is abandoned, not upgraded: it has no pause and no");
+    say("migration path, and the fee table above is why nothing had to be");
+    say("withdrawn before walking away from it.");
+    say();
+    say("**It must never be set as `CONDUIT_ROUTER_ADDRESS` again.** It still");
+    say("carries `executeWithFX`, which is `external` with no `msg.sender`");
+    say("check and emits `PaymentSettled` from caller-supplied calldata — a");
+    say("settlement event for any amount, over a transaction that moved one");
+    say("unit of any token. Phase A2 means a forged event would now be dropped");
+    say("rather than believed, but pointing back at that contract would be");
+    say("reintroducing the thing this work removed.");
+    say();
+    say("The registries kept their addresses, so every declaration registered");
+    say("against the old router still resolves.");
+    say();
+  }
+
+  if (deployments.deployerAbandoned) {
+    say("## The retired deployer key");
+    say();
+    say(`\`${deployments.deployerAbandoned}\` signed every original deployment,`);
+    say("sat in `packages/contracts/.env`, was read by `scripts/e2e.sh`, and has");
+    say("therefore been in a shell history. Treat it as compromised. The");
+    say("ownership table above is the check that it holds nothing: if that");
+    say("address ever reappears as an `owner()`, something has gone backwards.");
+    say();
+    say("It still holds testnet gas, which is fine — it is a payer now and");
+    say("nothing else.");
+    say();
+  }
+
+  say("## Ownership is a single key, deliberately");
+  say();
+  say("The owner above is an EOA, not a 2-of-3 Safe, and that is a stopping");
+  say("point rather than an oversight. A Safe needs three keys held in three");
+  say("different places; three keys on one laptop is the ceremony of a multisig");
+  say("with the security of a single key, and worse than one key because it");
+  say("looks protected.");
+  say();
+  say("Sized rather than feared — what a stolen owner key can do: skim up to");
+  say("`MAX_PROTOCOL_FEE_BPS` (30, or 0.3%) and withdraw it, and halt payments");
+  say("by disabling a currency. It CANNOT drain merchant funds or redirect a");
+  say("payment: the router is non-custodial between transactions and `execute`");
+  say("requires `msg.sender == instruction.payer`. The function the original");
+  say("remediation plan feared most — `setAtomicSettler`, which could");
+  say("\"redirect every payment in flight\" — was deleted in Phase A3.");
+  say();
+  say("Before mainnet: deploy the Safe, `transferOwnership` to it,");
+  say("`acceptOwnership` from it. `scripts/RedeployRouter.s.sol` takes");
+  say("`ROUTER_OWNER` and `ROUTER_GUARDIAN` so a future deployment can be born");
+  say("owned correctly rather than transferred afterwards.");
+  say();
+
   // ── Verdict ───────────────────────────────────────────────────────────────
   say("## Unresolved");
   say();

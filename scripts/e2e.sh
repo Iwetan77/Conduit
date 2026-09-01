@@ -20,8 +20,30 @@ API_URL="http://localhost:8080"
 PAY_CURRENCY="USDC"
 SETTLE_ISO="EUR"   # EURC's fiat code in CurrencyRegistry / internal/currency
 
-PRIVATE_KEY="$(grep PRIVATE_KEY "$CONTRACTS_DIR/.env" | cut -d= -f2-)"
-PAYER_ADDR="0xf04a181eaB4CfABf7D13CCe64737782737cD0b22"
+# The e2e PAYER, which is deliberately not the protocol owner.
+#
+# This used to read PRIVATE_KEY out of packages/contracts/.env -- the same key
+# that deployed the contracts and owned every one of them. So a test script,
+# run casually and often, held a key that could change the protocol fee,
+# repoint the currency registry, or halt payments. A test wallet must never be
+# able to change protocol parameters; the blast radius of a test going wrong
+# should be a test.
+#
+# Phase A6 split them. Ownership now sits on a key kept outside this repository
+# (~/.conduit-keys), and this reads a payer key that owns nothing. Falls back to
+# the old location so an unmigrated checkout still runs, and says so.
+E2E_KEY_FILE="${E2E_PAYER_KEY_FILE:-$HOME/.conduit-keys/e2e-payer.key}"
+if [ -f "$E2E_KEY_FILE" ]; then
+  PRIVATE_KEY="$(tr -d '[:space:]' < "$E2E_KEY_FILE")"
+  PAYER_ADDR="${E2E_PAYER_ADDR:-0x1f38f7A2e5Cb55d6AfbF44934BC62cF791015C99}"
+else
+  echo "warning: $E2E_KEY_FILE not found -- falling back to the contracts .env key." >&2
+  echo "         That key is the old deployer. It no longer owns anything (A6)," >&2
+  echo "         but generate a payer key rather than relying on that:" >&2
+  echo "           node ~/.conduit-keys/new-key.mjs e2e-payer" >&2
+  PRIVATE_KEY="$(grep PRIVATE_KEY "$CONTRACTS_DIR/.env" | cut -d= -f2-)"
+  PAYER_ADDR="0xf04a181eaB4CfABf7D13CCe64737782737cD0b22"
+fi
 
 # Clean up any devserver/embedded-postgres left over from a previous run that
 # didn't shut down gracefully (SIGKILL skips deferred cleanup) -- otherwise

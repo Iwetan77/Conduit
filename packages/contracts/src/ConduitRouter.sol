@@ -26,7 +26,12 @@ import {SettlementPreferenceRegistry} from "./SettlementPreferenceRegistry.sol";
 ///         declarationId != bytes32(0) → declaration validated against registry
 ///
 /// @dev All amounts: 6-decimal ERC-20 units. Never 18-decimal native gas values.
-///      Protocol params owned by 2-of-3 multisig (Ownable in v1).
+///      Protocol params are owned by a single EOA, kept outside this
+///      repository. NOT a multisig — an earlier version of this comment said
+///      2-of-3 and that was never true, which is worse than saying nothing:
+///      it is the sentence a reader checks instead of checking the chain.
+///      `scripts/onchain-audit.mjs` answers this from the chain and should be
+///      believed over any comment, including this one.
 /// @dev NON-CUSTODIAL BETWEEN TRANSACTIONS. Every payment pulls from the payer
 ///      and pays the recipient inside one call; the only balance this contract
 ///      holds across transactions is `accumulatedFees`, and `withdrawFees`

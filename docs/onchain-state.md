@@ -7,8 +7,8 @@ document confirms or refutes it.
 
 - RPC: `https://rpc.testnet.arc.network`
 - Chain id: `5042002` (deployments file says `5042002`)
-- Block at audit: `59863080`
-- Generated: 2026-09-01T01:44:18.385Z
+- Block at audit: `59866384`
+- Generated: 2026-09-01T02:12:55.119Z
 
 ## Ownership
 
@@ -18,12 +18,12 @@ document confirms or refutes it.
 
 | Contract | Address | owner() | Kind | pendingOwner() |
 |---|---|---|---|---|
-| ConduitRouter | `0x2Bd51BB0CA986703A4449796EdCeCAB81126899C` | `0xf04a181eaB4CfABf7D13CCe64737782737cD0b22` | an EOA (no code) | `0x0000000000000000000000000000000000000000` |
-| DeclarationRegistry | `0x97F4595dF5D68c5d1D14A6678e4e94b5E58E1598` | `0xf04a181eaB4CfABf7D13CCe64737782737cD0b22` | an EOA (no code) | `0x0000000000000000000000000000000000000000` |
-| CurrencyRegistry | `0x9aCd34c9E922903DBcB074A7Fb140D857ccA6F2B` | `0xf04a181eaB4CfABf7D13CCe64737782737cD0b22` | an EOA (no code) | `0x0000000000000000000000000000000000000000` |
+| ConduitRouter | `0x2Bd51BB0CA986703A4449796EdCeCAB81126899C` | `0xC5FEa695abe78B09E8acA73531658E0ad5e4e901` | an EOA (no code) | `0x0000000000000000000000000000000000000000` |
+| DeclarationRegistry | `0x97F4595dF5D68c5d1D14A6678e4e94b5E58E1598` | `0xC5FEa695abe78B09E8acA73531658E0ad5e4e901` | an EOA (no code) | `0x0000000000000000000000000000000000000000` |
+| CurrencyRegistry | `0x9aCd34c9E922903DBcB074A7Fb140D857ccA6F2B` | `0xC5FEa695abe78B09E8acA73531658E0ad5e4e901` | an EOA (no code) | `0x0000000000000000000000000000000000000000` |
 | SettlementPreferenceRegistry | `0x799F838F5D4Ca302E436a0C53ab0E1F51A5A3D1b` | — | no owner() — not Ownable | `0x0` (none pending) |
 
-The deployments file names `0xf04a181eaB4CfABf7D13CCe64737782737cD0b22` as both deployer and owner.
+The deployments file names `0xC5FEa695abe78B09E8acA73531658E0ad5e4e901` as both deployer and owner.
 **Confirmed for 3 of 4:** ConduitRouter, DeclarationRegistry, CurrencyRegistry.
 That address is an EOA (no code).
 
@@ -99,7 +99,7 @@ signature rather than written down, so a zero result means zero logs and
 not a mistyped topic.
 
 Router deployed at block **59862873**, found by binary search on
-`eth_getCode`. Scanning 59862873 → 59863080 in 20000-block chunks —
+`eth_getCode`. Scanning 59862873 → 59866384 in 20000-block chunks —
 the router's entire history, not a recent window.
 
 Logs found: **0**
@@ -119,59 +119,57 @@ Compare against `packages/api/internal/currency`. A currency the API
 serves and the registry does not know becomes a hard failure the
 moment Phase A4 makes `isEnabledToken` load-bearing in `execute()`.
 
+## ABANDONED — never point anything at this again
+
+`0x80f996e86C003AF309635B67A53dC6e63e623318` was the ConduitRouter until
+Phase A6. It is abandoned, not upgraded: it has no pause and no
+migration path, and the fee table above is why nothing had to be
+withdrawn before walking away from it.
+
+**It must never be set as `CONDUIT_ROUTER_ADDRESS` again.** It still
+carries `executeWithFX`, which is `external` with no `msg.sender`
+check and emits `PaymentSettled` from caller-supplied calldata — a
+settlement event for any amount, over a transaction that moved one
+unit of any token. Phase A2 means a forged event would now be dropped
+rather than believed, but pointing back at that contract would be
+reintroducing the thing this work removed.
+
+The registries kept their addresses, so every declaration registered
+against the old router still resolves.
+
+## The retired deployer key
+
+`0xf04a181eaB4CfABf7D13CCe64737782737cD0b22` signed every original deployment,
+sat in `packages/contracts/.env`, was read by `scripts/e2e.sh`, and has
+therefore been in a shell history. Treat it as compromised. The
+ownership table above is the check that it holds nothing: if that
+address ever reappears as an `owner()`, something has gone backwards.
+
+It still holds testnet gas, which is fine — it is a payer now and
+nothing else.
+
+## Ownership is a single key, deliberately
+
+The owner above is an EOA, not a 2-of-3 Safe, and that is a stopping
+point rather than an oversight. A Safe needs three keys held in three
+different places; three keys on one laptop is the ceremony of a multisig
+with the security of a single key, and worse than one key because it
+looks protected.
+
+Sized rather than feared — what a stolen owner key can do: skim up to
+`MAX_PROTOCOL_FEE_BPS` (30, or 0.3%) and withdraw it, and halt payments
+by disabling a currency. It CANNOT drain merchant funds or redirect a
+payment: the router is non-custodial between transactions and `execute`
+requires `msg.sender == instruction.payer`. The function the original
+remediation plan feared most — `setAtomicSettler`, which could
+"redirect every payment in flight" — was deleted in Phase A3.
+
+Before mainnet: deploy the Safe, `transferOwnership` to it,
+`acceptOwnership` from it. `scripts/RedeployRouter.s.sol` takes
+`ROUTER_OWNER` and `ROUTER_GUARDIAN` so a future deployment can be born
+owned correctly rather than transferred afterwards.
+
 ## Unresolved
 
 None. Every field above was filled from a real call.
 
-
----
-
-## ABANDONED — never point anything at this again
-
-`0x80f996e86C003AF309635B67A53dC6e63e623318` was the ConduitRouter until Phase
-A6. It is abandoned, not upgraded — it has no pause and no migration path, and
-A0 confirmed it holds nothing (`protocolFeeBps` is 0 and every
-`accumulatedFees` entry is zero), so nothing had to be withdrawn before walking
-away from it.
-
-**It must never be set as `CONDUIT_ROUTER_ADDRESS` again.** It still carries
-`executeWithFX`, which is `external` with no `msg.sender` check and emits
-`PaymentSettled` populated entirely from caller-supplied calldata — a
-settlement event for any amount, over a transaction that moved one unit of any
-token. Phase A2 means a forged event would now be dropped rather than believed,
-but pointing at that contract would be reintroducing the thing this work
-removed.
-
-Its replacement is `0x2Bd51BB0CA986703A4449796EdCeCAB81126899C`.
-`DeclarationRegistry`, `CurrencyRegistry` and `SettlementPreferenceRegistry`
-keep their addresses, so every declaration registered against the old router
-still resolves.
-
-## NOT DONE — ownership is still a single hot key
-
-The table above is the finding, restated so it is not lost in a table:
-`0xf04a181eaB4CfABf7D13CCe64737782737cD0b22` owns the router,
-`DeclarationRegistry` and `CurrencyRegistry`, and **has no code**. It is an
-EOA. `ConduitRouter.sol`'s header claim of a 2-of-3 multisig is false.
-
-That same key signed every deployment, holds the testnet funds, is read by
-`scripts/e2e.sh` out of `packages/contracts/.env`, and has therefore been in a
-shell history. Operationally it should be treated as compromised.
-
-Three things remain, and none of them can be done from a repository:
-
-1. **Deploy a 2-of-3 Safe** and `transferOwnership` to it on every
-   `Ownable2Step` contract, then `acceptOwnership` FROM the Safe. A
-   half-finished two-step transfer is worse than not starting — the old owner
-   still holds everything and the new one holds nothing.
-2. **Rotate the deployer key.** A replacement generated by tooling that logs is
-   not a rotation; it reproduces the defect under a new address.
-3. **Split the e2e payer from the owner.** A test wallet must never be able to
-   change protocol parameters.
-
-`guardian()` is currently `address(0)` — no worse than the old router, which
-had no pause at all, but the improvement Phase A4 built is not yet switched on.
-Set it with `setGuardian` once there is a key to hold it.
-
-`scripts/RedeployRouter.s.sol` takes `ROUTER_OWNER` and `ROUTER_GUARDIAN`, so
-the next deployment can be born owned correctly rather than transferred.

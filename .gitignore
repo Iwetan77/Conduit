@@ -24,6 +24,25 @@ packages/app/.env.local
 packages/contracts/.env
 packages/contracts/.env.*
 
+# Private keys, wherever they land.
+#
+# Keys for this project live in ~/.conduit-keys, outside the repository and
+# chmod 600, precisely so this section never has to work. It is here for the
+# time somebody generates one in the wrong directory, or copies a file across
+# to "check something" and forgets. A key that reaches a public repo is
+# compromised the moment it is pushed, and no amount of rewriting history
+# afterwards makes it not have been there -- so the cheap defence is to make
+# the accident impossible to commit rather than to catch it in review.
+*.key
+*.seed
+*.pem
+*.p12
+*.keystore
+keystore/
+.conduit-keys/
+**/private-key*
+**/privatekey*
+
 # ── TypeScript ────────────────────────────────────────────────────────────────
 *.tsbuildinfo
 next-env.d.ts

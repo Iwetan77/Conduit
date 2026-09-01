@@ -13,7 +13,13 @@ package server
 // interval from 4000ms to 500ms multiplied receipt-polling requests by eight,
 // straight into that bucket. This test is the thing that would have caught it.
 
-import "testing"
+import (
+	"io"
+	"net/http"
+	"strings"
+	"sync"
+	"testing"
+)
 
 func TestOnePaymentDoesNotExhaustTheRPCBucket(t *testing.T) {
 	rl := newRateLimiter(rpcRatePerSecond, rpcBurst)
@@ -84,5 +90,70 @@ func TestExpensiveMethodsCostMore(t *testing.T) {
 	// An unknown method must not be free -- that would be the way around this.
 	if rpcMethodCost("some_new_method") < 1 {
 		t.Error("an unrecognised method costs nothing")
+	}
+}
+
+// The bug the unit tests above could not see.
+//
+// The first attempt at this added rateLimitRPC to the /rpc route while leaving
+// it inside the group that already applied the public limiter. chi runs BOTH,
+// so the 5/second bucket still rejected calls the new 120/second one had just
+// allowed — the limiter was correct, the wiring made it irrelevant, and
+// production kept failing exactly as before.
+//
+// Unit-testing the limiter proved the limiter. This exercises the ROUTER, which
+// is where the mistake actually was.
+func TestRPCIsNotBehindThePublicLimiter(t *testing.T) {
+	srv, _, _ := newLinkTestServer(t, 15640)
+
+	// CONCURRENT, and that detail is the test.
+	//
+	// A sequential version of this passes even with the bug present: sixty
+	// round trips take about 28 seconds, and a 5/second bucket refills 140
+	// tokens in that time, so it never runs dry. It proved nothing and reported
+	// success -- which is worse than not having it.
+	//
+	// A payment does not make its reads politely one at a time. It fires nonce,
+	// gas estimate, fee history and receipt polls as fast as the wallet needs
+	// them, and that is what exhausts a burst of 20. Firing them together is
+	// the only shape that reproduces what a payer actually does.
+	const calls = 60
+
+	body := `{"jsonrpc":"2.0","id":1,"method":"eth_blockNumber","params":[]}`
+
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	limited := 0
+
+	for i := 0; i < calls; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			req, err := http.NewRequest(http.MethodPost, srv.URL+"/v1/rpc", strings.NewReader(body))
+			if err != nil {
+				return
+			}
+			req.Header.Set("content-type", "application/json")
+			res, err := http.DefaultClient.Do(req)
+			if err != nil {
+				return
+			}
+			defer res.Body.Close()
+			io.Copy(io.Discard, res.Body)
+			if res.StatusCode == http.StatusTooManyRequests {
+				mu.Lock()
+				limited++
+				mu.Unlock()
+			}
+		}()
+	}
+	wg.Wait()
+
+	if limited > 0 {
+		t.Fatalf(
+			"%d of %d concurrent /v1/rpc calls were rate limited -- the route is still sharing the "+
+				"public bucket, which is what makes one payment fail with \"Couldn't reach the network\"",
+			limited, calls,
+		)
 	}
 }

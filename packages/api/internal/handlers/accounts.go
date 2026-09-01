@@ -305,12 +305,28 @@ func (h *Accounts) Me(w http.ResponseWriter, r *http.Request) {
 	var resp accountResponse
 	err := h.Pool.QueryRow(r.Context(),
 		`SELECT id, name, logo_url, username, settle_currency, settle_address,
-		        -- Ready means BOTH halves are there. The constraint added with
-		        -- the column already guarantees they move together, so this is
-		        -- belt and braces -- but this is the field the dashboard gates
-		        -- provisioning on, and a half-written row reading as ready
-		        -- would silently stop anyone from ever finishing.
-		        (settle_wallet_id IS NOT NULL AND settle_address_source = 'provisioned'),
+		        -- Ready means the business has an address of its OWN.
+		        --
+		        -- Both halves present, and -- the part that was missing -- the
+		        -- address actually different from the wallet the owner signs in
+		        -- with. That is the whole point of provisioning: one person,
+		        -- two Circle wallets, personal money and business money in
+		        -- different places.
+		        --
+		        -- Without the third clause an account whose provisioning went
+		        -- wrong, or which was marked provisioned while still pointing at
+		        -- the login wallet, reads as ready forever. The dashboard gates
+		        -- the provisioner on this field, so "ready" with the same
+		        -- address means it never runs again and there is no way back:
+		        -- /send and the merchant dashboard show one address, and the
+		        -- business's income lands in the owner's personal wallet. That
+		        -- is precisely the default this feature exists to replace.
+		        --
+		        -- Reporting not-ready instead makes the provisioner try again,
+		        -- which is the recoverable answer.
+		        (settle_wallet_id IS NOT NULL
+		         AND settle_address_source = 'provisioned'
+		         AND (login_wallet IS NULL OR lower(settle_address) <> lower(login_wallet))),
 		        settle_address_source,
 		        login_wallet,
 		        livemode

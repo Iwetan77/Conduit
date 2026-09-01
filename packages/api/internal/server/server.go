@@ -355,6 +355,22 @@ func New(cfg Config) http.Handler {
 		// behind one NAT as if it were a single client. Scoping it structurally
 		// also means a bogus Authorization header cannot skip the limiter --
 		// which is what checking for one in the middleware would have allowed.
+		// The JSON-RPC relay, in its OWN group with its OWN limiter.
+		//
+		// Structurally separate rather than "the public group plus an extra
+		// middleware", because that is what the first attempt at this was and
+		// it did not work: chi runs BOTH, so the public 5/second bucket still
+		// rejected the calls the new one had just allowed. A limiter you add
+		// beside another limiter is the stricter of the two, not the one you
+		// wrote.
+		//
+		// No API key: reads are public chain data and a broadcast carries an
+		// already-signed transaction. See handlers.RPCProxy.
+		r.Group(func(r chi.Router) {
+			r.Use(rateLimitRPC(rpcLimiter, trustProxyHeaders))
+			r.Post("/rpc", rpcProxyH.Handle)
+		})
+
 		r.Group(func(r chi.Router) {
 			r.Use(rateLimit(publicLimiter, trustProxyHeaders))
 
@@ -380,17 +396,6 @@ func New(cfg Config) http.Handler {
 			// holding it would serve one payer's balance to another. Ten seconds
 			// matches balanceCacheTTL.
 			r.Get("/balances", cacheFor("private, max-age=10", balancesH.List))
-			// Public JSON-RPC relay to Arc (method-allowlisted, fixed upstream).
-			// No API key: reads are public chain data and a broadcast carries an
-			// already-signed transaction. See handlers.RPCProxy.
-			//
-			// Its OWN limiter, not the public one. A single payment makes dozens
-			// of reads, so sharing the payer bucket of 5/second meant one payer
-			// throttled themselves -- measured at nine rejections out of thirty
-			// calls, which the browser reports as "Couldn't reach the network".
-			// See rateLimitRPC.
-			r.With(rateLimitRPC(rpcLimiter, trustProxyHeaders)).
-				Post("/rpc", rpcProxyH.Handle)
 			r.Post("/accounts", accountsH.Create)
 			// Login bootstrap: verifies the credential itself (not gated by
 			// auth.Middleware, since a brand-new user has no account yet for the

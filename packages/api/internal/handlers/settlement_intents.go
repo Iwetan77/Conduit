@@ -371,6 +371,14 @@ type publicIntentResponse struct {
 	// it was set by the merchant's own server with their secret key, and the
 	// checkout has to know it to complete the mobile redirect flow.
 	ReturnURL string `json:"return_url,omitempty"`
+	// The settling transaction, once there is one.
+	//
+	// Added when Confirm stopped waiting for the maker leg (Phase B4.2): the
+	// browser now learns the outcome by polling this, so without the hash it
+	// could see "settled" and still have nothing to show the payer or link to
+	// an explorer. Public by nature -- it is on-chain, and it is the payer's
+	// own payment.
+	TxHash string `json:"tx_hash,omitempty"`
 }
 
 // GetPublic is GET /v1/settlement_intents/:id/public -- unauthenticated,
@@ -409,12 +417,19 @@ func (h *SettlementIntents) GetPublic(w http.ResponseWriter, r *http.Request) {
 		              ORDER BY (w.privy_user_id IS NULL AND w.auth_subject IS NULL) DESC
 		              LIMIT 1),
 		            a.name
-		        ), a.logo_url, COALESCE(si.return_url,'')
+		        ), a.logo_url, COALESCE(si.return_url,''),
+		        -- The settling transaction, when one exists. The browser polls
+		        -- this endpoint for the outcome now that Confirm returns 202
+		        -- rather than waiting, so without it a payer could see
+		        -- "settled" and have nothing to show for it.
+		        COALESCE((SELECT s.tx_hash FROM settlements s
+		                   WHERE s.intent_id = si.id
+		                   ORDER BY s.settled_at DESC LIMIT 1), '')
 		 FROM settlement_intents si JOIN accounts a ON a.id = si.account_id
 		 WHERE si.id = $1`,
 		id,
 	).Scan(&resp.Amount, &resp.Status, &resp.SettleCurrency, &resp.SourceChain, &resp.ExpiresAt, &resp.SettleAddress,
-		&resp.DisplayName, &resp.LogoURL, &resp.ReturnURL)
+		&resp.DisplayName, &resp.LogoURL, &resp.ReturnURL, &resp.TxHash)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			writeErr(w, apierrors.E(apierrors.CodeNotFound, "id"))
@@ -841,8 +856,18 @@ func (h *SettlementIntents) Confirm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	makerTxHash, err := h.StableFX.Submit(r.Context(), prep, req.FundingSignature)
-	if err != nil {
+	// Hand Circle the signature, and stop there.
+	//
+	// This is where the payer's involvement genuinely ends. A bad signature or
+	// an unfundable trade is rejected HERE, in one round trip, and that is an
+	// error they can act on. What used to follow -- polling Circle's relayer
+	// through three Arc transactions -- is not something a browser should hold
+	// a socket open through, and holding one through it was also a bug: the
+	// server's WriteTimeout is 30s while the poll deadline is 60s, so a payment
+	// that settled at 35 seconds was reported to the payer as a network failure
+	// while the money had already moved, leaving fx_trades at 'submitted' with
+	// nothing to resolve it.
+	if err := h.StableFX.SubmitFunding(r.Context(), prep, req.FundingSignature); err != nil {
 		// Persist the reason, not just log it. The payer has signed twice by
 		// now, so this is the worst possible place to lose why it failed --
 		// and a log line on the running host is unreachable to anyone
@@ -855,26 +880,83 @@ func (h *SettlementIntents) Confirm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, _ = h.Pool.Exec(r.Context(), `UPDATE fx_trades SET state = 'settled', updated_at = now() WHERE id = $1`, tradeID)
-	_, _ = h.Pool.Exec(r.Context(), `UPDATE settlement_intents SET status = 'settled', updated_at = now() WHERE id = $1`, id)
+	// Detached, on context.Background().
+	//
+	// NOT r.Context(): that is cancelled the moment the response is written,
+	// which is one line below. Using it would cancel the settlement this
+	// function just started.
+	go h.awaitFXSettlement(context.Background(), id, accountID, tradeID, prep)
 
-	// Now — and only now, with money actually delivered — is the payment link
+	// 202, not 200. The distinction is the point: Circle has accepted the
+	// funding, the money is moving, and nothing here knows yet that it landed.
+	// Reporting "settled" would be a guess, and the browser has
+	// pollWithBackoff to find out the truth.
+	writeJSON(w, http.StatusAccepted, confirmResponse{Status: "submitted", TxHash: ""})
+}
+
+// awaitFXSettlement finishes a trade whose funding Circle has already accepted.
+//
+// Everything Confirm used to do after Submit lives here, unchanged in effect:
+// the settlement row, the balance transaction, the payment link, the webhook.
+// The only difference is who is waiting for it, and the answer is nobody.
+//
+// Recoverable rather than lost if this process dies mid-poll. The trade stays
+// at 'submitted' with the transition already durable, and reconcileSubmittedFX
+// picks it up on the next sweep -- which is why the state is written before
+// this starts rather than after it finishes.
+func (h *SettlementIntents) awaitFXSettlement(
+	ctx context.Context, id, accountID, tradeID string, prep fx.Preparation,
+) {
+	makerTxHash, err := h.StableFX.AwaitSettlement(ctx, prep)
+	if err != nil {
+		_, _ = h.Pool.Exec(ctx,
+			`UPDATE fx_trades SET state = 'failed', last_error = $2, updated_at = now() WHERE id = $1`,
+			tradeID, err.Error())
+		log.Printf("fx: intent=%s stage=await trade=%s err=%v", id, tradeID, err)
+		if h.Webhooks != nil {
+			_ = h.Webhooks.Enqueue(ctx, accountID, "settlement.failed", map[string]any{
+				"intent_id": id,
+				"reason":    err.Error(),
+			})
+		}
+		return
+	}
+	h.recordFXSettlement(ctx, id, accountID, tradeID, makerTxHash)
+}
+
+// recordFXSettlement writes everything a delivered FX trade implies.
+//
+// Split out so the detached worker and the reconciler perform the same writes:
+// two versions of "what a settled trade means" would eventually disagree, and
+// the one that drifts would be the reconciler, which is the one nobody watches.
+func (h *SettlementIntents) recordFXSettlement(
+	ctx context.Context, id, accountID, tradeID, makerTxHash string,
+) {
+	// Idempotent on the trade's state, so a reconciler racing the worker
+	// cannot write the settlement twice and credit the merchant twice.
+	tag, err := h.Pool.Exec(ctx,
+		`UPDATE fx_trades SET state = 'settled', updated_at = now()
+		  WHERE id = $1 AND state <> 'settled'`, tradeID)
+	if err != nil || tag.RowsAffected() != 1 {
+		return
+	}
+
+	_, _ = h.Pool.Exec(ctx, `UPDATE settlement_intents SET status = 'settled', updated_at = now() WHERE id = $1`, id)
+
+	// Now -- and only now, with money actually delivered -- is the payment link
 	// (if this intent came from one) genuinely paid. This is the transition that
 	// used to fire prematurely at checkout start; see payment_links.go Pay().
-	_, _ = h.Pool.Exec(r.Context(),
-		links.SettleByIntentSQL,
-		id)
+	_, _ = h.Pool.Exec(ctx, links.SettleByIntentSQL, id)
 
 	// Record settlements + balance_transactions so GET /v1/balance_transactions
 	// and the CSV export have something to show for FX-routed settlements
-	// (the indexer only ever sees direct ConduitRouter events — see its
-	// package doc comment — so this path has to record its own rows).
+	// (the indexer only ever sees direct ConduitRouter events -- see its
+	// package doc comment -- so this path has to record its own rows).
 	// KNOWN GAP: fee is recorded as 0 here. StableFX's quote response does
-	// carry a real fee figure but Confirm doesn't have it in scope at this
-	// point (would need threading it through from Quote via fx_trades) --
-	// noted in whereistopped.md, not fixed this session.
+	// carry a real fee figure but it is not in scope at this point (would need
+	// threading through from Quote via fx_trades).
 	var settleAmount, settleCurrency, payCurrency, payAmount, rate, fxPayerAddress string
-	h.Pool.QueryRow(r.Context(),
+	h.Pool.QueryRow(ctx,
 		`SELECT si.amount::text, si.settle_currency, ft.pay_currency, ft.pay_amount::text,
 		        COALESCE(ft.rate::text,''), COALESCE(ft.pay_address,'')
 		 FROM settlement_intents si JOIN fx_trades ft ON ft.id = $1 WHERE si.id = $2`,
@@ -882,24 +964,22 @@ func (h *SettlementIntents) Confirm(w http.ResponseWriter, r *http.Request) {
 	).Scan(&settleAmount, &settleCurrency, &payCurrency, &payAmount, &rate, &fxPayerAddress)
 
 	settlementRowID := models.NewID("stl")
-	h.Pool.Exec(r.Context(),
+	h.Pool.Exec(ctx,
 		`INSERT INTO settlements (id, intent_id, fx_trade_id, tx_hash, receipt_id, pay_currency, pay_amount, settle_amount, rate_applied, fee, block_number, log_index, settled_at, payer_address)
 		 VALUES ($1,$2,$3,$4,$4,$5,$6,$7,NULLIF($8,'')::numeric,0,0,0,now(),NULLIF($9,''))`,
 		settlementRowID, id, tradeID, makerTxHash, payCurrency, payAmount, settleAmount, rate, fxPayerAddress,
 	)
 	balanceTxID := models.NewID("btx")
-	h.Pool.Exec(r.Context(),
+	h.Pool.Exec(ctx,
 		`INSERT INTO balance_transactions (id, account_id, settlement_id, type, gross, fee, net, currency)
 		 VALUES ($1,$2,$3,'settlement',$4,0,$4,$5)`,
 		balanceTxID, accountID, settlementRowID, settleAmount, settleCurrency,
 	)
 
 	if h.Webhooks != nil {
-		_ = h.Webhooks.Enqueue(r.Context(), accountID, "settlement.succeeded",
-			links.SettledPayload(r.Context(), h.Pool, id, makerTxHash))
+		_ = h.Webhooks.Enqueue(ctx, accountID, "settlement.succeeded",
+			links.SettledPayload(ctx, h.Pool, id, makerTxHash))
 	}
-
-	writeJSON(w, http.StatusOK, confirmResponse{Status: "settled", TxHash: makerTxHash})
 }
 
 // erc20TransferTopic is keccak256("Transfer(address,address,uint256)") — the

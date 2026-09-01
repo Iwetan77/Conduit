@@ -899,6 +899,14 @@ export function confirmSettlementIntent(id: string, fundingSignature: string) {
 export interface PublicSettlementIntent {
   id: string;
   status: string;
+  /**
+   * The settling transaction, once there is one.
+   *
+   * The FX checkout polls this after `confirm` returns 202 — it no longer holds
+   * the request open until the maker leg delivers, so this is how the browser
+   * learns both that it settled and what to show for it.
+   */
+  tx_hash?: string;
   amount: string;
   settle_currency: string;
   source_chain: string;

@@ -727,6 +727,29 @@ func StartBackgroundWorkers(ctx context.Context, pool *pgxpool.Pool, arcRPC, rou
 		}
 	}()
 
+	// Finishes FX trades whose detached worker did not -- a deploy or a crash
+	// takes that goroutine with it while Circle's relayer carries on, leaving a
+	// paid merchant uncredited. Same interval as the bridge reconciler and for
+	// the same reason.
+	{
+		fxH := &handlers.SettlementIntents{
+			Pool: pool, StableFX: fx.NewStableFXProvider(bridgeCfg.StableFXBase, bridgeCfg.StableFXKey),
+			Webhooks: dispatcher, ArcRPC: arcRPC,
+		}
+		go func() {
+			ticker := time.NewTicker(reconcileEvery)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					fxH.ReconcileSubmittedFX(ctx)
+				}
+			}
+		}()
+	}
+
 	// Reports payroll runs abandoned mid-execution, so a merchant learns from a
 	// webhook rather than from an employee asking where their salary is.
 	go (&handlers.PayrollSweeper{

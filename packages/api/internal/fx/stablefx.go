@@ -322,7 +322,26 @@ type fundTokenPermissions struct {
 // delivery, not that echoed number; the fee comes out of the payer's side
 // (their `from.amount`/pay_amount), never out of what the recipient nets.
 // This resolves the "fee gross-up" open question from earlier live testing.
+// Submit funds the trade and waits for it to settle.
+//
+// Kept for callers that genuinely want both. The payer-facing path does NOT:
+// see SubmitFunding and AwaitSettlement, which is the same work split at the
+// point where the payer stops needing to watch.
 func (p *StableFXProvider) Submit(ctx context.Context, prep Preparation, fundingSignature string) (makerDeliverTxHash string, err error) {
+	if err := p.SubmitFunding(ctx, prep, fundingSignature); err != nil {
+		return "", err
+	}
+	return p.AwaitSettlement(ctx, prep)
+}
+
+// SubmitFunding hands Circle the payer's funding signature. One round trip.
+//
+// Split from the waiting deliberately. This is the part the payer's browser has
+// to be present for -- it is where a bad signature or an unfundable trade is
+// rejected, and where an error is still theirs to act on. Everything after it
+// is Circle's relayer landing three transactions on Arc, which the payer can be
+// told about rather than made to sit through.
+func (p *StableFXProvider) SubmitFunding(ctx context.Context, prep Preparation, fundingSignature string) error {
 	req := fundRequest{
 		Type:      "taker",
 		Signature: fundingSignature,
@@ -337,11 +356,23 @@ func (p *StableFXProvider) Submit(ctx context.Context, prep Preparation, funding
 	var empty json.RawMessage
 	status, err := p.post(ctx, "/v1/exchange/stablefx/fund", req, &empty)
 	if err != nil {
-		return "", apierrors.E(apierrors.CodeFxProviderUnavailable, "")
+		return apierrors.E(apierrors.CodeFxProviderUnavailable, "")
 	}
 	if status != http.StatusOK && status != http.StatusCreated {
-		return "", fmt.Errorf("stablefx fund submission failed (%d)", status)
+		return fmt.Errorf("stablefx fund submission failed (%d)", status)
 	}
+	return nil
+}
+
+// AwaitSettlement polls until Circle's maker leg has delivered, or fails.
+//
+// Runs detached from the payer's request. It takes as long as three Arc
+// transactions take, which is not a wait a browser should be holding a socket
+// open through -- and holding one through it was also a correctness bug: the
+// server's WriteTimeout is 30s while this deadline is 60s, so a payment that
+// settled at 35 seconds was reported to the payer as a network failure while
+// the money had already moved.
+func (p *StableFXProvider) AwaitSettlement(ctx context.Context, prep Preparation) (makerDeliverTxHash string, err error) {
 
 	// Discovered live (2026-07-29): the top-level trade `status` field does not
 	// reliably reach "settled"/"complete" even when the maker leg has already

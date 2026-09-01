@@ -278,5 +278,55 @@ export async function runFxCheckout(
   onStage("Circle is settling to the recipient…");
   const res = await confirmSettlementIntent(intentId, fundingSignature);
 
-  return { txHash: res.tx_hash ?? "", rate, payAmount };
+  // 202 means Circle ACCEPTED the funding, not that the money has landed.
+  //
+  // Confirm used to hold this request open until the maker leg delivered --
+  // measured at 5.4s, against a server WriteTimeout of 30s and a poll deadline
+  // of 60s, so a payment settling at 35 seconds was reported to the payer as a
+  // network failure while the money had already moved. It returns as soon as
+  // Circle answers now, and the outcome is watched from here.
+  //
+  // pollWithBackoff rather than a fresh loop: it ramps, it keeps exactly one
+  // request in flight, and it does not give up on a single failed poll -- which
+  // matters, because giving up here would leave a settled payment unreported.
+  if (res.tx_hash) {
+    return { txHash: res.tx_hash, rate, payAmount };
+  }
+
+  onStage("Circle is settling to the recipient…");
+  const { pollWithBackoff } = await import("@/lib/poll");
+  const { getPublicSettlementIntent } = await import("@/lib/conduit-api");
+
+  const txHash = await new Promise<string>((resolve, reject) => {
+    const deadline = Date.now() + 90_000;
+    const cancel = pollWithBackoff(
+      async () => {
+        if (Date.now() > deadline) {
+          cancel();
+          // Not an error the payer caused, and not a payment that failed --
+          // the trade is durable and the reconciler will finish it. Saying so
+          // is more honest than a spinner that never resolves.
+          reject(
+            new Error(
+              "This is taking longer than usual. The payment is submitted and will complete — check the payment's status in a moment.",
+            ),
+          );
+          return true;
+        }
+        const intent = await getPublicSettlementIntent(intentId);
+        if (intent.status === "settled") {
+          resolve(intent.tx_hash ?? "");
+          return true;
+        }
+        if (intent.status === "failed" || intent.status === "expired") {
+          reject(new Error("The payment did not complete. Nothing was taken from your wallet."));
+          return true;
+        }
+        return false;
+      },
+      { immediate: true },
+    );
+  });
+
+  return { txHash, rate, payAmount };
 }

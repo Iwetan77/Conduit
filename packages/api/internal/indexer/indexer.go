@@ -25,7 +25,9 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/kzn-labs/conduit/api/internal/links"
+	"github.com/kzn-labs/conduit/api/internal/currency"
 	"github.com/kzn-labs/conduit/api/internal/models"
+	"github.com/kzn-labs/conduit/api/internal/onchain"
 	"github.com/kzn-labs/conduit/api/internal/webhooks"
 )
 
@@ -227,10 +229,12 @@ func (ix *Indexer) processLog(ctx context.Context, vLog types.Log) error {
 		return fmt.Errorf("unexpected topic count %d", len(vLog.Topics))
 	}
 	receiptID := vLog.Topics[1].Hex()
-	// Topics[2] is the indexed `payer` — who the money came from. Recorded so
-	// the dashboard can name a counterparty instead of echoing the merchant's
-	// own settle address back at them.
-	payer := common.BytesToAddress(vLog.Topics[2].Bytes()).Hex()
+	// Topics[2] is the indexed `payer`, and it is NOT recorded from here.
+	//
+	// It is a field of the caller-supplied instruction struct, so it says who
+	// the caller SAID paid. The payer written to the settlements row comes from
+	// the corroborating transfer instead -- see onchain.Proof.Payer, which also
+	// explains why it is not simply that transfer's sender.
 
 	var ev paymentSettledEvent
 	if err := ix.eventABI.UnpackIntoInterface(&ev, "PaymentSettled", vLog.Data); err != nil {
@@ -238,17 +242,85 @@ func (ix *Indexer) processLog(ctx context.Context, vLog types.Log) error {
 	}
 	declarationID := common.BytesToHash(ev.DeclarationId[:]).Hex()
 
-	// Dedupe on (tx_hash, log_index) via the unique constraint — an
+	// An event is corroboration. A token transfer is proof.
+	//
+	// This is the whole of Phase A2. Everything above comes out of a struct the
+	// CALLER supplied -- recipient, amounts and declarationId are all fields of
+	// calldata -- and the router had an external entry point that emitted
+	// PaymentSettled without moving the money it described. Believing the log
+	// meant a merchant's checkout could say "payment received" over a
+	// transaction that moved dust, and the merchant would ship goods.
+	//
+	// So: fetch the receipt, and require an ERC-20 Transfer of the intent's
+	// settle token, to the merchant's settle address, for exactly the settled
+	// amount, inside this same transaction. No corroborating transfer, no
+	// settlement row -- the log is logged and dropped.
+	//
+	// Deliberately not configurable. A flag here is a flag somebody turns off
+	// during an incident, which is the one moment it has to hold.
+	var intentID, settleCurrency, settleAddress, intentAmount string
+	if err := ix.pool.QueryRow(ctx,
+		`SELECT id, settle_currency, settle_address, amount::text
+		   FROM settlement_intents WHERE declaration_id = $1`,
+		declarationID,
+	).Scan(&intentID, &settleCurrency, &settleAddress, &intentAmount); err != nil {
+		// No intent for this declaration: a direct send, which this indexer
+		// has never recorded. Not an error, and nothing to verify.
+		return nil
+	}
+
+	info, ok := currency.ByISO(settleCurrency)
+	if !ok {
+		log.Printf("indexer: intent %s has unknown settle currency %q -- dropped", intentID, settleCurrency)
+		return nil
+	}
+	settled, ok := new(big.Int).SetString(intentAmount, 10)
+	if !ok {
+		log.Printf("indexer: intent %s has unreadable amount %q -- dropped", intentID, intentAmount)
+		return nil
+	}
+
+	receipt, err := ix.client.TransactionReceipt(ctx, vLog.TxHash)
+	if err != nil {
+		// Cannot verify yet. Returning the error leaves this log unprocessed so
+		// the 15s reconciler sees it again -- the right outcome for a transient
+		// RPC failure, and harmless for a permanent one since nothing was
+		// written.
+		return fmt.Errorf("receipt %s: %w", vLog.TxHash.Hex(), err)
+	}
+
+	proof := onchain.FindSettlementTransfer(
+		receipt,
+		common.HexToAddress(info.Token),
+		common.HexToAddress(settleAddress),
+		settled,
+	)
+	if proof == nil {
+		// Logged loudly: on a live deployment this line means somebody emitted
+		// a settlement event that moved no money.
+		log.Printf(
+			"indexer: PaymentSettled in %s claims %s to %s for intent %s, but the tx contains no matching transfer -- DROPPED",
+			vLog.TxHash.Hex(), intentAmount, settleAddress, intentID,
+		)
+		return nil
+	}
+
+	// Dedupe on (tx_hash, log_index) via the unique constraint -- an
 	// ON CONFLICT DO NOTHING makes this call idempotent under both the live
 	// subscription and the reconciler re-scanning the same block twice.
+	//
+	// Keyed on the TRANSFER's log index rather than the event's, so this and
+	// RecordDirectSettlement land on the same row for the same payment and
+	// whichever arrives second inserts nothing. Two rows for one settlement
+	// would double the merchant's balance and fire the webhook twice.
 	settlementID := models.NewID("stl")
 	tag, err := ix.pool.Exec(ctx,
 		`INSERT INTO settlements (id, intent_id, tx_hash, receipt_id, pay_currency, pay_amount, settle_amount, block_number, log_index, settled_at, payer_address)
-		 SELECT $1, si.id, $2, $3, si.settle_currency, $4, $5, $6, $7, now(), $9
-		 FROM settlement_intents si WHERE si.declaration_id = $8
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now(), NULLIF($10,''))
 		 ON CONFLICT (tx_hash, log_index) DO NOTHING`,
-		settlementID, vLog.TxHash.Hex(), receiptID, ev.PayerAmount.String(), ev.RecipientAmount.String(),
-		vLog.BlockNumber, vLog.Index, declarationID, payer,
+		settlementID, intentID, vLog.TxHash.Hex(), receiptID, settleCurrency,
+		ev.PayerAmount.String(), proof.Amount.String(),
+		vLog.BlockNumber, proof.LogIndex, proof.Payer,
 	)
 	if err != nil {
 		return fmt.Errorf("insert settlement: %w", err)

@@ -23,6 +23,7 @@ import (
 	"github.com/kzn-labs/conduit/api/internal/fx"
 	"github.com/kzn-labs/conduit/api/internal/links"
 	"github.com/kzn-labs/conduit/api/internal/models"
+	"github.com/kzn-labs/conduit/api/internal/onchain"
 	"github.com/kzn-labs/conduit/api/internal/webhooks"
 )
 
@@ -1079,37 +1080,18 @@ func (h *SettlementIntents) RecordDirectSettlement(w http.ResponseWriter, r *htt
 	// rather than trusting a PaymentSettled event (which would tie this to the
 	// router address, unset in prod) — reaching the merchant's wallet is the
 	// fact the merchant is paid on.
+	// Shared with the indexer, which needs the same answer to the same
+	// question and must not have a second copy of it. See settlement_proof.go
+	// -- including why the payer it reports is NOT the sender of the transfer
+	// that reached the merchant.
 	tokenAddr := common.HexToAddress(settleInfo.Token)
 	settleAddr := common.HexToAddress(settleAddress)
-	var paidAmount *big.Int
-	var matchedLogIndex uint
-	// Topics[1] of the matched Transfer is who sent it: the payer, straight
-	// from the chain, not something a caller can assert.
-	var payerAddress string
-	for _, lg := range receipt.Logs {
-		if lg.Address != tokenAddr || len(lg.Topics) != 3 || lg.Topics[0] != erc20TransferTopic {
-			continue
-		}
-		to := common.BytesToAddress(lg.Topics[2].Bytes())
-		if to != settleAddr {
-			continue
-		}
-		value := new(big.Int).SetBytes(lg.Data)
-		// Exactly the amount, not at least it. A router payment delivers
-		// instruction.amount and nothing else, so ">=" only ever admitted
-		// transfers this intent did not cause -- and it recorded settle_amount
-		// as the intent amount regardless, leaving any excess unaccounted.
-		if value.Cmp(amount) == 0 {
-			paidAmount = value
-			matchedLogIndex = lg.Index
-			payerAddress = common.BytesToAddress(lg.Topics[1].Bytes()).Hex()
-			break
-		}
-	}
-	if paidAmount == nil {
+	proof := onchain.FindSettlementTransfer(receipt, tokenAddr, settleAddr, amount)
+	if proof == nil {
 		writeErr(w, apierrors.E(apierrors.CodeInvalidRequest, "tx does not settle this intent"))
 		return
 	}
+	paidAmount, matchedLogIndex, payerAddress := proof.Amount, proof.LogIndex, proof.Payer
 
 	// ...and it must be OUR router that settled it. See
 	// routerSettledThisIntent: a transfer reaching the merchant is not evidence

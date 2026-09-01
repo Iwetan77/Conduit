@@ -4,6 +4,7 @@ pragma solidity 0.8.24;
 import {Test, Vm} from "forge-std/Test.sol";
 import {ConduitPayroll} from "../src/ConduitPayroll.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
+import {OutboundFeeERC20} from "./mocks/QuirkyERC20.sol";
 import {FeeOnTransferERC20, BlocklistERC20, ReentrantERC20} from "./mocks/QuirkyERC20.sol";
 
 /// @dev What a payroll contract has to get right.
@@ -230,5 +231,71 @@ contract ConduitPayrollTest is Test {
         // change that made each line dramatically more expensive is noticed
         // here rather than in production.
         assertLt(used, 8_000_000, "a 120-person run got expensive");
+    }
+
+    // ── Phase A5 ──────────────────────────────────────────────────────────────
+
+    function _roster(uint256 n) internal pure returns (address[] memory to, uint256[] memory amounts) {
+        to = new address[](n);
+        amounts = new uint256[](n);
+        for (uint256 i = 0; i < n; i++) {
+            to[i] = address(uint160(0x10000 + i));
+            amounts[i] = 1e6;
+        }
+    }
+
+    /// The loop was unbounded, so a large roster exceeded the block gas limit
+    /// and reverted AFTER the merchant had signed and paid for the approve.
+    function test_revertsOneOverTheRecipientCap() public {
+        uint256 cap = payroll.MAX_RECIPIENTS();
+        (address[] memory to, uint256[] memory amounts) = _roster(cap + 1);
+        vm.prank(payer);
+        vm.expectRevert(ConduitPayroll.TooManyRecipients.selector);
+        payroll.disperse(RUN, address(token), to, amounts);
+    }
+
+    function test_succeedsExactlyAtTheCap() public {
+        uint256 cap = payroll.MAX_RECIPIENTS();
+        (address[] memory to, uint256[] memory amounts) = _roster(cap);
+        vm.prank(payer);
+        uint256 total = payroll.disperse(RUN, address(token), to, amounts);
+        assertEq(total, cap * 1e6);
+        assertEq(token.balanceOf(address(payroll)), 0, "contract kept funds");
+    }
+
+    /// Everything pulled must have been paid out. A token that charges the
+    /// sender on top leaves the contract short, and without this the run either
+    /// reverts with the token's own opaque balance error or -- if a stray
+    /// donation absorbed the difference -- completes while holding less than it
+    /// started with.
+    function test_outboundFeeRevertsWithItsOwnReason() public {
+        OutboundFeeERC20 out = new OutboundFeeERC20(1e6);
+        out.setTaxed(address(payroll));
+        out.mint(payer, 1_000e6);
+        // A donation, which is what makes the loop survivable long enough to
+        // reach the post-loop assertion rather than reverting inside it.
+        out.mint(address(payroll), 100e6);
+
+        vm.prank(payer);
+        out.approve(address(payroll), type(uint256).max);
+
+        vm.prank(payer);
+        vm.expectRevert(ConduitPayroll.FeeOnTransferUnsupported.selector);
+        payroll.disperse(RUN, address(out), _to3(), _amounts3(1e6, 1e6, 1e6));
+    }
+
+    /// The post-loop check compares against the starting balance, not zero.
+    /// Zero would let anybody brick payroll for a token forever by sending this
+    /// contract one unit of it.
+    function test_aDonationDoesNotBrickPayroll() public {
+        token.mint(address(payroll), 1);
+
+        vm.prank(payer);
+        uint256 total = payroll.disperse(RUN, address(token), _to3(), _amounts3(1e6, 2e6, 3e6));
+
+        assertEq(total, 6e6);
+        assertEq(token.balanceOf(alice), 1e6);
+        // The donation is still sitting there, untouched and harmless.
+        assertEq(token.balanceOf(address(payroll)), 1);
     }
 }

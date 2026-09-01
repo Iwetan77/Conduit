@@ -20,12 +20,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"log"
 	"math/big"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/jackc/pgx/v5"
 	"github.com/kzn-labs/conduit/api/internal/arcrpc"
@@ -190,6 +193,15 @@ func (h *PayrollRuns) Execute(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// maxPayrollRecipients mirrors ConduitPayroll.MAX_RECIPIENTS.
+//
+// Derived there from Arc's 30,000,000 block gas limit against the 35,000 gas a
+// recipient costs (gasPerRecipient), with better than half of it as headroom.
+// Duplicated here rather than read from the chain because a draft must be
+// refusable without an RPC call — but the two MUST move together, and the
+// contract's own comment says so from its side.
+const maxPayrollRecipients = 400
+
 func (h *PayrollRuns) buildLegs(ctx context.Context, runID, treasury string) ([]payrollLeg, *apierrors.APIError) {
 	rows, err := h.Pool.Query(ctx,
 		`SELECT currency, address, amount::text
@@ -234,7 +246,24 @@ func (h *PayrollRuns) buildLegs(ctx context.Context, runID, treasury string) ([]
 
 	out := make([]payrollLeg, 0, len(order))
 	for _, cur := range order {
-		out = append(out, *byCurrency[cur])
+		leg := *byCurrency[cur]
+		// The same cap the contract enforces, checked HERE so it surfaces at
+		// draft time.
+		//
+		// ConduitPayroll reverts TooManyRecipients above MAX_RECIPIENTS. Left
+		// only to the contract, a business with too large a roster finds out
+		// after signing and paying for the approve -- a wasted signature and a
+		// wasted fee for a run that could never have worked. This one number
+		// has to move in both places at once; the contract's own comment says
+		// the same thing from the other side.
+		if len(leg.Recipients) > maxPayrollRecipients {
+			return nil, apierrors.E(apierrors.CodeInvalidRequest,
+				fmt.Sprintf(
+					"a payroll run can pay at most %d people in one currency; %s has %d. Pause some, or split them across two runs.",
+					maxPayrollRecipients, cur, len(leg.Recipients),
+				))
+		}
+		out = append(out, leg)
 	}
 	return out, nil
 }
@@ -303,21 +332,91 @@ func (h *PayrollRuns) RecordLeg(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, e)
 			return
 		}
-		ok, err := h.dispersed(ctx, strings.TrimSpace(req.TxHash), runID, req.Currency, total)
+
+		// The business's own treasury is the only wallet that may pay this
+		// account's payroll.
+		var settleAddress string
+		_ = h.Pool.QueryRow(ctx,
+			`SELECT settle_address FROM accounts WHERE id = $1`, principal.AccountID,
+		).Scan(&settleAddress)
+
+		txHash := strings.TrimSpace(req.TxHash)
+		paid, err := h.dispersed(ctx, txHash, runID, req.Currency, total, settleAddress)
 		if err != nil {
 			writeErr(w, apierrors.E(apierrors.CodeUpstreamUnavailable, "arc rpc"))
 			return
 		}
-		if !ok {
+		if len(paid) == 0 {
 			writeErr(w, apierrors.E(apierrors.CodePayrollNotOnChain, "tx_hash"))
 			return
 		}
-		if _, err := h.Pool.Exec(ctx,
-			`UPDATE payroll_run_items SET status = 'paid', tx_hash = $1, error = NULL
-			  WHERE run_id = $2 AND currency = $3 AND status = 'pending'`,
-			strings.TrimSpace(req.TxHash), runID, req.Currency); err != nil {
+
+		// One log per row, matched individually.
+		//
+		// This used to be a single UPDATE marking every pending item in the
+		// currency as paid, on the strength of the aggregate event alone. A
+		// caller could disperse the correct total to one address and everybody
+		// in the group was recorded as paid. The contract emits a PayrollPaid
+		// per recipient so that this does not have to be inferred, and each row
+		// is now marked from its OWN matched log or left pending.
+		//
+		// A multiset, not a set: the contract deliberately allows the same
+		// address twice — a person with salary and expenses as two arrangements
+		// — and each line must consume its own log. Collapsing them would let
+		// one payment mark two rows paid.
+		available := map[payment]int{}
+		for _, p := range paid {
+			available[p]++
+		}
+
+		rows, err := h.Pool.Query(ctx,
+			`SELECT id, address, amount::text FROM payroll_run_items
+			  WHERE run_id = $1 AND currency = $2 AND status = 'pending'`,
+			runID, req.Currency)
+		if err != nil {
 			writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
 			return
+		}
+		type pendingItem struct{ id, addr, amount string }
+		var pending []pendingItem
+		for rows.Next() {
+			var it pendingItem
+			if err := rows.Scan(&it.id, &it.addr, &it.amount); err != nil {
+				rows.Close()
+				writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
+				return
+			}
+			pending = append(pending, it)
+		}
+		rows.Close()
+
+		matched := 0
+		for _, it := range pending {
+			key := payment{to: strings.ToLower(it.addr), amount: it.amount}
+			if available[key] == 0 {
+				// No log paid this person this amount. The row stays pending,
+				// and settleRunStatus below reports the run as partial.
+				continue
+			}
+			available[key]--
+			if _, err := h.Pool.Exec(ctx,
+				`UPDATE payroll_run_items SET status = 'paid', tx_hash = $1, error = NULL
+				  WHERE id = $2 AND status = 'pending'`,
+				txHash, it.id); err != nil {
+				writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
+				return
+			}
+			matched++
+		}
+		if matched == 0 {
+			writeErr(w, apierrors.E(apierrors.CodePayrollNotOnChain, "tx_hash"))
+			return
+		}
+		if matched < len(pending) {
+			log.Printf(
+				"payroll: run %s currency %s — tx %s paid %d of %d pending rows; the rest stay pending",
+				runID, req.Currency, txHash, matched, len(pending),
+			)
 		}
 	}
 
@@ -406,37 +505,85 @@ func (h *PayrollRuns) groupTotal(ctx context.Context, runID, currencyISO string)
 // payrollRunTopic is keccak256 of the run-level event the contract emits.
 var payrollRunTopic = crypto.Keccak256Hash([]byte("PayrollRun(bytes32,address,address,uint256,uint256)"))
 
-// dispersed reports whether `txHash` really contains this group's payment.
+// payrollPaidTopic is the PER-RECIPIENT event. This is the one that says who
+// was actually paid; PayrollRun only says how much left the payer's wallet.
+var payrollPaidTopic = crypto.Keccak256Hash([]byte("PayrollPaid(bytes32,address,address,uint256)"))
+
+// payment is one (recipient, amount) pair read off a PayrollPaid log.
+type payment struct {
+	to     string
+	amount string
+}
+
+// dispersed reads a payroll transaction and reports WHO it actually paid.
 //
-// Matched on the run id AND the token AND the total, all three. The run id
-// alone would accept a different currency's leg from the same run; the token
-// alone would accept somebody else's payroll of the same asset.
+// It used to return a bool, having checked only that a PayrollRun event carried
+// the right run id, token and total. The caller then marked EVERY pending item
+// in that currency as paid. Those two facts do not add up to each other: a
+// caller could disperse the correct total to a single address of their choosing
+// and every employee in the group would be recorded as paid, with
+// payroll.run.completed fired and nothing anywhere saying otherwise. The
+// contract emits one PayrollPaid per recipient precisely so this does not have
+// to be inferred.
+//
+// So it returns the per-recipient payments, and the caller matches each one to
+// a row. A row with no matching log stays pending.
+//
+// The payer is checked too. A merchant's payroll should be paid out of the
+// merchant's own treasury, and until now nothing said so — the run-level event
+// carries `payer` as msg.sender, which was read past.
 func (h *PayrollRuns) dispersed(
-	ctx context.Context, txHash, runID, currencyISO string, total *big.Int,
-) (bool, error) {
+	ctx context.Context, txHash, runID, currencyISO string, total *big.Int, settleAddress string,
+) ([]payment, error) {
 	info, ok := currency.ByISO(currencyISO)
 	if !ok {
-		return false, nil
+		return nil, nil
 	}
 	client, err := arcrpc.Get(ctx, h.ArcRPC)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 	callCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
 	receipt, err := client.TransactionReceipt(callCtx, common.HexToHash(txHash))
 	if err != nil {
-		return false, err
+		return nil, err
 	}
+	return payrollPayments(
+		receipt,
+		common.HexToAddress(h.PayrollContract),
+		crypto.Keccak256Hash([]byte(runID)),
+		common.HexToAddress(info.Token),
+		settleAddress,
+		total,
+	), nil
+}
+
+// payrollPayments reads who a payroll transaction ACTUALLY paid.
+//
+// Pure, so it can be tested against a hand-built receipt without an RPC. That
+// matters more than usual here: the bug this replaces was invisible precisely
+// because nothing could exercise the log-reading in isolation.
+//
+// Returns nil unless a matching run-level event is present AND the payer is the
+// account's own treasury. Otherwise it returns one entry per PayrollPaid log,
+// which is what the caller matches rows against.
+func payrollPayments(
+	receipt *types.Receipt,
+	contract common.Address,
+	wantRun common.Hash,
+	wantToken common.Address,
+	settleAddress string,
+	total *big.Int,
+) []payment {
 	// A reverted transaction paid nobody, whatever its logs say.
-	if receipt.Status != 1 {
-		return false, nil
+	if receipt == nil || receipt.Status != 1 {
+		return nil
 	}
 
-	wantRun := crypto.Keccak256Hash([]byte(runID))
-	wantToken := common.HexToAddress(info.Token)
-	contract := common.HexToAddress(h.PayrollContract)
+	wantPayer := common.HexToAddress(settleAddress)
+	var runSeen bool
 	for _, lg := range receipt.Logs {
 		if lg.Address != contract || len(lg.Topics) != 4 || lg.Topics[0] != payrollRunTopic {
 			continue
@@ -447,13 +594,43 @@ func (h *PayrollRuns) dispersed(
 		if common.BytesToAddress(lg.Topics[2].Bytes()) != wantToken {
 			continue
 		}
+		// The business's money, from the business's wallet. A payroll paid out
+		// of somebody else's balance is not this account's payroll, however
+		// correct the total looks.
+		if settleAddress != "" && common.BytesToAddress(lg.Topics[3].Bytes()) != wantPayer {
+			continue
+		}
 		// recipients, then total — two non-indexed words, in declaration order.
 		if len(lg.Data) < 64 {
 			continue
 		}
 		if new(big.Int).SetBytes(lg.Data[32:64]).Cmp(total) == 0 {
-			return true, nil
+			runSeen = true
+			break
 		}
 	}
-	return false, nil
+	if !runSeen {
+		return nil
+	}
+
+	var paid []payment
+	for _, lg := range receipt.Logs {
+		if lg.Address != contract || len(lg.Topics) != 4 || lg.Topics[0] != payrollPaidTopic {
+			continue
+		}
+		if lg.Topics[1] != wantRun {
+			continue
+		}
+		if common.BytesToAddress(lg.Topics[2].Bytes()) != wantToken {
+			continue
+		}
+		if len(lg.Data) < 32 {
+			continue
+		}
+		paid = append(paid, payment{
+			to:     strings.ToLower(common.BytesToAddress(lg.Topics[3].Bytes()).Hex()),
+			amount: new(big.Int).SetBytes(lg.Data[:32]).String(),
+		})
+	}
+	return paid
 }

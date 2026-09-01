@@ -84,3 +84,40 @@ contract ReentrantERC20 is ERC20 {
         }
     }
 }
+
+/// @dev A token that charges the SENDER on top of the amount sent, but only
+///      when the sender is a nominated address.
+///
+/// This is the outbound half of fee-on-transfer, and it is a different failure
+/// from the inbound half. On the way in, the contract receives less than it
+/// asked for and the existing before/after check catches it immediately. On the
+/// way out the contract is debited MORE than it pays, so it runs short as it
+/// works down the list.
+///
+/// Nominating the sender is what makes the two separable in a test: the pull
+/// from the payer is untaxed, so the run gets past the inbound check and fails
+/// the way a real out-fee token would.
+contract OutboundFeeERC20 is ERC20 {
+    address public taxed;
+    uint256 public immutable feePerTransfer;
+
+    constructor(uint256 feePerTransfer_) ERC20("OutFee", "OUT") {
+        feePerTransfer = feePerTransfer_;
+    }
+
+    function setTaxed(address who) external {
+        taxed = who;
+    }
+
+    function mint(address to, uint256 amount) external {
+        _mint(to, amount);
+    }
+
+    function _update(address from, address to, uint256 value) internal override {
+        super._update(from, to, value);
+        if (from == taxed && from != address(0) && feePerTransfer > 0) {
+            // Charged on top: the sender loses value + fee.
+            super._update(from, address(0xFEE), feePerTransfer);
+        }
+    }
+}

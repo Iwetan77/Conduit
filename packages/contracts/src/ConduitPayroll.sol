@@ -36,11 +36,31 @@ contract ConduitPayroll is ReentrancyGuard {
     /// several runs in a block it belongs to.
     event PayrollRun(bytes32 indexed runId, address indexed token, address indexed payer, uint256 recipients, uint256 total);
 
+    error TooManyRecipients();
     error LengthMismatch();
     error NoRecipients();
     error ZeroRecipient();
     error ZeroAmount();
     error FeeOnTransferUnsupported();
+
+    /// @notice The most people one run can pay.
+    ///
+    /// @dev Derived from Arc's block gas limit, not chosen for roundness. Arc
+    ///      reports 30,000,000 per block; the API costs a recipient at 35,000
+    ///      gas (`gasPerRecipient` in payroll_runs.go), which puts the
+    ///      theoretical ceiling at ~857. This is set to less than half of that.
+    ///
+    ///      The headroom is the point. 35,000 is an ESTIMATE, a run shares its
+    ///      block with other transactions, and the failure mode of getting this
+    ///      wrong is the expensive one: the loop is unbounded today, so a large
+    ///      roster exceeds the block limit and reverts AFTER the merchant has
+    ///      already signed and paid for the approve. A cap that refuses early
+    ///      costs a draft; a cap that refuses late costs a signature and a fee.
+    ///
+    ///      The API enforces the same number when building legs, so an
+    ///      over-large roster is refused at draft time rather than at signature
+    ///      time. If this changes, that must change with it.
+    uint256 public constant MAX_RECIPIENTS = 400;
 
     /// @notice Send `amounts[i]` of `token` to `to[i]`, for every i.
     /// @param runId Caller-supplied. Echoed in both events so a payroll run can
@@ -62,6 +82,7 @@ contract ConduitPayroll is ReentrancyGuard {
     ) external nonReentrant returns (uint256 total) {
         if (to.length != amounts.length) revert LengthMismatch();
         if (to.length == 0) revert NoRecipients();
+        if (to.length > MAX_RECIPIENTS) revert TooManyRecipients();
 
         for (uint256 i = 0; i < to.length; ++i) {
             if (to[i] == address(0)) revert ZeroRecipient();
@@ -88,6 +109,23 @@ contract ConduitPayroll is ReentrancyGuard {
             erc20.safeTransfer(to[i], amounts[i]);
             emit PayrollPaid(runId, token, to[i], amounts[i]);
         }
+
+        // Everything pulled was paid out.
+        //
+        // The check above catches a token that takes a fee on the way IN. One
+        // that takes a fee on the way OUT passes it and then leaves this
+        // contract short before the last recipient, so the run reverts with an
+        // opaque "transfer amount exceeds balance" that names neither the cause
+        // nor the token. This says which it is.
+        //
+        // Compared against `before`, NOT against zero. Zero would be the
+        // tighter-looking assertion and it would be a permanent griefing
+        // vector: anybody could send this contract one unit of a token and
+        // every payroll run in that token would revert forever, since a
+        // donation is not a balance this contract can spend or refuse. Ending
+        // where it started is the property that actually distinguishes a
+        // fee-on-transfer token, and it is immune to what strangers do.
+        if (erc20.balanceOf(address(this)) != before) revert FeeOnTransferUnsupported();
 
         emit PayrollRun(runId, token, msg.sender, to.length, total);
     }

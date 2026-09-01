@@ -376,7 +376,34 @@ async function loadWallet(token: string): Promise<{ wallet: CircleWallet; wallet
   for (;;) {
     const res = await api("/v1/auth/circle/wallets", { token });
     const list = (res.data ?? []) as CircleWallet[];
-    const found = list.find((w) => w.blockchain === blockchain) ?? list[0];
+    // The SIGN-IN wallet, chosen deterministically.
+    //
+    // This was `list.find(w => w.blockchain === blockchain)` -- the first Arc
+    // wallet Circle happened to return. That was correct while a user had
+    // exactly one, and became a coin flip the moment provisioning gave a
+    // business a second one: Circle's ordering is not a promise, so which
+    // wallet counted as "the one you signed in with" could differ between
+    // sessions.
+    //
+    // Everything downstream is keyed on that answer, so the damage was wide.
+    // The personal account is looked up by login_wallet, so a username claimed
+    // under one address stopped resolving when the other came back first --
+    // which is what "@ivan disappeared" was. /send shows the connected wallet,
+    // so a payer could be shown their business address. And provisioning
+    // compares against the login wallet to refuse binding it, a check that
+    // means nothing if the login wallet is whichever one it picked today.
+    //
+    // refId is what separates them: createSettlementWallet stamps the account
+    // id on the wallet it creates, and /user/initialize's wallet carries none.
+    // So the sign-in wallet is the Arc wallet WITHOUT a refId. Falling back to
+    // the old behaviour only when every candidate has one, which cannot happen
+    // for an account that ever signed in, but is better than returning nothing.
+    const arcWallets = list.filter((w) => w.blockchain === blockchain);
+    // Sorted, so that even the fallback is stable across sessions rather than
+    // dependent on the order a third party returned rows in.
+    const byID = (a: CircleWallet, b: CircleWallet) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+    const signIn = arcWallets.filter((w) => !w.refId).sort(byID);
+    const found = signIn[0] ?? arcWallets.slice().sort(byID)[0] ?? list[0];
     if (found?.address) return { wallet: found, wallets: list };
     if (Date.now() > deadline) {
       throw new Error(

@@ -214,8 +214,13 @@ func (p *StableFXProvider) PrepareWithSignature(ctx context.Context, q Quote, pa
 	// documented anywhere; found by testing.
 	contractTradeID := tradeEnv.Data.ContractTradeID
 	tradeID := tradeEnv.Data.ID
-	for i := 0; i < 20 && contractTradeID == ""; i++ {
-		time.Sleep(500 * time.Millisecond)
+	// Checked BEFORE sleeping. The old loop slept 500ms first, so a trade that
+	// already carried a contractTradeId -- which the create response sometimes
+	// returns outright -- still cost half a second to notice. See poll.go.
+	poll(ctx, time.Now().Add(10*time.Second), func() bool {
+		if contractTradeID != "" {
+			return true
+		}
 		var getEnv struct {
 			Data *struct {
 				ContractTradeID string `json:"contractTradeId"`
@@ -225,7 +230,8 @@ func (p *StableFXProvider) PrepareWithSignature(ctx context.Context, q Quote, pa
 		if _, err := p.get(ctx, "/v1/exchange/stablefx/trades/"+tradeID, &getEnv); err == nil && getEnv.Data != nil {
 			contractTradeID = getEnv.Data.ContractTradeID
 		}
-	}
+		return contractTradeID != ""
+	})
 	if contractTradeID == "" {
 		return Preparation{}, fmt.Errorf("stablefx trade %s never got a contractTradeId after polling", tradeID)
 	}
@@ -348,9 +354,18 @@ func (p *StableFXProvider) Submit(ctx context.Context, prep Preparation, funding
 	// a populated txHash is the real completion signal (that's the money the
 	// recipient actually received); a "failed" on either leg is reported
 	// immediately with StableFX's own errorDetails, not a generic timeout.
+	// Checked BEFORE sleeping, and on a ramp rather than a flat second.
+	//
+	// The old loop slept a full second at the top of every iteration, so the
+	// fastest this could ever report a settled trade was one second after it
+	// settled -- plus, on average, another half from the granularity. That is
+	// a guaranteed 1.5s on a path measured at 11.5s, spent asleep before
+	// anybody asked. Circle frequently has the answer immediately. See poll.go.
 	deadline := time.Now().Add(60 * time.Second)
-	for time.Now().Before(deadline) {
-		time.Sleep(1 * time.Second)
+	var settledTxHash string
+	var pollErr error
+
+	poll(ctx, deadline, func() bool {
 		var tradeEnv struct {
 			Data *struct {
 				Status               string `json:"status"`
@@ -371,24 +386,39 @@ func (p *StableFXProvider) Submit(ctx context.Context, prep Preparation, funding
 		var raw json.RawMessage
 		st, err := p.get(ctx, "/v1/exchange/stablefx/trades/"+prep.StableFXTradeID, &raw)
 		if err != nil || st != http.StatusOK || raw == nil {
-			continue
+			return false
 		}
 		if err := json.Unmarshal(raw, &tradeEnv); err != nil || tradeEnv.Data == nil {
-			continue
+			return false
 		}
 		ct := tradeEnv.Data.ContractTransactions
 		if ct.MakerDeliver.Status == "success" && ct.MakerDeliver.TxHash != "" {
-			return ct.MakerDeliver.TxHash, nil
+			settledTxHash = ct.MakerDeliver.TxHash
+			return true
 		}
+		// A failure is a RESULT, not a reason to keep waiting. Returning true
+		// stops the poll; pollErr carries StableFX's own words rather than a
+		// generic timeout sixty seconds later.
 		if ct.TakerDeliver.Status == "failed" {
-			return "", fmt.Errorf("stablefx trade %s: taker funding failed: %s", prep.StableFXTradeID, ct.TakerDeliver.ErrorDetails)
+			pollErr = fmt.Errorf("stablefx trade %s: taker funding failed: %s", prep.StableFXTradeID, ct.TakerDeliver.ErrorDetails)
+			return true
 		}
 		if ct.MakerDeliver.Status == "failed" {
-			return "", fmt.Errorf("stablefx trade %s: maker delivery failed: %s", prep.StableFXTradeID, ct.MakerDeliver.ErrorDetails)
+			pollErr = fmt.Errorf("stablefx trade %s: maker delivery failed: %s", prep.StableFXTradeID, ct.MakerDeliver.ErrorDetails)
+			return true
 		}
 		if tradeEnv.Data.Status == "failed" || tradeEnv.Data.Status == "breached" {
-			return "", fmt.Errorf("stablefx trade %s ended in status %s", prep.StableFXTradeID, tradeEnv.Data.Status)
+			pollErr = fmt.Errorf("stablefx trade %s ended in status %s", prep.StableFXTradeID, tradeEnv.Data.Status)
+			return true
 		}
+		return false
+	})
+
+	if pollErr != nil {
+		return "", pollErr
+	}
+	if settledTxHash != "" {
+		return settledTxHash, nil
 	}
 	return "", fmt.Errorf("stablefx trade %s did not settle within 60s", prep.StableFXTradeID)
 }

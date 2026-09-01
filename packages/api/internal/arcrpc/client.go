@@ -25,12 +25,48 @@ type entry struct {
 	once   sync.Once
 	client *ethclient.Client
 	err    error
+
+	// When this connection was last known good. Guarded by its own mutex
+	// rather than the package one, so a probe on one URL cannot block a
+	// lookup on another.
+	probeMu   sync.Mutex
+	lastProbe time.Time
+}
+
+// needsProbe reports whether this connection is stale enough to check, and
+// claims the check so concurrent callers do not all probe at once. A payment
+// makes many calls in a burst; without the claim they would each decide
+// independently that a probe was due.
+func (e *entry) needsProbe() bool {
+	e.probeMu.Lock()
+	defer e.probeMu.Unlock()
+	if time.Since(e.lastProbe) < probeInterval {
+		return false
+	}
+	// Claimed optimistically: if the probe then fails, the entry is discarded
+	// anyway, so a stale timestamp on a dead entry cannot mislead anyone.
+	e.lastProbe = time.Now()
+	return true
+}
+
+func (e *entry) markProbed() {
+	e.probeMu.Lock()
+	e.lastProbe = time.Now()
+	e.probeMu.Unlock()
 }
 
 var (
 	mu    sync.Mutex
 	pool  = map[string]*entry{}
 	probe = 3 * time.Second
+	// How stale a connection may be before it is worth checking.
+	//
+	// Long enough that the probe disappears from the cost of a payment -- a
+	// payment makes many calls in a few seconds and now probes at most once
+	// across all of them -- and short enough that a connection dropped by a
+	// restart or a load balancer is noticed within a few requests rather than
+	// lingering.
+	probeInterval = 30 * time.Second
 )
 
 // Get returns the shared client for `url`, dialling once and reusing it after.
@@ -49,6 +85,11 @@ func Get(ctx context.Context, url string) (*ethclient.Client, error) {
 
 	e.once.Do(func() {
 		e.client, e.err = ethclient.DialContext(ctx, url)
+		if e.err == nil {
+			// A successful dial IS a liveness check. Probing it again on the
+			// very next call would reintroduce the cost this removes.
+			e.lastProbe = time.Now()
+		}
 	})
 	if e.err != nil {
 		// A dial that failed once must not poison the URL forever -- the RPC may
@@ -61,32 +102,50 @@ func Get(ctx context.Context, url string) (*ethclient.Client, error) {
 	}
 
 	// A pooled connection can die without anyone noticing: the RPC restarts, a
-	// load balancer drops it, the network moves. Cheap liveness probe, so a dead
-	// connection is replaced here rather than surfacing as an inexplicable
-	// failure inside whatever call was about to be made.
-	pingCtx, cancel := context.WithTimeout(ctx, probe)
-	defer cancel()
-	if _, err := e.client.ChainID(pingCtx); err != nil {
-		// Only redial when the underlying connection is the problem, not when
-		// the CALLER's context has been cancelled -- a cancelled request is not
-		// evidence of anything about the connection.
-		if ctx.Err() != nil {
-			return nil, ctx.Err()
+	// load balancer drops it, the network moves. So it is probed -- but NOT on
+	// every call.
+	//
+	// It used to be. Every Get ran a ChainID round trip before handing back a
+	// client, which put a full RPC round trip in front of every balance read,
+	// every receipt fetch and every payroll verification. The Phase B0 trace
+	// measured Arc at ~242ms direct and ~850ms through this API, so that probe
+	// was paying up to a second, every time, to answer a question whose answer
+	// is almost always yes.
+	//
+	// The connection is either healthy or the real call will say so. Probing
+	// first pays the cost on every call to save it on the rare one, which is
+	// backwards. Now it is probed at most once per probeInterval per URL; in
+	// between, callers get the pooled client immediately and a genuinely dead
+	// connection surfaces on the real call, where the caller's own error
+	// handling already deals with it.
+	if e.needsProbe() {
+		pingCtx, cancel := context.WithTimeout(ctx, probe)
+		defer cancel()
+		if _, err := e.client.ChainID(pingCtx); err != nil {
+			// Only redial when the underlying connection is the problem, not
+			// when the CALLER's context has been cancelled -- a cancelled
+			// request is not evidence of anything about the connection.
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			log.Printf("arcrpc: pooled connection to %s failed liveness (%v), redialling", url, err)
+			mu.Lock()
+			delete(pool, url)
+			mu.Unlock()
+			fresh, derr := ethclient.DialContext(ctx, url)
+			if derr != nil {
+				return nil, derr
+			}
+			mu.Lock()
+			// Just dialled, so it is known good: start its clock now rather
+			// than letting the next caller probe a connection one line old.
+			ne := &entry{client: fresh, lastProbe: time.Now()}
+			ne.once.Do(func() {})
+			pool[url] = ne
+			mu.Unlock()
+			return fresh, nil
 		}
-		log.Printf("arcrpc: pooled connection to %s failed liveness (%v), redialling", url, err)
-		mu.Lock()
-		delete(pool, url)
-		mu.Unlock()
-		fresh, derr := ethclient.DialContext(ctx, url)
-		if derr != nil {
-			return nil, derr
-		}
-		mu.Lock()
-		ne := &entry{client: fresh}
-		ne.once.Do(func() {})
-		pool[url] = ne
-		mu.Unlock()
-		return fresh, nil
+		e.markProbed()
 	}
 	return e.client, nil
 }

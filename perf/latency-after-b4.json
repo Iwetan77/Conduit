@@ -1,0 +1,194 @@
+{
+  "prefix": "after-b4",
+  "medianOf": 7,
+  "sources": [
+    "perf/latency-after-b4-r1.json",
+    "perf/latency-after-b4-r2.json",
+    "perf/latency-after-b4-r3.json",
+    "perf/latency-after-b4-r4.json",
+    "perf/latency-after-b4-r5.json",
+    "perf/latency-after-b4-r6.json",
+    "perf/latency-after-b4-r7.json"
+  ],
+  "generatedAt": "2026-09-01T04:30:54.463Z",
+  "api": "https://conduit-z56x.onrender.com",
+  "rpc": "https://rpc.testnet.arc.network",
+  "router": "0x2Bd51BB0CA986703A4449796EdCeCAB81126899C",
+  "payer": "0x1f38f7A2e5Cb55d6AfbF44934BC62cF791015C99",
+  "spans": [
+    {
+      "name": "floor.healthz_median",
+      "ms": 215,
+      "runs": 7,
+      "samples": [
+        192,
+        199,
+        200,
+        215,
+        220,
+        224,
+        240
+      ],
+      "note": "API round-trip floor: /healthz does no work, so this is TLS + distance alone"
+    },
+    {
+      "name": "floor.arc_rpc_median",
+      "ms": 223,
+      "runs": 7,
+      "samples": [
+        212,
+        213,
+        214,
+        223,
+        225,
+        226,
+        227
+      ],
+      "note": "Arc RPC round-trip floor, measured directly rather than proxied"
+    },
+    {
+      "name": "setup.create_account",
+      "ms": 224,
+      "runs": 7,
+      "samples": [
+        210,
+        214,
+        220,
+        224,
+        226,
+        229,
+        249
+      ]
+    },
+    {
+      "name": "cross.permit2_allowance_read",
+      "ms": 233,
+      "runs": 7,
+      "samples": [
+        205,
+        228,
+        231,
+        233,
+        233,
+        238,
+        244
+      ]
+    },
+    {
+      "name": "cross.permit2_approve_skipped",
+      "ms": 0,
+      "runs": 7,
+      "samples": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "note": "already approved"
+    },
+    {
+      "name": "cross.create_intent",
+      "ms": 213,
+      "runs": 7,
+      "samples": [
+        193,
+        198,
+        213,
+        213,
+        219,
+        225,
+        255
+      ]
+    },
+    {
+      "name": "cross.post_quote",
+      "ms": 416,
+      "runs": 7,
+      "samples": [
+        382,
+        397,
+        405,
+        416,
+        429,
+        486,
+        570
+      ]
+    },
+    {
+      "name": "cross.balance_read",
+      "ms": 222,
+      "runs": 7,
+      "samples": [
+        197,
+        209,
+        219,
+        222,
+        223,
+        226,
+        236
+      ]
+    },
+    {
+      "name": "cross.sign_quote",
+      "ms": 15,
+      "runs": 7,
+      "samples": [
+        13,
+        14,
+        14,
+        15,
+        18,
+        19,
+        22
+      ],
+      "note": "key-signed; a human wallet prompt adds seconds on top"
+    },
+    {
+      "name": "cross.post_prepare",
+      "ms": 6792,
+      "runs": 7,
+      "samples": [
+        5165,
+        5991,
+        6298,
+        6792,
+        7232,
+        7942,
+        8147
+      ],
+      "note": "server-side: trade POST + contractTradeId poll + presign POST"
+    },
+    {
+      "name": "cross.sign_funding",
+      "ms": 4,
+      "runs": 7,
+      "samples": [
+        3,
+        4,
+        4,
+        4,
+        5,
+        5,
+        7
+      ]
+    },
+    {
+      "name": "cross.post_confirm",
+      "ms": 1262,
+      "runs": 7,
+      "samples": [
+        513,
+        710,
+        826,
+        1262,
+        1450,
+        1650,
+        1916
+      ],
+      "note": "browser-visible wait: fund POST + status polling + makerDeliver"
+    }
+  ]
+}

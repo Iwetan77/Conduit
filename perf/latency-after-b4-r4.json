@@ -1,0 +1,89 @@
+{
+  "prefix": "after-b4-r4",
+  "startedAt": "2026-09-01T04:29:02.081Z",
+  "finishedAt": "2026-09-01T04:29:13.679Z",
+  "api": "https://conduit-z56x.onrender.com",
+  "rpc": "https://rpc.testnet.arc.network",
+  "router": "0x2Bd51BB0CA986703A4449796EdCeCAB81126899C",
+  "payer": "0x1f38f7A2e5Cb55d6AfbF44934BC62cF791015C99",
+  "cold": false,
+  "spans": [
+    {
+      "name": "floor.healthz_median",
+      "ms": 240,
+      "samples": [
+        202,
+        208,
+        240,
+        603,
+        654
+      ],
+      "note": "API round-trip floor: /healthz does no work, so this is TLS + distance alone"
+    },
+    {
+      "name": "floor.arc_rpc_median",
+      "ms": 212,
+      "samples": [
+        200,
+        200,
+        212,
+        217,
+        546
+      ],
+      "note": "Arc RPC round-trip floor, measured directly rather than proxied"
+    },
+    {
+      "name": "setup.create_account",
+      "ms": 220,
+      "startedAt": "2026-09-01T04:29:05.366Z"
+    },
+    {
+      "name": "cross.permit2_allowance_read",
+      "ms": 205,
+      "startedAt": "2026-09-01T04:29:05.592Z"
+    },
+    {
+      "name": "cross.permit2_approve_skipped",
+      "ms": 0,
+      "note": "already approved"
+    },
+    {
+      "name": "cross.create_intent",
+      "ms": 213,
+      "startedAt": "2026-09-01T04:29:05.797Z"
+    },
+    {
+      "name": "cross.post_quote",
+      "ms": 397,
+      "startedAt": "2026-09-01T04:29:06.010Z"
+    },
+    {
+      "name": "cross.balance_read",
+      "ms": 236,
+      "startedAt": "2026-09-01T04:29:06.407Z"
+    },
+    {
+      "name": "cross.sign_quote",
+      "ms": 22,
+      "startedAt": "2026-09-01T04:29:06.643Z",
+      "note": "key-signed; a human wallet prompt adds seconds on top"
+    },
+    {
+      "name": "cross.post_prepare",
+      "ms": 6298,
+      "startedAt": "2026-09-01T04:29:06.666Z",
+      "note": "server-side: trade POST + contractTradeId poll + presign POST"
+    },
+    {
+      "name": "cross.sign_funding",
+      "ms": 5,
+      "startedAt": "2026-09-01T04:29:12.964Z"
+    },
+    {
+      "name": "cross.post_confirm",
+      "ms": 710,
+      "startedAt": "2026-09-01T04:29:12.970Z",
+      "note": "browser-visible wait: fund POST + status polling + makerDeliver"
+    }
+  ]
+}

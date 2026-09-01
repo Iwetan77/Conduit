@@ -1,0 +1,68 @@
+{
+  "prefix": "after-b4-probe",
+  "startedAt": "2026-09-01T04:27:33.502Z",
+  "finishedAt": "2026-09-01T04:27:38.507Z",
+  "api": "https://conduit-z56x.onrender.com",
+  "rpc": "https://rpc.testnet.arc.network",
+  "router": "0x2Bd51BB0CA986703A4449796EdCeCAB81126899C",
+  "payer": "0x1f38f7A2e5Cb55d6AfbF44934BC62cF791015C99",
+  "cold": false,
+  "spans": [
+    {
+      "name": "floor.healthz_median",
+      "ms": 205,
+      "samples": [
+        182,
+        198,
+        205,
+        579,
+        666
+      ],
+      "note": "API round-trip floor: /healthz does no work, so this is TLS + distance alone"
+    },
+    {
+      "name": "floor.arc_rpc_median",
+      "ms": 235,
+      "samples": [
+        205,
+        235,
+        235,
+        278,
+        769
+      ],
+      "note": "Arc RPC round-trip floor, measured directly rather than proxied"
+    },
+    {
+      "name": "setup.create_account",
+      "ms": 211,
+      "startedAt": "2026-09-01T04:27:37.058Z"
+    },
+    {
+      "name": "cross.permit2_allowance_read",
+      "ms": 227,
+      "startedAt": "2026-09-01T04:27:37.274Z"
+    },
+    {
+      "name": "cross.permit2_approve_skipped",
+      "ms": 0,
+      "note": "already approved"
+    },
+    {
+      "name": "cross.create_intent",
+      "ms": 207,
+      "startedAt": "2026-09-01T04:27:37.501Z"
+    },
+    {
+      "name": "cross.post_quote",
+      "ms": 800,
+      "startedAt": "2026-09-01T04:27:37.707Z",
+      "failed": true,
+      "error": "/v1/settlement_intents/si_vv7lssmjzneg7ykd2bqd/quote: non-JSON (502) <!DOCTYPE html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\">\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n    <title>502</title>\n    <style>@font-face {\n  font-fami"
+    },
+    {
+      "name": "cross.aborted",
+      "ms": 0,
+      "error": "/v1/settlement_intents/si_vv7lssmjzneg7ykd2bqd/quote: non-JSON (502) <!DOCTYPE html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\">\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n    <title>502</title>\n    <style>@font-face {\n  font-fami"
+    }
+  ]
+}

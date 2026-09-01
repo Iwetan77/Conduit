@@ -336,3 +336,70 @@ Two things stand out as cheap and not yet in any phase:
 Neither is in the work order. Both are larger wins than the region change B1
 proposes, and they are recorded here rather than acted on because Track B has an
 order and B4 is next.
+
+---
+
+# Phase B4 — measured, including the part that got worse
+
+    node scripts/latency-compare.mjs perf/latency-before.json perf/latency-after-b4.json
+
+| Span | Before | After | |
+|---|---:|---:|---|
+| `cross.post_confirm` | 5399ms | **1262ms** | **−77%** |
+| `cross.post_prepare` | 4547ms | 6792ms | **+49%** |
+| `cross.post_quote` | 505ms | 416ms | −18% |
+| **cross total** | **11108ms** | **9157ms** | −18% |
+
+Median of seven runs against the deployed API.
+
+## The win
+
+`confirm` is the last thing a payer waits through — after both signatures, with
+nothing left to do but watch. It used to hold the browser's socket while the API
+polled Circle's relayer through three Arc transactions. It now returns as soon
+as Circle accepts the funding, and the browser polls for the outcome.
+
+**5.4s → 1.3s, and the samples go as low as 513ms.** That is the difference
+between a payer watching a spinner and a payer seeing a result.
+
+It also fixed a correctness bug: the poll deadline was 60s against a server
+`WriteTimeout` of 30s, so a payment settling at 35 seconds was reported as a
+network failure while the money had already moved, leaving `fx_trades` at
+`submitted` with nothing to resolve it. There is a reconciler for that now.
+
+## The regression, stated plainly
+
+`post_prepare` went from a 4547ms median to 6792ms. **I cannot attribute it, and
+I am not claiming B4 improved it.**
+
+`latency-compare` reports it as "(within noise)" and that verdict is technically
+correct — the ranges overlap, baseline `[4206, 4547, 6340]` against after
+`[5165, 5991, 6298, 6792, 7232, 7942, 8147]`. But a median moving 2.2 seconds in
+one direction is not something to wave through on a technicality, and the after
+samples are clearly clustered higher.
+
+Three candidates, in order of likelihood:
+
+1. **Circle sandbox variance.** The baseline itself ranged 4206-6340ms, and
+   `prepare` is dominated by waiting for Circle's relayer to produce a
+   `contractTradeId` — an on-chain `recordTrade` that Conduit does not control.
+2. **The instance was restarting.** The first sample (8147ms) came immediately
+   after Render redeployed, and the series trends downward: 8147, 6792, 7942,
+   6298, 5991, 7232, 5165.
+3. **The new poll shape.** It checks at t=0 rather than sleeping first, so it
+   makes more requests earlier. That should find an answer sooner, not later —
+   but it has not been ruled out.
+
+**What would settle it:** instrument inside `PrepareWithSignature` to record the
+trade-creation POST, the `contractTradeId` poll count and duration, and the
+presign POST separately. Phase B0 asked for exactly that split and this trace
+does not have it — the span is measured from the browser, so it cannot see
+inside. That is the next measurement, not the next optimisation.
+
+## What the payer actually feels
+
+Net cross-stable is 11.1s → 9.2s, but the shape matters more than the total.
+The 4-second improvement landed on the LAST wait, when the payer has finished
+signing and is doing nothing but waiting. The 2-second regression landed
+between the two signatures, where the payer is already being asked to act.
+Neither is a rounding error, and only one of them is understood.

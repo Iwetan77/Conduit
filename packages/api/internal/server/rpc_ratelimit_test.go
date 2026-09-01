@@ -157,3 +157,38 @@ func TestRPCIsNotBehindThePublicLimiter(t *testing.T) {
 		)
 	}
 }
+
+// A comma-separated CONDUIT_ROUTER_ADDRESS must not reach the indexer.
+//
+// The list exists so the approve guard tolerates a browser that has not rebuilt
+// yet. Everything else means ONE contract: the indexer watches its events and
+// RecordDirectSettlement requires settlements to have come from it. Handed
+// "addr1,addr2" either would match nothing, and match-nothing is a silent
+// failure — settlements simply stop being recorded, with no error anywhere.
+func TestOnlyThePrimaryRouterReachesTheIndexer(t *testing.T) {
+	const current = "0x2Bd51BB0CA986703A4449796EdCeCAB81126899C"
+	const previous = "0x80f996e86C003AF309635B67A53dC6e63e623318"
+
+	t.Setenv("CONDUIT_ROUTER_ADDRESS", current+","+previous)
+	if got := PrimaryRouterAddress(); got != current {
+		t.Errorf("primary router = %q, want %q", got, current)
+	}
+
+	// Spaces are how a human writes a list.
+	t.Setenv("CONDUIT_ROUTER_ADDRESS", " "+current+" , "+previous+" ")
+	if got := PrimaryRouterAddress(); got != current {
+		t.Errorf("primary router = %q, want %q", got, current)
+	}
+
+	// The single-address case, which is every deployment not mid-migration.
+	t.Setenv("CONDUIT_ROUTER_ADDRESS", current)
+	if got := PrimaryRouterAddress(); got != current {
+		t.Errorf("primary router = %q, want %q", got, current)
+	}
+
+	// Unset stays empty, which callers already treat as "indexer off".
+	t.Setenv("CONDUIT_ROUTER_ADDRESS", "")
+	if got := PrimaryRouterAddress(); got != "" {
+		t.Errorf("primary router = %q, want empty", got)
+	}
+}

@@ -56,8 +56,22 @@ services:
       # transfers now (Phase A2), so a forged event would be dropped rather than
       # believed -- but pointing at that contract would be reintroducing the
       # thing this work removed.
+      # Comma-separated, current router FIRST.
+      #
+      # The indexer watches the first entry; the approve guard accepts any of
+      # them. Both are needed during a migration, because a redeploy is not
+      # atomic: this service learns the new address on its deploy and the
+      # browser learns it on its next BUILD. In the window between, the browser
+      # asks to approve the router it still knows about, and a guard that only
+      # knew the new one refused it as a stranger -- which failed every payment
+      # until the frontend caught up.
+      #
+      # 0x80f9... is abandoned and must never be first. It still carries
+      # executeWithFX; it is listed only so an allowance granted to it by a
+      # not-yet-rebuilt frontend is not treated as an attack. Remove it once
+      # every client is confirmed on the new address.
       - key: CONDUIT_ROUTER_ADDRESS
-        value: "0x2Bd51BB0CA986703A4449796EdCeCAB81126899C"
+        value: "0x2Bd51BB0CA986703A4449796EdCeCAB81126899C,0x80f996e86C003AF309635B67A53dC6e63e623318"
 
       # The batch payroll contract. Also a public address, and also pinned
       # here rather than left to the dashboard -- it was left to the dashboard,

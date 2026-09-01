@@ -14,7 +14,12 @@ import (
 func TestApprovalsAreOnlyBuiltForConduitContracts(t *testing.T) {
 	const router = "0x80f996e86C003AF309635B67A53dC6e63e623318"
 	const payroll = "0xcC4b99a2B74DA98695d4136FB7F20988621BeB11"
-	os.Setenv("CONDUIT_ROUTER_ADDRESS", router)
+	// Comma-separated: the current router AND the one it replaced. A redeploy
+	// is not atomic -- the API learns the new address on its deploy, the
+	// browser on its next build -- and in between the browser asks to approve
+	// the router it still knows about.
+	const oldRouter = "0x80f996e86C003AF309635B67A53dC6e63e623318"
+	os.Setenv("CONDUIT_ROUTER_ADDRESS", router+","+oldRouter)
 	os.Setenv("CONDUIT_PAYROLL_ADDRESS", payroll)
 
 	approve := func(spender string) string {
@@ -35,6 +40,12 @@ func TestApprovalsAreOnlyBuiltForConduitContracts(t *testing.T) {
 
 	for _, ok := range []struct{ name, spender string }{
 		{"our router", router},
+		// The router we just replaced. Refusing this is what broke every
+		// payment during the migration window: the browser was still on the
+		// old address, and the guard called our own contract a stranger. An
+		// allowance to it is spendable only by the person who granted it --
+		// execute requires msg.sender to be the payer.
+		{"the router we replaced", oldRouter},
 		// Was missing, and every payroll run failed at its approve with
 		// "approvals are only built for Conduit's own contracts" -- a refusal
 		// that was correct about the list and wrong about the contract.

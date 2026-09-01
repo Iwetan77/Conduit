@@ -234,25 +234,50 @@ func (h *SettlementIntents) CreateDirect(w http.ResponseWriter, r *http.Request)
 	}
 	req.SettleCurrency = settleInfo.ISO
 
-	if e := rejectSuppliedSettleAddress(req.SuppliedSettleAddress); e != nil {
-		writeErr(w, e)
-		return
-	}
-
 	ctx := r.Context()
 	accountID, err := h.personalAccountForWallet(ctx, req.PayerWallet, req.SettleCurrency)
 	if err != nil {
 		writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
 		return
 	}
-	// The payer's own account, which settles to the wallet that signed in --
-	// derived here for the same reason as everywhere else, even though on this
-	// path it can only ever be the payer's own address. One rule, no exception
-	// to remember.
-	settleAddress, e := deriveSettleAddress(ctx, h.Pool, accountID)
-	if e != nil {
-		writeErr(w, e)
-		return
+
+	// On THIS route, settle_address is the RECIPIENT -- and that is the whole
+	// difference between this and every other intent route.
+	//
+	// Everywhere else an intent is a merchant asking to be paid, so the address
+	// is theirs and deriving it from the account is right: it stops an
+	// integration pointing its own income somewhere it did not mean to. Here a
+	// payer is sending money to SOMEBODY ELSE, and the destination is the one
+	// thing only the caller can know.
+	//
+	// rejectSuppliedSettleAddress was applied to this route along with the
+	// others, and it made every cross-currency direct send fail with 400. The
+	// tempting fix -- drop the field on the client -- is far worse than the
+	// bug: deriveSettleAddress returns the PAYER's own address here (its old
+	// comment said so outright), so the payment would settle back to the person
+	// sending it, silently, with a 201 and a receipt. An error that stops a
+	// payment beats a success that misroutes one.
+	settleAddress := ""
+	if req.SuppliedSettleAddress != nil {
+		settleAddress = strings.TrimSpace(*req.SuppliedSettleAddress)
+	}
+	if settleAddress != "" {
+		// Checked, because it decides where money goes and nothing downstream
+		// can tell a typo from an address.
+		if !common.IsHexAddress(settleAddress) {
+			writeErr(w, apierrors.E(apierrors.CodeInvalidRequest, "settle_address"))
+			return
+		}
+		settleAddress = common.HexToAddress(settleAddress).Hex()
+	} else {
+		// Absent means "pay me" -- a payer converting their own funds, which is
+		// what the payroll conversion leg does. Derived, as everywhere else.
+		var e *apierrors.APIError
+		settleAddress, e = deriveSettleAddress(ctx, h.Pool, accountID)
+		if e != nil {
+			writeErr(w, e)
+			return
+		}
 	}
 
 	expiresIn := req.ExpiresIn

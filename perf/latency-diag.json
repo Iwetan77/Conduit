@@ -1,0 +1,79 @@
+{
+  "prefix": "diag",
+  "startedAt": "2026-09-01T11:38:16.306Z",
+  "finishedAt": "2026-09-01T11:38:24.554Z",
+  "api": "https://conduit-z56x.onrender.com",
+  "rpc": "https://rpc.testnet.arc.network",
+  "router": "0x2Bd51BB0CA986703A4449796EdCeCAB81126899C",
+  "payer": "0x1f38f7A2e5Cb55d6AfbF44934BC62cF791015C99",
+  "cold": false,
+  "spans": [
+    {
+      "name": "floor.healthz_median",
+      "ms": 251,
+      "samples": [
+        207,
+        220,
+        251,
+        679,
+        1074
+      ],
+      "note": "API round-trip floor: /healthz does no work, so this is TLS + distance alone"
+    },
+    {
+      "name": "floor.arc_rpc_median",
+      "ms": 230,
+      "samples": [
+        222,
+        226,
+        230,
+        260,
+        791
+      ],
+      "note": "Arc RPC round-trip floor, measured directly rather than proxied"
+    },
+    {
+      "name": "setup.create_account",
+      "ms": 491,
+      "startedAt": "2026-09-01T11:38:20.484Z"
+    },
+    {
+      "name": "same.create_intent",
+      "ms": 324,
+      "startedAt": "2026-09-01T11:38:20.977Z"
+    },
+    {
+      "name": "same.get_signer",
+      "ms": 0,
+      "startedAt": "2026-09-01T11:38:21.301Z"
+    },
+    {
+      "name": "same.allowance_read",
+      "ms": 244,
+      "startedAt": "2026-09-01T11:38:21.369Z"
+    },
+    {
+      "name": "same.approve_broadcast",
+      "ms": 1108,
+      "startedAt": "2026-09-01T11:38:21.613Z"
+    },
+    {
+      "name": "same.approve_receipt",
+      "ms": 1386,
+      "startedAt": "2026-09-01T11:38:22.721Z",
+      "note": "ethers polls at its 4000ms default; Phase B2 is about this number"
+    },
+    {
+      "name": "same.execute_broadcast",
+      "ms": 441,
+      "startedAt": "2026-09-01T11:38:24.112Z",
+      "failed": true,
+      "error": "execution reverted: \"ERC20: transfer amount exceeds balance\" (action=\"estimateGas\", data=\"0x08c379a00000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000002645524332303a207472616e7366657220616d6f756e7420657863656564732062616c616e"
+    },
+    {
+      "name": "same.aborted",
+      "ms": 0,
+      "error": "execution reverted: \"ERC20: transfer amount exceeds balance\" (action=\"estimateGas\", data=\"0x08c379a00000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000002645524332303a207472616e7366657220616d6f756e7420657863656564732062616c616e"
+    }
+  ]
+}

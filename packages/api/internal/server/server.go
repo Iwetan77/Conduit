@@ -134,7 +134,7 @@ func New(cfg Config) http.Handler {
 	// environment here for the same reason StartBackgroundWorkers does: it is
 	// deployment configuration, and the indexer and the record route must agree
 	// on which router is ours.
-	routerAddr := strings.TrimSpace(os.Getenv("CONDUIT_ROUTER_ADDRESS"))
+	routerAddr := PrimaryRouterAddress()
 	// Unset, this does not degrade one feature -- it breaks paying and
 	// recording, and it does both silently.
 	//
@@ -810,4 +810,21 @@ func StartBackgroundWorkers(ctx context.Context, pool *pgxpool.Pool, arcRPC, rou
 			log.Printf("indexer: Run exited: %v", err)
 		}
 	}()
+}
+
+// primaryRouterAddress is the router this deployment settles through NOW.
+//
+// CONDUIT_ROUTER_ADDRESS may list several, comma-separated, current one first.
+// Only the approve guard wants the whole list -- it has to tolerate a browser
+// that has not rebuilt yet still asking to approve the router it knows about.
+// Everything else here means one specific contract: the indexer watches its
+// events, and RecordDirectSettlement requires a settlement to have come from
+// it. Handing either a comma-joined string would make it match nothing, which
+// is a silent failure rather than a loud one.
+func PrimaryRouterAddress() string {
+	raw := os.Getenv("CONDUIT_ROUTER_ADDRESS")
+	if i := strings.IndexByte(raw, ','); i >= 0 {
+		raw = raw[:i]
+	}
+	return strings.TrimSpace(raw)
 }

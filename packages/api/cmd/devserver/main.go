@@ -89,7 +89,7 @@ func main() {
 
 	handler := server.New(cfg)
 
-	server.StartBackgroundWorkers(ctx, pool, cfg.ArcRPC, os.Getenv("CONDUIT_ROUTER_ADDRESS"), cfg)
+	server.StartBackgroundWorkers(ctx, pool, cfg.ArcRPC, server.PrimaryRouterAddress(), cfg)
 
 	addr := ":" + envOr("PORT", "8080")
 	srv := &http.Server{Addr: addr, Handler: handler, ReadHeaderTimeout: 5 * time.Second}

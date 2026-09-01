@@ -49,7 +49,7 @@ func main() {
 	}
 	handler := server.New(cfg)
 
-	server.StartBackgroundWorkers(ctx, pool, cfg.ArcRPC, os.Getenv("CONDUIT_ROUTER_ADDRESS"), cfg)
+	server.StartBackgroundWorkers(ctx, pool, cfg.ArcRPC, server.PrimaryRouterAddress(), cfg)
 
 	log.Printf("conduit-api listening on :%s", addr)
 	// Only ReadHeaderTimeout was set, which bounds the headers and nothing else.

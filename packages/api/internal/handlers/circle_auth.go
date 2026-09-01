@@ -81,7 +81,6 @@ func approvalSpender(data string) (string, bool) {
 // mixed-case checksummed forms.
 func allowedApprovalSpender(spender string) bool {
 	allowed := []string{
-		strings.ToLower(strings.TrimSpace(os.Getenv("CONDUIT_ROUTER_ADDRESS"))),
 		// ConduitPayroll. Read from the environment, exactly like the router
 		// and from the same variable the payroll handler hands the browser as
 		// its `spender` -- so the address this guard permits and the address
@@ -98,6 +97,32 @@ func allowedApprovalSpender(spender string) bool {
 		"0x0022222abe238cc2c7bb1f21003f0a260052475b", // Circle Gateway Minter
 		"0x867650f5eae8df91445971f14d89fd84f0c9a9f8", // Circle StableFX FxEscrow
 	}
+	// Every router this deployment has ever had, not just the current one.
+	//
+	// CONDUIT_ROUTER_ADDRESS accepts a comma-separated list, and this is why.
+	// A router redeploy is not atomic: the API picks up the new address on its
+	// next deploy, the browser picks it up on ITS next build, and in between
+	// the browser asks for an approval to the router it still knows about. The
+	// guard then refuses -- "approvals are only built for Conduit's own
+	// contracts" -- over an approval to a contract that IS ours. Every payment
+	// fails for the length of that window, which is exactly what happened.
+	//
+	// Accepting an old router is safe. An ERC-20 allowance to it can only be
+	// spent BY it, `execute` requires msg.sender to be the payer, and the
+	// cross-currency entry point takes Permit2 signatures rather than
+	// allowances. A stale approval to an abandoned Conduit router is spendable
+	// only by the person who granted it.
+	//
+	// What this must never become is a wildcard. The list is explicit, it comes
+	// from configuration rather than from the request, and the whole point of
+	// the guard -- refusing approve(attacker, max) inside a prompt that looks
+	// like ours -- is untouched.
+	for _, raw := range strings.Split(os.Getenv("CONDUIT_ROUTER_ADDRESS"), ",") {
+		if v := strings.ToLower(strings.TrimSpace(raw)); v != "" {
+			allowed = append(allowed, v)
+		}
+	}
+
 	s := strings.ToLower(strings.TrimSpace(spender))
 	for _, a := range allowed {
 		if a != "" && a == s {

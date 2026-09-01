@@ -1,0 +1,164 @@
+{
+  "prefix": "verify",
+  "startedAt": "2026-09-01T11:49:51.605Z",
+  "finishedAt": "2026-09-01T11:50:17.512Z",
+  "api": "https://conduit-z56x.onrender.com",
+  "rpc": "https://rpc.testnet.arc.network",
+  "router": "0x2Bd51BB0CA986703A4449796EdCeCAB81126899C",
+  "payer": "0x1f38f7A2e5Cb55d6AfbF44934BC62cF791015C99",
+  "cold": false,
+  "spans": [
+    {
+      "name": "floor.healthz_median",
+      "ms": 231,
+      "samples": [
+        204,
+        224,
+        231,
+        543,
+        992
+      ],
+      "note": "API round-trip floor: /healthz does no work, so this is TLS + distance alone"
+    },
+    {
+      "name": "floor.arc_rpc_median",
+      "ms": 222,
+      "samples": [
+        206,
+        215,
+        222,
+        235,
+        664
+      ],
+      "note": "Arc RPC round-trip floor, measured directly rather than proxied"
+    },
+    {
+      "name": "setup.create_account",
+      "ms": 431,
+      "startedAt": "2026-09-01T11:49:55.358Z"
+    },
+    {
+      "name": "same.create_intent",
+      "ms": 377,
+      "startedAt": "2026-09-01T11:49:55.791Z"
+    },
+    {
+      "name": "same.get_signer",
+      "ms": 0,
+      "startedAt": "2026-09-01T11:49:56.168Z"
+    },
+    {
+      "name": "same.allowance_read",
+      "ms": 322,
+      "startedAt": "2026-09-01T11:49:56.201Z"
+    },
+    {
+      "name": "same.approve_skipped",
+      "ms": 0,
+      "note": "allowance already sufficient"
+    },
+    {
+      "name": "same.execute_broadcast",
+      "ms": 1175,
+      "startedAt": "2026-09-01T11:49:56.526Z"
+    },
+    {
+      "name": "same.execute_receipt",
+      "ms": 1580,
+      "startedAt": "2026-09-01T11:49:57.701Z"
+    },
+    {
+      "name": "same.post_record",
+      "ms": 342,
+      "startedAt": "2026-09-01T11:49:59.282Z"
+    },
+    {
+      "name": "cross.permit2_allowance_read",
+      "ms": 265,
+      "startedAt": "2026-09-01T11:49:59.628Z"
+    },
+    {
+      "name": "cross.permit2_approve_skipped",
+      "ms": 0,
+      "note": "already approved"
+    },
+    {
+      "name": "cross.create_intent",
+      "ms": 232,
+      "startedAt": "2026-09-01T11:49:59.893Z"
+    },
+    {
+      "name": "cross.post_quote",
+      "ms": 1301,
+      "startedAt": "2026-09-01T11:50:00.125Z"
+    },
+    {
+      "name": "cross.balance_read",
+      "ms": 662,
+      "startedAt": "2026-09-01T11:50:01.427Z"
+    },
+    {
+      "name": "cross.sign_quote",
+      "ms": 18,
+      "startedAt": "2026-09-01T11:50:02.089Z",
+      "note": "key-signed; a human wallet prompt adds seconds on top"
+    },
+    {
+      "name": "cross.post_prepare",
+      "ms": 5387,
+      "startedAt": "2026-09-01T11:50:02.106Z",
+      "note": "server-side: trade POST + contractTradeId poll + presign POST"
+    },
+    {
+      "name": "cross.sign_funding",
+      "ms": 15,
+      "startedAt": "2026-09-01T11:50:07.494Z"
+    },
+    {
+      "name": "cross.post_confirm",
+      "ms": 1007,
+      "startedAt": "2026-09-01T11:50:07.509Z",
+      "note": "browser-visible wait: fund POST + status polling + makerDeliver"
+    },
+    {
+      "name": "payroll.add_employee",
+      "ms": 458,
+      "startedAt": "2026-09-01T11:50:08.518Z"
+    },
+    {
+      "name": "payroll.create_run",
+      "ms": 326,
+      "startedAt": "2026-09-01T11:50:08.976Z"
+    },
+    {
+      "name": "payroll.post_execute",
+      "ms": 281,
+      "startedAt": "2026-09-01T11:50:09.302Z"
+    },
+    {
+      "name": "payroll.approve_broadcast",
+      "ms": 1460,
+      "startedAt": "2026-09-01T11:50:09.588Z"
+    },
+    {
+      "name": "payroll.approve_receipt",
+      "ms": 2323,
+      "startedAt": "2026-09-01T11:50:11.048Z"
+    },
+    {
+      "name": "payroll.disperse_broadcast",
+      "ms": 1959,
+      "startedAt": "2026-09-01T11:50:13.372Z"
+    },
+    {
+      "name": "payroll.disperse_receipt",
+      "ms": 1492,
+      "startedAt": "2026-09-01T11:50:15.332Z"
+    },
+    {
+      "name": "payroll.post_legs",
+      "ms": 687,
+      "startedAt": "2026-09-01T11:50:16.824Z"
+    }
+  ]
+}

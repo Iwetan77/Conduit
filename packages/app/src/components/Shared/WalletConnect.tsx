@@ -194,7 +194,7 @@ function ConnectedChip({
   const { identity } = usePayerIdentity();
   // The name this person is paid under, when they have claimed one. Falls back
   // to the shortened address, which is all there ever was before.
-  const { username, eligible: eligibleForUsername } = useUsername();
+  const { username, loading: usernameLoading, eligible: eligibleForUsername } = useUsername();
   const usdc = usePayerUsdc({
     address: identity?.address,
     family: identity?.kind,
@@ -215,9 +215,28 @@ function ConnectedChip({
             address beside it already said, restated as an animation that never
             stopped. The mark now carries the person's initials once they have a
             username, and the chip shows the NAME rather than hex. */}
-        <UserMark username={username} size={compact ? "sm" : "md"} />
+        <UserMark username={usernameLoading ? null : username} size={compact ? "sm" : "md"} />
         <span className={`${compact ? "text-scale-1" : "text-scale-2"} font-mono text-ink`}>
-          {username || shortenAddress(address, compact ? 3 : 4)}
+          {/* The address is not a placeholder for a name.
+              This was `username || shortenAddress(address)`, which renders hex
+              the instant an address exists and swaps to the name when the
+              lookup lands a moment later -- so every sign-in flashed a wallet
+              address at somebody who has a username. The hook already reports
+              `loading`; nothing was reading it.
+
+              A reserved bar rather than the address, because the two have
+              different widths and swapping one for the other moves the whole
+              pill. Only while the answer is genuinely unknown: somebody with
+              no username still sees their address, which is the honest label
+              for them. */}
+          {usernameLoading ? (
+            <span
+              className="inline-block h-3 w-20 bg-border align-middle animate-pulse"
+              aria-label="Loading your name"
+            />
+          ) : (
+            username || shortenAddress(address, compact ? 3 : 4)
+          )}
         </span>
       </button>
 

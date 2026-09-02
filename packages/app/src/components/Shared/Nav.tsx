@@ -77,7 +77,10 @@ function WalletMenu({ address }: { address: `0x${string}` }) {
   const crossChain = usePayerUsdc({ address, family: "evm", enabled: open });
   // Not gated on `open`: the chip shows the name whether or not the menu has
   // ever been opened, which is the whole point of it being on the chip.
-  const { username } = useUsername();
+  // loading matters here for the same reason it does in the pill: rendering an
+  // address while the name is still being fetched shows somebody hex they have
+  // already replaced. See WalletConnect.
+  const { username, loading: usernameLoading } = useUsername();
   const spendable = spendableUsdc(balances.USDC ?? 0n, crossChain);
 
   const held = TOKEN_LIST.map((currency) => ({ currency, raw: balances[currency] })).filter(
@@ -119,9 +122,19 @@ function WalletMenu({ address }: { address: `0x${string}` }) {
             NOTE: WalletConnect has its own ConnectedChip that looks almost
             identical. This is the one the nav actually renders. Two chips for
             one job is why a fix to the other one changed nothing here. */}
-        <UserMark username={username} />
+        <UserMark username={usernameLoading ? null : username} />
         <span className="text-scale-2 font-mono text-ink">
-          {username || shortenAddress(address)}
+          {/* Not the address while the name is still loading. See the same
+              change in WalletConnect: `username || address` renders hex first
+              and swaps a moment later, which is the flash on every sign-in. */}
+          {usernameLoading ? (
+            <span
+              className="inline-block h-3 w-20 bg-border align-middle animate-pulse"
+              aria-label="Loading your name"
+            />
+          ) : (
+            username || shortenAddress(address)
+          )}
         </span>
         <svg
           className={`w-3 h-3 text-ink-dim transition-transform ${open ? "rotate-180" : ""}`}

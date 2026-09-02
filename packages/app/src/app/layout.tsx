@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { ChunkReloader } from "@/components/Shared/ChunkReloader";
 // Self-hosted fonts (no render-blocking fonts.googleapis.com round-trips,
 // no build-time Google Fonts fetch that fails offline).
 import "@fontsource/jetbrains-mono/400.css";
@@ -11,7 +12,12 @@ import "@fontsource/barlow-condensed/900.css";
 import "./globals.css";
 import { Providers } from "./providers";
 
+// Browsers request /favicon.ico unprompted, and there is no file at that path
+// -- the app ships icon.svg, which Next serves at /icon.svg. So every page load
+// logged a 404 for an icon that exists under another name. Naming it here
+// points the browser at the file rather than letting it guess.
 export const metadata: Metadata = {
+  icons: { icon: "/icon.svg", shortcut: "/icon.svg", apple: "/icon.svg" },
   // Makes relative OG image URLs (e.g. the per-link /pay/[id]/opengraph-image)
   // resolve to absolute ones so crawlers can fetch them. Falls back to the
   // Vercel-provided deploy URL, then localhost for dev.
@@ -72,6 +78,11 @@ export default function RootLayout({
             surfaces that genuinely need Arc (SendConfirm, ArcSettlePanel)
             switch the chain themselves at the moment of signing, which is the
             only point where the requirement is actually known. */}
+        {/* Recovers a tab holding HTML from a previous deploy, whose chunk
+            names no longer exist. Outside Providers because it must survive a
+            failure that happens while the tree below is still mounting -- see
+            the file for why it reloads exactly once. */}
+        <ChunkReloader />
         <Providers>{children}</Providers>
       </body>
     </html>

@@ -73,6 +73,19 @@ const REPORT_ONLY_CSP = [
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // Ties every chunk URL to the deployment that produced it.
+  //
+  // Without this, a browser holding HTML from the previous build asks for
+  // `1235-b9c70d1c.js` after the build that renamed it to `1235-a50bb5e7.js`.
+  // Vercel answers 404 with content-type text/plain, the browser refuses to
+  // execute it, and the app dies with "a client-side exception has occurred".
+  // The HTML is edge-cached with a 300s stale window, so that is a five-minute
+  // hole after every deploy, not a race nobody hits.
+  //
+  // VERCEL_DEPLOYMENT_ID is injected by Vercel. Left undefined everywhere else,
+  // which is the no-op that local development and other hosts want.
+  deploymentId: process.env.VERCEL_DEPLOYMENT_ID,
+
   transpilePackages: ["@conduit/sdk"],
 
   // The share card's fonts and wordmark, kept in the serverless bundle.

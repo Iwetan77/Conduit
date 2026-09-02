@@ -12,6 +12,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   addEmployee,
   archiveEmployee,
+  deleteEmployee,
   createEmployeeGroup,
   deleteEmployeeGroup,
   listEmployeeGroups,
@@ -394,9 +395,40 @@ function EmployeeRow({
               type="button"
               disabled={busy}
               onClick={() => void run(() => archiveEmployee(employee.id))}
-              className="text-ink-dim text-xs font-mono hover:text-danger"
+              className="text-ink-dim text-xs font-mono hover:text-ink mr-3"
             >
               Archive
+            </button>
+            {/* Remove, as well as archive.
+                Archiving is right for somebody who has been PAID -- their run
+                items are the record of money that moved, and deleting the
+                person they point at would leave that history dangling. It is
+                the wrong and only answer for somebody added by mistake, with a
+                typo in their address, or during a test, who has no history to
+                protect and leaves a row nobody can clear.
+
+                The server decides which case this is; it refuses the delete
+                and names the number of payroll lines when there are any. So
+                this button does not have to guess, and cannot be wrong. */}
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => {
+                if (
+                  !window.confirm(
+                    `Remove ${employee.name} completely?\n\n` +
+                      `This works only if they have never been paid. If they have, ` +
+                      `nothing is deleted and you will be told to archive them instead — ` +
+                      `their payroll history is a record of money that actually moved.`,
+                  )
+                ) {
+                  return;
+                }
+                void run(() => deleteEmployee(employee.id));
+              }}
+              className="text-ink-dim text-xs font-mono hover:text-danger"
+            >
+              Remove
             </button>
           </>
         )}

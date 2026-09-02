@@ -21,6 +21,7 @@ package handlers
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math/big"
 	"net/http"
 	"strings"
@@ -487,4 +488,86 @@ func (h *Employees) ReassignAddress(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, out)
+}
+
+// Delete is DELETE /v1/employees/{id}.
+//
+// A real delete, and only when it is genuinely safe.
+//
+// Archiving is the right end state for somebody who has been PAID: their rows
+// in payroll_run_items are the record of money that actually moved, and
+// removing the employee they point at turns that history into a set of
+// dangling ids. That is the whole reason nothing here was ever hard-deleted.
+//
+// But that reasoning only covers people with history. Somebody added by
+// mistake, with a typo in their address, or during a test has no history to
+// protect -- and telling a merchant their only option is to "archive" a row
+// that never meant anything leaves a permanent list of things they cannot
+// clean up. "Why can't I remove people" is a fair question when the answer is
+// a rule that does not apply to the person being removed.
+//
+// So: delete when no payroll run has ever referenced them, refuse otherwise
+// and say to archive instead. The check is a real query rather than a guess at
+// status, because a run can reference somebody who is already archived.
+func (h *Employees) Delete(w http.ResponseWriter, r *http.Request) {
+	principal, ok := auth.FromContext(r.Context())
+	if !ok {
+		writeErr(w, apierrors.E(apierrors.CodeUnauthorized, ""))
+		return
+	}
+	id := pathParam(r, "id")
+	ctx := r.Context()
+
+	// Owned by this account, checked before anything is counted or removed.
+	var exists bool
+	if err := h.Pool.QueryRow(ctx,
+		`SELECT true FROM employees WHERE id = $1 AND account_id = $2`,
+		id, principal.AccountID).Scan(&exists); err != nil {
+		writeErr(w, apierrors.E(apierrors.CodeNotFound, "id"))
+		return
+	}
+
+	var paidLines int
+	if err := h.Pool.QueryRow(ctx,
+		`SELECT count(*) FROM payroll_run_items WHERE employee_id = $1`, id).Scan(&paidLines); err != nil {
+		writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
+		return
+	}
+	if paidLines > 0 {
+		writeErr(w, apierrors.E(apierrors.CodeInvalidRequest,
+			fmt.Sprintf(
+				"this person appears on %d payroll line(s), which record money that actually moved. Archive them instead — that removes them from future runs and keeps the history intact.",
+				paidLines,
+			)))
+		return
+	}
+
+	// The audit trail goes with them. It exists to explain how a PAID person's
+	// address changed over time, and there is nothing to explain about somebody
+	// no run ever touched.
+	tx, err := h.Pool.Begin(ctx)
+	if err != nil {
+		writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
+		return
+	}
+	defer tx.Rollback(ctx)
+
+	if _, err := tx.Exec(ctx, `DELETE FROM employee_address_changes WHERE employee_id = $1`, id); err != nil {
+		writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
+		return
+	}
+	tag, err := tx.Exec(ctx, `DELETE FROM employees WHERE id = $1 AND account_id = $2`, id, principal.AccountID)
+	if err != nil {
+		writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
+		return
+	}
+	if tag.RowsAffected() == 0 {
+		writeErr(w, apierrors.E(apierrors.CodeNotFound, "id"))
+		return
+	}
+	if err := tx.Commit(ctx); err != nil {
+		writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }

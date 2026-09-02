@@ -11,6 +11,7 @@
 // human, which is why it shows resolved names rather than hex and why it is a
 // separate screen rather than a checkbox on the preview.
 import { useState } from "react";
+import Link from "next/link";
 import { useAccount } from "wagmi";
 import { useMyAccount } from "@/lib/queries";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -18,6 +19,7 @@ import {
   createPayrollRun,
   discardPayrollRun,
   listEmployeeGroups,
+  listEmployees,
   executePayrollRun,
   listPayrollRuns,
   recordPayrollLeg,
@@ -72,16 +74,25 @@ export default function PayrollPage() {
     queryFn: listEmployeeGroups,
   });
   const groups = groupData?.data ?? [];
+  // Only to say how many "Everyone" means. The draft itself is built by the
+  // server from the same rule, so this number is a label rather than a source
+  // of truth -- it must never be what decides who gets paid.
+  const { data: employeeData } = useQuery({
+    queryKey: ["employees", false],
+    queryFn: () => listEmployees(false),
+  });
+  const all = (employeeData?.data ?? []).filter((e) => e.status === "active");
   // Who this run pays. "" is everybody active, which is what a run has always
   // meant and what an account with no groups still gets.
   const [groupID, setGroupID] = useState("");
   const chosen = groups.find((g) => g.id === groupID);
 
-  const build = async () => {
+  const build = async (forGroup: string) => {
     setError("");
     setBusy(true);
+    setGroupID(forGroup);
     try {
-      const draft = await createPayrollRun(undefined, groupID || undefined);
+      const draft = await createPayrollRun(undefined, forGroup || undefined);
       setRun(draft);
       setStage("preview");
     } catch (err) {
@@ -161,49 +172,85 @@ export default function PayrollPage() {
       />
 
       {stage === "idle" && (
-        <div className="border border-border p-8 text-center space-y-4">
-          <div className="space-y-1">
-            <p className="text-ink text-sm">Ready when you are.</p>
-            <p className="text-ink-dim text-xs">
-              {chosen
-                ? `This builds a draft from the ${chosen.members} active ${chosen.members === 1 ? "person" : "people"} in ${chosen.name}. Nobody outside it is paid.`
-                : "This builds a draft from everybody active. You will see the full list and the total before anything is paid."}
-            </p>
-          </div>
-
-          {/* Who gets paid, chosen BEFORE the draft is built.
-              Somebody running two businesses used to have to pause one team,
-              run payroll, then remember to unpause them -- and the failure mode
-              of forgetting is paying the wrong people next month, quietly. */}
-          {groups.length > 0 && (
-            <div className="max-w-xs mx-auto text-left">
-              <label className="text-scale-1 font-mono text-ink-dim uppercase tracking-wider block mb-1">
-                Pay
-              </label>
-              <select
-                value={groupID}
-                onChange={(e) => setGroupID(e.target.value)}
-                className="w-full bg-bg border border-border px-3 py-2 text-sm text-ink focus:border-signal focus:outline-none"
+        // Groups first, as CARDS rather than a dropdown behind a button.
+        //
+        // This screen used to be one "Run payroll" button with the group
+        // hidden in a select underneath it, which got the order backwards: the
+        // first decision a merchant makes is WHO is being paid, and a business
+        // with three teams should see three teams, not a verb. Picking is the
+        // action; the draft follows from it.
+        <div className="space-y-4">
+          {groups.length === 0 && all.length === 0 && (
+            <div className="border border-border p-8 text-center space-y-2">
+              <p className="text-ink text-sm">Nobody to pay yet.</p>
+              <p className="text-ink-dim text-xs">
+                Add the people you pay on the Employees page, group them by
+                business, then come back and pay a group at a time.
+              </p>
+              <Link
+                href="/dashboard/employees"
+                className="inline-block mt-2 border border-signal/40 text-signal text-xs font-mono px-4 py-2 hover:bg-signal/10 transition-colors"
               >
-                <option value="">Everybody</option>
-                {groups.map((g) => (
-                  <option key={g.id} value={g.id}>
-                    {g.name} ({g.members})
-                  </option>
-                ))}
-              </select>
+                Go to Employees
+              </Link>
             </div>
           )}
 
-          <button
-            type="button"
-            onClick={() => void build()}
-            disabled={busy}
-            className="bg-signal text-signal-ink font-medium px-6 py-2 text-sm disabled:opacity-50"
-          >
-            {busy ? "Building…" : chosen ? `Run payroll for ${chosen.name}` : "Run payroll"}
-          </button>
-          {error && <p className="text-danger text-xs">{error}</p>}
+          {(groups.length > 0 || all.length > 0) && (
+            <>
+              <p className="text-ink-dim text-xs">Who are you paying?</p>
+
+              <div className="grid gap-2 sm:grid-cols-2">
+                {groups.map((g) => (
+                  <button
+                    key={g.id}
+                    type="button"
+                    disabled={busy || g.members === 0}
+                    onClick={() => void build(g.id)}
+                    className="text-left border border-border p-4 transition-colors
+                               hover:border-signal hover:bg-signal/5
+                               disabled:opacity-40 disabled:hover:border-border disabled:hover:bg-transparent"
+                  >
+                    <p className="text-ink text-sm font-medium">{g.name}</p>
+                    <p className="text-ink-dim text-xs mt-0.5 font-mono">
+                      {g.members === 0
+                        ? "nobody in this group"
+                        : `${g.members} ${g.members === 1 ? "person" : "people"}`}
+                    </p>
+                  </button>
+                ))}
+
+                {/* Everybody stays available, but it is no longer the only
+                    thing on the screen and no longer the default. */}
+                <button
+                  type="button"
+                  disabled={busy || all.length === 0}
+                  onClick={() => void build("")}
+                  className="text-left border border-dashed border-border p-4 transition-colors
+                             hover:border-ink-dim hover:bg-surface
+                             disabled:opacity-40"
+                >
+                  <p className="text-ink text-sm font-medium">Everyone</p>
+                  <p className="text-ink-dim text-xs mt-0.5 font-mono">
+                    {all.length} active {all.length === 1 ? "person" : "people"}, every group
+                  </p>
+                </button>
+              </div>
+
+              {groups.length === 0 && (
+                <p className="text-ink-dim text-xs">
+                  No groups yet — everyone is paid together. Make groups on the{" "}
+                  <Link href="/dashboard/employees" className="text-signal hover:underline">
+                    Employees
+                  </Link>{" "}
+                  page to pay one business at a time.
+                </p>
+              )}
+
+              {busy && <p className="text-ink-dim text-xs font-mono">Building the draft…</p>}
+              {error && <p className="text-danger text-xs">{error}</p>}
+            </>
+          )}
         </div>
       )}
 

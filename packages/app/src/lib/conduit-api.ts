@@ -609,7 +609,20 @@ export function reassignEmployeeAddress(id: string, address: string, note?: stri
   });
 }
 
-/** Never a delete: a removed row breaks the history of every run that paid them. */
+/**
+ * Remove somebody entirely.
+ *
+ * Only works for a person no payroll run has ever paid — the server refuses
+ * otherwise and says to archive instead, because their run items are the
+ * record of money that actually moved. That covers the case archiving never
+ * did: somebody added by mistake, with a typo in their address, or during a
+ * test, who leaves a row a merchant cannot clean up.
+ */
+export function deleteEmployee(id: string) {
+  return request<void>(`/v1/employees/${id}`, { method: "DELETE" });
+}
+
+/** Keeps the history of every run that paid them. The end state for anyone who has been paid. */
 export function archiveEmployee(id: string) {
   return request<Employee>(`/v1/employees/${id}/archive`, { method: "POST", body: {} });
 }

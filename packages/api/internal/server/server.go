@@ -556,6 +556,9 @@ func New(cfg Config) http.Handler {
 			r.Post("/employees", employeesH.Create)
 			r.Patch("/employees/{id}", employeesH.Update)
 			r.Post("/employees/{id}/archive", employeesH.Archive)
+			// A real delete, allowed only for somebody no payroll run has ever
+			// paid. Archive is still the answer for anyone with history.
+			r.Delete("/employees/{id}", employeesH.Delete)
 			// The one sanctioned way a payment address moves. Update refuses
 			// to touch it; without this an employee who changed wallet had to
 			// be archived and re-added, severing their payroll history.

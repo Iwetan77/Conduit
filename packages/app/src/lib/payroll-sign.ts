@@ -52,10 +52,18 @@ async function convertForLeg(
   // Settling to the merchant's OWN address, in the leg's currency, for exactly
   // the leg total. Not a penny more: leftover foreign currency sitting in a
   // treasury is a balance nobody chose to hold and nobody is watching.
+  //
+  // settle_address is NOT sent, and that is deliberate rather than an omission.
+  // This route derives it from the account, and for a merchant that derivation
+  // IS the settle address -- the same value this function was passing. Sending
+  // it was refused outright ("settle_address is derived from the account and
+  // can no longer be set on this request"), which is what made every payroll
+  // run fail at its conversion leg. Deriving it is also the safer of the two:
+  // the destination of a business's own conversion should come from the
+  // account, not from whatever the browser believed a moment ago.
   const intent = await createSettlementIntent({
     amount: leg.total,
     settle_currency: leg.currency,
-    settle_address: settleAddress,
     accept_currencies: [treasuryCurrency],
     reference: `payroll conversion ${leg.run_id_hash}`,
   });

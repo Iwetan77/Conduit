@@ -809,10 +809,24 @@ export function getSettlementIntent(id: string, apiKey?: string) {
   return request<SettlementIntent>(`/v1/settlement_intents/${id}`, { apiKey });
 }
 
+/**
+ * Ask to be paid.
+ *
+ * No `settle_address`. The server derives it from the account and REFUSES a
+ * request that carries one — "settle_address is derived from the account and
+ * can no longer be set on this request" — which is what failed every payroll
+ * conversion leg until the field was dropped here too. Keeping it in the type
+ * meant the compiler cheerfully required a value the API would reject.
+ *
+ * That derivation is also the point: an intent created here is a merchant
+ * asking to be paid, and where their money lands should come from their
+ * account rather than from whatever the browser believed a moment ago. Use
+ * `createDirectSettlementIntent` when the destination is somebody else — there
+ * the address is the recipient, and only the caller can know it.
+ */
 export function createSettlementIntent(body: {
   amount: string;
   settle_currency: string;
-  settle_address: string;
   accept_currencies?: string[];
   reference?: string;
   expires_in?: number;

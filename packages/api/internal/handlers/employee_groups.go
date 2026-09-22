@@ -180,20 +180,36 @@ func (h *EmployeeGroups) Update(w http.ResponseWriter, r *http.Request) {
 
 // Delete is DELETE /v1/employee_groups/{id}.
 //
-// Removes the GROUP, never the people in it. The column is ON DELETE SET NULL,
-// so its members return to ungrouped: still listed, still payable, and their
-// payroll history still intact. Deleting people here would orphan the run items
-// that record what they were paid, which is the record this whole feature
-// exists to keep straight.
+// Removes an empty group, never the people in it. A group with members is
+// refused so deleting organizational furniture cannot silently ungroup staff.
+// Deleting people here would orphan the run items that record what they were
+// paid, which is the record this whole feature exists to keep straight.
 func (h *EmployeeGroups) Delete(w http.ResponseWriter, r *http.Request) {
 	principal, ok := auth.FromContext(r.Context())
 	if !ok {
 		writeErr(w, apierrors.E(apierrors.CodeUnauthorized, ""))
 		return
 	}
+	groupID := pathParam(r, "id")
+	var members int
+	if err := h.Pool.QueryRow(r.Context(),
+		`SELECT count(*) FROM employees e
+		  JOIN employee_groups g ON g.id = e.group_id
+		 WHERE g.id = $1 AND g.account_id = $2`,
+		groupID, principal.AccountID,
+	).Scan(&members); err != nil {
+		writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
+		return
+	}
+	if members > 0 {
+		writeErr(w, apierrors.E(apierrors.CodeInvalidRequest,
+			"move or remove every employee in this group before deleting it"))
+		return
+	}
+
 	tag, err := h.Pool.Exec(r.Context(),
 		`DELETE FROM employee_groups WHERE id = $1 AND account_id = $2`,
-		pathParam(r, "id"), principal.AccountID,
+		groupID, principal.AccountID,
 	)
 	if err != nil {
 		writeErr(w, apierrors.E(apierrors.CodeInternal, ""))

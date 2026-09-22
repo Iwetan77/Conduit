@@ -269,12 +269,12 @@ export default function PayrollPage() {
             />
           )}
 
-          {!loadError && groups.length === 0 && all.length === 0 && (
+          {!loadError && groups.length === 0 && (
             <div className="border border-border p-8 text-center space-y-2">
-              <p className="text-ink text-sm">Nobody to pay yet.</p>
+              <p className="text-ink text-sm">No employee groups yet.</p>
               <p className="text-ink-dim text-xs">
-                Add the people you pay on the Employees page, group them by
-                business, then come back and pay a group at a time.
+                Create a group on the Employees page, add its people, then come
+                back to pay that group as one batch.
               </p>
               <Link
                 href="/dashboard/employees"
@@ -285,7 +285,7 @@ export default function PayrollPage() {
             </div>
           )}
 
-          {!loadError && (groups.length > 0 || all.length > 0) && (
+          {!loadError && groups.length > 0 && (
             <>
               <p className="text-ink-dim text-xs">Who are you paying?</p>
 
@@ -309,32 +309,8 @@ export default function PayrollPage() {
                   </button>
                 ))}
 
-                {/* Everybody stays available, but it is no longer the only
-                    thing on the screen and no longer the default. */}
-                <button
-                  type="button"
-                  disabled={busy || amountGroup !== null || all.length === 0}
-                  onClick={() => chooseScope("")}
-                  className="text-left border border-dashed border-border p-4 transition-colors
-                             hover:border-ink-dim hover:bg-surface
-                             disabled:opacity-40"
-                >
-                  <p className="text-ink text-sm font-medium">Everyone</p>
-                  <p className="text-ink-dim text-xs mt-0.5 font-mono">
-                    {all.length} active {all.length === 1 ? "person" : "people"}, every group
-                  </p>
-                </button>
               </div>
 
-              {groups.length === 0 && (
-                <p className="text-ink-dim text-xs">
-                  No groups yet — everyone is paid together. Make groups on the{" "}
-                  <Link href="/dashboard/employees" className="text-signal hover:underline">
-                    Employees
-                  </Link>{" "}
-                  page to pay one business at a time.
-                </p>
-              )}
 
               {busy && <p className="text-ink-dim text-xs font-mono">Building the draft…</p>}
               {amountGroup === null && error && <p className="text-danger text-xs">{error}</p>}

@@ -7,7 +7,7 @@
 // way round. That ordering is the product's position, not a layout preference —
 // a typed address is unrecoverable when wrong and looks identical when right,
 // and this is a list that gets paid every month without anyone re-reading it.
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   addEmployee,
@@ -50,8 +50,8 @@ function errorText(err: unknown): string {
 export default function EmployeesPage() {
   const qc = useQueryClient();
   const [showArchived, setShowArchived] = useState(false);
-  // Which group is being looked at. "" is everybody, which is also what an
-  // account that has never made a group always sees.
+  // Which named payroll group is being looked at. The first group is selected
+  // once the roster loads; an account with none must create one before hiring.
   const [groupID, setGroupID] = useState("");
   const { data, isLoading, error: employeesError } = useQuery({
     queryKey: [...qkEmployees, showArchived],
@@ -62,12 +62,15 @@ export default function EmployeesPage() {
     queryFn: listEmployeeGroups,
   });
   const loadError = employeesError ?? groupsError;
-  const groups = groupData?.data ?? [];
+  const groups = useMemo(() => groupData?.data ?? [], [groupData?.data]);
   const all = data?.data ?? [];
+  useEffect(() => {
+    if (groups.length > 0 && !groupID) setGroupID(groups[0].id);
+  }, [groups, groupID]);
   // Filtered here rather than refetched per tab. The roster is small, it is
   // already in memory, and a request per tab click would make switching
   // between two teams feel like loading two pages.
-  const employees = groupID ? all.filter((e) => e.group_id === groupID) : all;
+  const employees = groupID ? all.filter((e) => e.group_id === groupID) : [];
   const refresh = () => {
     qc.invalidateQueries({ queryKey: qkEmployees });
     qc.invalidateQueries({ queryKey: qkEmployeeGroups });
@@ -89,7 +92,6 @@ export default function EmployeesPage() {
         groups={groups}
         selected={groupID}
         onSelect={setGroupID}
-        total={all.length}
         onChanged={refresh}
       />
 
@@ -156,13 +158,11 @@ function GroupBar({
   groups,
   selected,
   onSelect,
-  total,
   onChanged,
 }: {
   groups: EmployeeGroup[];
   selected: string;
   onSelect: (id: string) => void;
-  total: number;
   onChanged: () => void;
 }) {
   const [creating, setCreating] = useState(false);
@@ -192,13 +192,8 @@ function GroupBar({
   };
 
   const remove = async (g: EmployeeGroup) => {
-    // Named, and honest about what survives. Deleting a group is not deleting
-    // people, and somebody hesitating over this button deserves to know that
-    // before they press it rather than after.
-    const ok = window.confirm(
-      `Delete the group "${g.name}"?\n\n` +
-        `The ${g.members} ${g.members === 1 ? "person" : "people"} in it stay on your payroll and become ungrouped. Nobody is removed.`,
-    );
+    if (g.members > 0) return;
+    const ok = window.confirm(`Delete the empty group "${g.name}"?`);
     if (!ok) return;
     setBusy(true);
     try {
@@ -222,9 +217,6 @@ function GroupBar({
   return (
     <div className="mb-4 space-y-2">
       <div className="flex flex-wrap items-center gap-2">
-        <button type="button" onClick={() => onSelect("")} className={tab(selected === "")}>
-          Everyone <span className="text-ink-dim/70">{total}</span>
-        </button>
         {groups.map((g) => (
           <span key={g.id} className="inline-flex items-center">
             <button type="button" onClick={() => onSelect(g.id)} className={tab(selected === g.id)}>
@@ -239,8 +231,8 @@ function GroupBar({
               <button
                 type="button"
                 onClick={() => remove(g)}
-                disabled={busy}
-                title={`Delete the group ${g.name}`}
+                disabled={busy || g.members > 0}
+                title={g.members > 0 ? "Move or remove its employees first" : `Delete ${g.name}`}
                 className="border border-l-0 border-border px-2.5 py-1.5 text-xs text-ink-dim hover:text-danger hover:border-danger disabled:opacity-50"
               >
                 Delete group
@@ -339,7 +331,6 @@ function EmployeeRow({
           onChange={(e) => run(() => updateEmployee(employee.id, { group_id: e.target.value }))}
           className="bg-bg border border-border px-2 py-1 text-xs text-ink-dim focus:border-signal focus:outline-none disabled:opacity-50"
         >
-          <option value="">Ungrouped</option>
           {groups.map((g) => (
             <option key={g.id} value={g.id}>
               {g.name}
@@ -482,7 +473,7 @@ function AddEmployee({
         address: byAddress ? address.trim() : undefined,
         pay_currency: currency,
         pay_type: payType,
-        group_id: groupID || undefined,
+        group_id: groupID,
         amount:
           payType === "fixed"
             ? parseAmount(amount, isoToToken(currency) as Currency).toString()
@@ -508,11 +499,13 @@ function AddEmployee({
     return (
       <button
         type="button"
+        disabled={groups.length === 0}
+        title={groups.length === 0 ? "Create a group first" : undefined}
         onClick={() => {
           setGroupID(defaultGroup);
           setOpen(true);
         }}
-        className="border border-border px-4 py-2 text-sm text-ink-dim hover:text-ink hover:border-ink-dim transition-colors"
+        className="border border-border px-4 py-2 text-sm text-ink-dim hover:text-ink hover:border-ink-dim transition-colors disabled:opacity-40"
       >
         Add someone
       </button>
@@ -629,7 +622,6 @@ function AddEmployee({
           onChange={(e) => setGroupID(e.target.value)}
           className="w-full bg-bg border border-border px-3 py-2 text-sm text-ink focus:border-signal focus:outline-none"
         >
-          <option value="">Ungrouped</option>
           {groups.map((g) => (
             <option key={g.id} value={g.id}>
               {g.name}
@@ -692,7 +684,7 @@ function AddEmployee({
       <div className="flex gap-2">
         <button
           type="submit"
-          disabled={busy}
+          disabled={busy || !groupID}
           className="flex-1 bg-signal text-signal-ink font-medium py-2 text-sm disabled:opacity-50"
         >
           {busy ? "Adding…" : "Add"}

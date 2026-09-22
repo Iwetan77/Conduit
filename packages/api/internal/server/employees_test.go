@@ -27,9 +27,41 @@ type employee struct {
 	Status      string  `json:"status"`
 }
 
+func testEmployeeGroupID(t *testing.T, srvURL, key string) string {
+	t.Helper()
+	resp := doJSON(t, srvURL, "GET", "/v1/employee_groups", key, "", "")
+	var listed struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	_ = json.Unmarshal([]byte(resp.body), &listed)
+	if len(listed.Data) > 0 {
+		return listed.Data[0].ID
+	}
+
+	resp = doJSON(t, srvURL, "POST", "/v1/employee_groups", key, `{"name":"Test staff"}`, "")
+	var created struct {
+		ID string `json:"id"`
+	}
+	_ = json.Unmarshal([]byte(resp.body), &created)
+	if resp.status != http.StatusCreated || created.ID == "" {
+		t.Fatalf("create employee group: status=%d body=%s", resp.status, resp.body)
+	}
+	return created.ID
+}
+
 func addEmployee(t *testing.T, srvURL, key, body string) (jsonResp, employee) {
 	t.Helper()
-	resp := doJSON(t, srvURL, "POST", "/v1/employees", key, body, "")
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(body), &payload); err != nil {
+		t.Fatalf("employee body: %v", err)
+	}
+	if _, present := payload["group_id"]; !present {
+		payload["group_id"] = testEmployeeGroupID(t, srvURL, key)
+	}
+	encoded, _ := json.Marshal(payload)
+	resp := doJSON(t, srvURL, "POST", "/v1/employees", key, string(encoded), "")
 	var e employee
 	_ = json.Unmarshal([]byte(resp.body), &e)
 	return resp, e
@@ -236,5 +268,32 @@ func TestEmployeesAreScopedToTheirAccount(t *testing.T) {
 	}
 	if got := doJSON(t, srv.URL, "POST", "/v1/employees/"+e.ID+"/archive", other.APIKey.Key, "", ""); got.status != http.StatusNotFound {
 		t.Errorf("another account could archive them: status=%d", got.status)
+	}
+}
+
+func TestEmployeeRequiresAGroup(t *testing.T) {
+	srv, key, _ := newLinkTestServer(t, 15609)
+	_, addr := newSigner(t)
+	resp := doJSON(t, srv.URL, "POST", "/v1/employees", key, fmt.Sprintf(
+		`{"name":"Ada","address":%q,"pay_currency":"USD","pay_type":"fixed","amount":"5000000"}`, addr), "")
+	if resp.status != http.StatusBadRequest {
+		t.Fatalf("employee without group: status=%d, want 400; body=%s", resp.status, resp.body)
+	}
+}
+
+func TestNonEmptyEmployeeGroupCannotBeDeleted(t *testing.T) {
+	srv, key, _ := newLinkTestServer(t, 15610)
+	groupID := testEmployeeGroupID(t, srv.URL, key)
+	_, addr := newSigner(t)
+	resp, _ := addEmployee(t, srv.URL, key, fmt.Sprintf(
+		`{"name":"Ada","address":%q,"pay_currency":"USD","pay_type":"fixed","amount":"5000000","group_id":%q}`,
+		addr, groupID))
+	if resp.status != http.StatusCreated {
+		t.Fatalf("add employee: status=%d body=%s", resp.status, resp.body)
+	}
+
+	deleted := doJSON(t, srv.URL, "DELETE", "/v1/employee_groups/"+groupID, key, "", "")
+	if deleted.status != http.StatusBadRequest {
+		t.Fatalf("delete non-empty group: status=%d, want 400; body=%s", deleted.status, deleted.body)
 	}
 }

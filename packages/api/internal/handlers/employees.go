@@ -109,8 +109,7 @@ type employeeRequest struct {
 	PayCurrency string  `json:"pay_currency"`
 	PayType     string  `json:"pay_type"`
 	Amount      *string `json:"amount"`
-	// Optional. Omitted or empty means ungrouped, which is where everybody who
-	// existed before groups did stays.
+	// Required. Every employee belongs to one batch-payroll scope.
 	GroupID *string `json:"group_id"`
 }
 
@@ -146,16 +145,14 @@ func (h *Employees) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// A group id that is not this account's is refused, not ignored. Silently
-	// dropping it would put the person in the ungrouped list, where the next
-	// group-scoped run would not pay them and nothing would say why.
-	if req.GroupID != nil && strings.TrimSpace(*req.GroupID) != "" {
-		if !groupBelongsTo(r.Context(), h.Pool, *req.GroupID, principal.AccountID) {
-			writeErr(w, apierrors.E(apierrors.CodeInvalidRequest, "group_id"))
-			return
-		}
-	} else {
-		req.GroupID = nil
+	if req.GroupID == nil || strings.TrimSpace(*req.GroupID) == "" {
+		writeErr(w, apierrors.E(apierrors.CodeInvalidRequest, "group_id is required"))
+		return
+	}
+	*req.GroupID = strings.TrimSpace(*req.GroupID)
+	if !groupBelongsTo(r.Context(), h.Pool, *req.GroupID, principal.AccountID) {
+		writeErr(w, apierrors.E(apierrors.CodeInvalidRequest, "group_id"))
+		return
 	}
 
 	id := models.NewID("emp")
@@ -311,20 +308,16 @@ func (h *Employees) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Three states, and they are not the same: absent leaves the group as it
-	// is, "" removes them from theirs, and an id moves them. A single COALESCE
-	// cannot say all three, hence the explicit flag.
+	// Omission leaves the group alone; a supplied id moves them. Clearing a
+	// group is refused because every employee is always in one batch scope.
 	groupID := current.GroupID
 	if req.GroupID != nil {
-		if strings.TrimSpace(*req.GroupID) == "" {
-			groupID = nil
-		} else {
-			if !groupBelongsTo(r.Context(), h.Pool, *req.GroupID, principal.AccountID) {
-				writeErr(w, apierrors.E(apierrors.CodeInvalidRequest, "group_id"))
-				return
-			}
-			groupID = req.GroupID
+		trimmed := strings.TrimSpace(*req.GroupID)
+		if trimmed == "" || !groupBelongsTo(r.Context(), h.Pool, trimmed, principal.AccountID) {
+			writeErr(w, apierrors.E(apierrors.CodeInvalidRequest, "group_id"))
+			return
 		}
+		groupID = &trimmed
 	}
 
 	row = h.Pool.QueryRow(r.Context(),

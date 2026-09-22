@@ -573,7 +573,7 @@ export function addEmployee(body: {
   pay_currency: string;
   pay_type: "fixed" | "variable";
   amount?: string;
-  group_id?: string;
+  group_id: string;
 }) {
   return request<Employee>("/v1/employees", { method: "POST", body });
 }
@@ -585,9 +585,8 @@ export function addEmployee(body: {
  */
 export function updateEmployee(
   id: string,
-  // group_id has three states: absent leaves it alone, "" removes them from
-  // their group, an id moves them. Moving groups is a normal edit — it changes
-  // which run pays somebody, not where their money goes.
+  // Omit group_id to leave it alone; provide a real group id to move them.
+  // Employees cannot be ungrouped.
   body: { name?: string; pay_currency?: string; pay_type?: "fixed" | "variable"; amount?: string; status?: "active" | "paused"; group_id?: string },
 ) {
   return request<Employee>(`/v1/employees/${id}`, { method: "PATCH", body });

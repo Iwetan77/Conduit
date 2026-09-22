@@ -68,13 +68,31 @@ export interface SolanaWalletOption {
 // is loud and recoverable, whereas hiding wallets is silent.
 const CANNOT_SIGN_GATEWAY = [/phantom/i];
 
+// Wallet extensions own these objects. Some expose getters that throw while
+// another extension is still installing its provider, so discovery must never
+// read them directly during a React render/effect.
+function safeGet(value: object, key: string): unknown {
+  try {
+    return Reflect.get(value, key);
+  } catch {
+    return undefined;
+  }
+}
+
+function safeKeys(value: object): string[] {
+  try {
+    return Object.keys(value);
+  } catch {
+    return [];
+  }
+}
+
 function looksLikeProvider(v: unknown): v is SolanaProvider {
-  const p = v as SolanaProvider | undefined;
   return (
-    !!p &&
-    typeof p === "object" &&
-    typeof p.connect === "function" &&
-    typeof p.signTransaction === "function"
+    !!v &&
+    typeof v === "object" &&
+    typeof safeGet(v, "connect") === "function" &&
+    typeof safeGet(v, "signTransaction") === "function"
   );
 }
 
@@ -94,18 +112,12 @@ function injectedProviders(): { key: string; provider: SolanaProvider }[] {
     }
   };
 
-  for (const key of Object.keys(window)) {
-    let value: unknown;
-    try {
-      value = (window as unknown as Record<string, unknown>)[key];
-    } catch {
-      // Some window properties throw on access (cross-origin frames). Skip.
-      continue;
-    }
+  for (const key of safeKeys(window)) {
+    const value = safeGet(window, key);
     add(key, value);
     // One level down, for the window.phantom.solana / window.glow.solana shape.
     if (value && typeof value === "object" && !looksLikeProvider(value)) {
-      const nested = (value as Record<string, unknown>).solana;
+      const nested = safeGet(value, "solana");
       if (nested) add(key, nested);
     }
   }
@@ -130,7 +142,7 @@ export function listSolanaWallets(): SolanaWalletOption[] {
     const match = injected.find(({ key, provider }) => {
       if (used.has(provider)) return false;
       const flag = `is${name.replace(/\s+/g, "")}`.toLowerCase();
-      const flags = Object.keys(provider).filter((k) => k.startsWith("is"));
+      const flags = safeKeys(provider).filter((k) => k.startsWith("is"));
       return (
         key.toLowerCase() === name.toLowerCase().replace(/\s+/g, "") ||
         flags.some((f) => f.toLowerCase() === flag)
@@ -166,8 +178,8 @@ export function listSolanaWallets(): SolanaWalletOption[] {
   if (out.length === 0) {
     for (const { key, provider } of injected) {
       if (used.has(provider)) continue;
-      const flag = Object.keys(provider).find(
-        (k) => k.startsWith("is") && (provider as unknown as Record<string, unknown>)[k] === true
+      const flag = safeKeys(provider).find(
+        (k) => k.startsWith("is") && safeGet(provider, k) === true
       );
       const raw = flag ? flag.slice(2) : key === "solana" ? "" : key;
       const label = raw ? raw.charAt(0).toUpperCase() + raw.slice(1) : "Injected Solana wallet";

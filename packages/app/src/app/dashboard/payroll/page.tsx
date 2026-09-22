@@ -207,6 +207,33 @@ export default function PayrollPage() {
       setBusy(false);
     }
   };
+  const retryUnpaid = async () => {
+    if (!run) return;
+    const unpaid = run.items.filter((item) => item.status !== "paid");
+    if (unpaid.length === 0) return;
+
+    setError("");
+    setBusy(true);
+    try {
+      const amounts = Object.fromEntries(
+        unpaid.map((item) => [item.employee_id, item.amount]),
+      );
+      const draft = await createPayrollRun(
+        amounts,
+        undefined,
+        unpaid.map((item) => item.employee_id),
+      );
+      setRun(draft);
+      setLegs([]);
+      setProgress({});
+      setStage("preview");
+    } catch (err) {
+      setError(errorText(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
 
   return (
     <div className="max-w-3xl mx-auto">
@@ -342,12 +369,21 @@ export default function PayrollPage() {
       )}
 
       {(stage === "running" || stage === "done") && run && (
-        <Progress run={run} legs={legs} progress={progress} stage={stage} onReset={() => {
-          setStage("idle");
-          setRun(null);
-          setLegs([]);
-          setProgress({});
-        }} />
+        <Progress
+          run={run}
+          legs={legs}
+          progress={progress}
+          stage={stage}
+          busy={busy}
+          error={error}
+          onRetry={() => void retryUnpaid()}
+          onReset={() => {
+            setStage("idle");
+            setRun(null);
+            setLegs([]);
+            setProgress({});
+          }}
+        />
       )}
 
       <History runs={history?.data ?? []} />
@@ -590,12 +626,18 @@ function Progress({
   legs,
   progress,
   stage,
+  busy,
+  error,
+  onRetry,
   onReset,
 }: {
   run: PayrollRun;
   legs: PayrollLeg[];
   progress: Record<string, string>;
   stage: Stage;
+  busy: boolean;
+  error: string;
+  onRetry: () => void;
   onReset: () => void;
 }) {
   const paid = run.items.filter((i) => i.status === "paid");
@@ -663,19 +705,33 @@ function Progress({
                 </p>
               ))}
               <p className="text-ink-dim text-xs mt-2">
-                Run payroll again to pay the people who were missed. Nobody who
-                was already paid will be paid twice.
+                Review a new draft containing only the people who were missed.
+                Successful payments from this run are excluded.
               </p>
             </div>
           )}
 
-          <button
-            type="button"
-            onClick={onReset}
-            className="border border-border px-4 py-2 text-sm text-ink-dim hover:text-ink"
-          >
-            Done
-          </button>
+          {error && <p className="text-danger text-xs">{error}</p>}
+          <div className="flex gap-2">
+            {unpaid.length > 0 && (
+              <button
+                type="button"
+                onClick={onRetry}
+                disabled={busy}
+                className="flex-1 bg-signal text-signal-ink px-4 py-2 text-sm font-medium disabled:opacity-50"
+              >
+                {busy ? "Building retry..." : "Review unpaid payroll"}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={onReset}
+              disabled={busy}
+              className="border border-border px-4 py-2 text-sm text-ink-dim hover:text-ink disabled:opacity-50"
+            >
+              Done
+            </button>
+          </div>
         </div>
       )}
     </div>

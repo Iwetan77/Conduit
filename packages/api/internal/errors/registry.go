@@ -36,6 +36,7 @@ const (
 	CodeLinkExpired           Code = "payment_link_expired"
 	CodeLinkVoided            Code = "payment_link_voided"
 	CodeLinkAlreadyUsed       Code = "payment_link_already_used"
+	CodeLinkInCheckout        Code = "payment_link_in_checkout"
 	CodeLinkAmountOutOfBounds Code = "payment_link_amount_out_of_bounds"
 	CodeLinkAmountRequired    Code = "payment_link_amount_required"
 
@@ -99,9 +100,14 @@ var registry = map[Code]entry{
 	// whoever picked up the abandoned name.
 	CodeUsernameAlreadySet: {http.StatusConflict, "This account already has a username."},
 
-	CodeLinkExpired:           {http.StatusConflict, "This payment link has expired."},
-	CodeLinkVoided:            {http.StatusConflict, "This payment link has been voided."},
-	CodeLinkAlreadyUsed:       {http.StatusConflict, "This single-use payment link has already been paid."},
+	CodeLinkExpired:     {http.StatusConflict, "This payment link has expired."},
+	CodeLinkVoided:      {http.StatusConflict, "This payment link has been voided."},
+	CodeLinkAlreadyUsed: {http.StatusConflict, "This single-use payment link has already been paid."},
+	// 409, not "already used": the link is live and the money has not moved
+	// yet. Another checkout simply got there first and holds the reservation;
+	// it lapses on its own once that checkout is abandoned or its intent
+	// expires, so a retry after a short wait is the correct next move.
+	CodeLinkInCheckout:        {http.StatusConflict, "This payment link is already being paid. Try again shortly."},
 	CodeLinkAmountOutOfBounds: {http.StatusUnprocessableEntity, "The amount is outside this link's allowed range."},
 	CodeLinkAmountRequired:    {http.StatusBadRequest, "An amount is required for this payment link."},
 

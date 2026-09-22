@@ -550,6 +550,14 @@ func (h *SettlementIntents) Cancel(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, apierrors.E(apierrors.CodeIntentAlreadySettled, "id"))
 		return
 	}
+
+	// A cancelled checkout releases its link's reservation immediately. The
+	// link was never paid, so the invoice is live again rather than waiting for
+	// the reservation to lapse.
+	_, _ = h.Pool.Exec(r.Context(),
+		`UPDATE payment_links SET reserved_intent_id = NULL, reserved_until = NULL, updated_at = now()
+		 WHERE reserved_intent_id = $1`, id)
+
 	writeJSON(w, http.StatusOK, map[string]string{"id": id, "status": "canceled"})
 }
 

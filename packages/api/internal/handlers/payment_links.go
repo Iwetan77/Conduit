@@ -458,18 +458,34 @@ func (h *PaymentLinks) Pay(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
+
+	// The link row is locked for the life of this request. Reading status and
+	// inserting the intent as separate statements was the concurrency bug: two
+	// checkouts on a single_use link both saw 'active'/'viewed' and each
+	// minted an intent. FOR UPDATE serialises them, so the reservation check
+	// below observes exactly one winner.
+	tx, err := h.Pool.Begin(ctx)
+	if err != nil {
+		writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
+		return
+	}
+	defer tx.Rollback(ctx)
+
 	var accountID, amountMode, settleCurrency, settleAddress, status, reusePolicy, description, merchantReference string
 	var amount, minAmount, maxAmount *string
 	var acceptCurrencies []string
 	var expiresAt *time.Time
+	var reservedUntil *time.Time
 	var livemode bool
-	err := h.Pool.QueryRow(ctx,
+	err = tx.QueryRow(ctx,
 		`SELECT account_id, amount_mode, amount::text, min_amount::text, max_amount::text, settle_currency, settle_address,
-		        accept_currencies, status, reuse_policy, expires_at, livemode, COALESCE(description,''), COALESCE(merchant_reference,'')
-		 FROM payment_links WHERE id = $1`,
+		        accept_currencies, status, reuse_policy, expires_at, livemode, COALESCE(description,''), COALESCE(merchant_reference,''),
+		        reserved_until
+		 FROM payment_links WHERE id = $1 FOR UPDATE`,
 		id,
 	).Scan(&accountID, &amountMode, &amount, &minAmount, &maxAmount, &settleCurrency, &settleAddress,
-		&acceptCurrencies, &status, &reusePolicy, &expiresAt, &livemode, &description, &merchantReference)
+		&acceptCurrencies, &status, &reusePolicy, &expiresAt, &livemode, &description, &merchantReference,
+		&reservedUntil)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			writeErr(w, apierrors.E(apierrors.CodeNotFound, "id"))
@@ -480,7 +496,10 @@ func (h *PaymentLinks) Pay(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if expiresAt != nil && time.Now().After(*expiresAt) {
-		h.Pool.Exec(ctx, `UPDATE payment_links SET status = 'expired', updated_at = now() WHERE id = $1 AND status NOT IN ('paid','settled','void')`, id)
+		// Persist the expired transition rather than discarding it on rollback,
+		// exactly as the pre-transaction code did.
+		tx.Exec(ctx, `UPDATE payment_links SET status = 'expired', updated_at = now() WHERE id = $1 AND status NOT IN ('paid','settled','void')`, id)
+		tx.Commit(ctx)
 		writeErr(w, apierrors.E(apierrors.CodeLinkExpired, "id"))
 		return
 	}
@@ -494,6 +513,17 @@ func (h *PaymentLinks) Pay(w http.ResponseWriter, r *http.Request) {
 	}
 	if status != "active" && status != "viewed" {
 		writeErr(w, apierrors.E(apierrors.CodeNotFound, "id"))
+		return
+	}
+
+	// Reservation: a single_use link may have at most one checkout in flight.
+	// The link is NOT marked paid here — it becomes paid only when a real
+	// settlement lands (see the confirm handler, the indexer, and the direct
+	// record path). What is claimed instead is a temporary reservation that
+	// lapses when the intent it created expires, so an abandoned checkout
+	// releases the link rather than burning it.
+	if reusePolicy == "single_use" && reservedUntil != nil && time.Now().Before(*reservedUntil) {
+		writeErr(w, apierrors.E(apierrors.CodeLinkInCheckout, "id"))
 		return
 	}
 
@@ -532,19 +562,6 @@ func (h *PaymentLinks) Pay(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Starting checkout does NOT mean the link is paid. Marking it 'paid' here
-	// (before the payer has moved any money) was the bug behind links showing
-	// PAID for payments that later failed on insufficient funds — the 'paid'
-	// transition now happens only when a real settlement lands (see the confirm
-	// handler in settlement_intents.go and the indexer). Here we just record
-	// that the link has been opened.
-	//
-	// The single-use double-payment guard is enforced at settlement time: once
-	// a link's intent settles it flips to 'paid', and the status checks above
-	// reject any further Pay() call. (A link only truly closes on real payment,
-	// not on someone merely reaching checkout.)
-	h.Pool.Exec(ctx, `UPDATE payment_links SET status = 'viewed', updated_at = now() WHERE id = $1 AND status = 'active'`, id)
-
 	intentID := models.NewID("si")
 	intentExpiresAt := time.Now().Add(1 * time.Hour)
 	metadata := map[string]any{}
@@ -556,7 +573,7 @@ func (h *PaymentLinks) Pay(w http.ResponseWriter, r *http.Request) {
 	}
 	metadataJSON, _ := json.Marshal(metadata)
 
-	_, err = h.Pool.Exec(ctx,
+	_, err = tx.Exec(ctx,
 		`INSERT INTO settlement_intents
 		 (id, account_id, amount, settle_currency, settle_address, accept_currencies, status, reference, metadata, expires_at, livemode, source_chain, payment_link_id, payer_reference)
 		 VALUES ($1,$2,$3,$4,$5,$6,'created',$7,$8,$9,$10,'arc',$11,$12)`,
@@ -564,6 +581,28 @@ func (h *PaymentLinks) Pay(w http.ResponseWriter, r *http.Request) {
 		nullIfEmpty(merchantReference), metadataJSON, intentExpiresAt, livemode, id, nullIfEmpty(req.PayerReference),
 	)
 	if err != nil {
+		writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
+		return
+	}
+
+	// Record that the link has been opened, and for a single_use link stake the
+	// reservation: it expires with the intent so an abandoned checkout does not
+	// permanently lock the invoice.
+	if reusePolicy == "single_use" {
+		_, err = tx.Exec(ctx,
+			`UPDATE payment_links SET status = 'viewed', reserved_intent_id = $1, reserved_until = $2, updated_at = now()
+			 WHERE id = $3 AND status IN ('active','viewed')`,
+			intentID, intentExpiresAt, id)
+	} else {
+		_, err = tx.Exec(ctx,
+			`UPDATE payment_links SET status = 'viewed', updated_at = now() WHERE id = $1 AND status = 'active'`, id)
+	}
+	if err != nil {
+		writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
+		return
+	}
+
+	if err := tx.Commit(ctx); err != nil {
 		writeErr(w, apierrors.E(apierrors.CodeInternal, ""))
 		return
 	}

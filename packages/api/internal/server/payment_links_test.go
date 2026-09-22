@@ -136,9 +136,10 @@ func TestLinkLifecycle(t *testing.T) {
 }
 
 // TestSingleUse: once a single_use link has actually been PAID (a settlement
-// landed), a further payment attempt must be rejected. Merely starting checkout
-// no longer burns the link — that was the bug where a failed payment left the
-// link unusable and falsely marked paid.
+// landed), a further payment attempt must be rejected. Starting checkout does
+// not burn the link — it stakes a temporary reservation that lapses with the
+// intent's expiry, so an abandoned checkout releases the invoice rather than
+// leaving it falsely marked paid.
 func TestSingleUse(t *testing.T) {
 	srv, key, pool := newLinkTestServer(t, 15502)
 
@@ -154,11 +155,27 @@ func TestSingleUse(t *testing.T) {
 		t.Fatalf("first pay should succeed: status=%d body=%s", resp.status, resp.body)
 	}
 
-	// Before settlement the link is still payable — a payer who abandoned or
-	// whose payment failed must not have permanently burned it.
+	// A second checkout while the first is still in flight is refused: the link
+	// is reserved, not paid. Two concurrent checkouts on a single_use link were
+	// the double-payment bug.
+	resp = doJSON(t, srv.URL, "POST", "/v1/payment_links/"+link.ID+"/pay", "", `{}`, "")
+	if resp.status != http.StatusConflict {
+		t.Fatalf("pay while reserved: expected 409, got %d body=%s", resp.status, resp.body)
+	}
+	if code := errCode(t, resp.body); code != "payment_link_in_checkout" {
+		t.Errorf("expected payment_link_in_checkout, got %s", code)
+	}
+
+	// An abandoned checkout must not permanently burn the link: once the
+	// reservation lapses (with the intent's expiry) the invoice is payable
+	// again.
+	if _, err := pool.Exec(context.Background(),
+		`UPDATE payment_links SET reserved_until = now() - interval '1 second' WHERE id = $1`, link.ID); err != nil {
+		t.Fatalf("backdate reservation: %v", err)
+	}
 	resp = doJSON(t, srv.URL, "POST", "/v1/payment_links/"+link.ID+"/pay", "", `{}`, "")
 	if resp.status != http.StatusCreated {
-		t.Fatalf("retry before settlement should be allowed: status=%d body=%s", resp.status, resp.body)
+		t.Fatalf("pay after reservation expiry should succeed: status=%d body=%s", resp.status, resp.body)
 	}
 
 	// Now a settlement lands (confirm handler / indexer marks it paid).

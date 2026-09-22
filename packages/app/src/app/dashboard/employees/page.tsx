@@ -53,14 +53,15 @@ export default function EmployeesPage() {
   // Which group is being looked at. "" is everybody, which is also what an
   // account that has never made a group always sees.
   const [groupID, setGroupID] = useState("");
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, error: employeesError } = useQuery({
     queryKey: [...qkEmployees, showArchived],
     queryFn: () => listEmployees(showArchived),
   });
-  const { data: groupData } = useQuery({
+  const { data: groupData, error: groupsError } = useQuery({
     queryKey: qkEmployeeGroups,
     queryFn: listEmployeeGroups,
   });
+  const loadError = employeesError ?? groupsError;
   const groups = groupData?.data ?? [];
   const all = data?.data ?? [];
   // Filtered here rather than refetched per tab. The roster is small, it is
@@ -78,6 +79,11 @@ export default function EmployeesPage() {
         title="Employees"
         description="The people this business pays. Group them by business, then pay one group at a time."
       />
+      {loadError && (
+        <p className="text-danger text-sm mb-4">
+          {errorText(loadError)}
+        </p>
+      )}
 
       <GroupBar
         groups={groups}
@@ -92,7 +98,7 @@ export default function EmployeesPage() {
       <div className="mt-6 border border-border">
         {isLoading && <p className="text-ink-dim text-xs p-4">Loading…</p>}
 
-        {!isLoading && employees.length === 0 && (
+        {!isLoading && !loadError && employees.length === 0 && (
           // Says what the page is for. "No employees" tells somebody who has
           // never used it nothing at all.
           <div className="p-8 text-center space-y-1">

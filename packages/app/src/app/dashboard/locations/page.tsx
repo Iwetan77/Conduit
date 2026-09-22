@@ -5,7 +5,6 @@ import { useSubAccounts, useMyAccount, qk } from "@/lib/queries";
 import { useEffect, useRef, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import {
-  listAccounts,
   createSubAccount,
   getStorefrontLink,
   createAccountApiKey,
@@ -188,6 +187,20 @@ export default function LocationsPage() {
   // rather than describing it in the abstract.
   const { data: parent } = useMyAccount();
 
+  // The accounts endpoint includes the merchant's main account so account
+  // management can use one response. This page is only for its child locations.
+  // Wait for the parent before filtering so the main account never flashes as a
+  // storefront while the two queries settle.
+  const storefronts = parent
+    ? accounts?.filter((account) => account.id !== parent.id)
+    : undefined;
+
+
+  useEffect(() => {
+    if (!parent?.settle_currency) return;
+    setSettleCurrency(parent.settle_currency);
+  }, [parent?.settle_currency]);
+
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
@@ -279,15 +292,15 @@ export default function LocationsPage() {
         </div>
       )}
 
-      {accounts === undefined && <p className="text-ink-dim text-sm">Loading...</p>}
+      {storefronts === undefined && <p className="text-ink-dim text-sm">Loading...</p>}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-        {accounts?.map((a) => (
+        {storefronts?.map((a) => (
           <StorefrontCard key={a.id} account={a} />
         ))}
       </div>
 
-      {accounts?.length === 1 && !showForm && (
+      {storefronts?.length === 0 && !showForm && (
         <p className="text-ink-dim text-sm mt-4">
           No storefronts yet beyond your main account — click &quot;Add storefront&quot; to create one.
         </p>

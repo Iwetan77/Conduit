@@ -50,7 +50,6 @@ export function TokenIcon({ currency, px }: { currency: Currency; px: number }) 
   // with html-to-image — which inlines a same-origin <img> and would choke on
   // an optimizer URL.
   return (
-    // eslint-disable-next-line @next/next/no-img-element
     <img
       src={src}
       alt=""

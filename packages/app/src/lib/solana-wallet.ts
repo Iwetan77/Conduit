@@ -191,7 +191,6 @@ export function listSolanaWallets(): SolanaWalletOption[] {
 // the bundle where cross-chain pay is actually used.
 function registeredSolanaWallets(): { name: string; icon?: string }[] {
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { getWallets } = require("@wallet-standard/app") as {
       getWallets: () => { get: () => readonly { name: string; icon?: string; chains: readonly string[] }[] };
     };

@@ -129,7 +129,6 @@ export function SettlementIntentPay({ intentId }: SettlementIntentPayProps) {
     <div className="space-y-6">
       <div className="flex items-center gap-3">
         {intent.logo_url ? (
-          // eslint-disable-next-line @next/next/no-img-element
           <img src={intent.logo_url} alt="" className="w-10 h-10 object-contain border border-border bg-surface" />
         ) : (
           <div className="w-10 h-10 border border-border bg-surface flex items-center justify-center font-display font-bold text-signal">

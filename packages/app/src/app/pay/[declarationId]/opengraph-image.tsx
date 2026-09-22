@@ -212,7 +212,6 @@ export default async function Image({
         >
           {/* Top rail: the mark, and the network, exactly as the page heads it */}
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={wordmarkSrc} width={224} height={66} alt="Conduit" />
             <div
               style={{
@@ -246,7 +245,6 @@ export default async function Image({
                     carry their own shape; cropping them to a circle would clip
                     the ones that are not round. */}
                 {logoSrc ? (
-                  // eslint-disable-next-line @next/next/no-img-element
                   <img src={logoSrc} width={104} height={104} alt="" />
                 ) : null}
                 {/* Same size, so the pair reads as one amount. Colour is what

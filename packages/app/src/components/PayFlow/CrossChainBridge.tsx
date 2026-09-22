@@ -201,7 +201,6 @@ function WalletSheet({
                     <span className="flex items-center gap-3">
                       {/* The wallet's own icon, when it registered one. */}
                       {w.icon ? (
-                        // eslint-disable-next-line @next/next/no-img-element
                         <img src={w.icon} alt="" className="w-5 h-5 shrink-0" />
                       ) : (
                         <span className="w-5 h-5 shrink-0" aria-hidden />

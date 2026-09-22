@@ -247,7 +247,6 @@ export function PaymentLinkPay({ linkId }: PaymentLinkPayProps) {
     <div className="space-y-6">
       <div className="flex items-center gap-3">
         {link.logo_url ? (
-          // eslint-disable-next-line @next/next/no-img-element
           <img src={link.logo_url} alt="" className="w-10 h-10 object-contain border border-border bg-surface" />
         ) : (
           <div className="w-10 h-10 border border-border bg-surface flex items-center justify-center font-display font-bold text-signal">

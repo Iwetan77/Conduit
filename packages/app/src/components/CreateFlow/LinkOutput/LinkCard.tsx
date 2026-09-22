@@ -86,7 +86,6 @@ export function LinkCard({
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           {/* 2000×2000 PNG — render at fixed px, negative margin crops to center text */}
           <div style={{ overflow: "hidden", height: "22px", width: "120px" }}>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src="/conduit-logo.png"
               alt="Conduit"

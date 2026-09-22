@@ -511,7 +511,6 @@ export function WalletConnect() {
                   {/* The wallet's own icon when discovery gave us one. Plain
                       img: a data URI from the extension, not one of our assets. */}
                   {c.icon ? (
-                    // eslint-disable-next-line @next/next/no-img-element
                     <img src={c.icon} alt="" width={16} height={16} />
                   ) : (
                     <span className="w-4 h-4 shrink-0" aria-hidden />

@@ -29,6 +29,7 @@ import { createContext, useContext } from "react";
 // was to leave call sites alone.
 
 export const GOOGLE_LOGIN_EVENT = "conduit:google-login";
+export const GOOGLE_LOGIN_INTENT_TTL_MS = 30_000;
 export const GOOGLE_LOGIN_FLAG = "conduit:google-login-pending";
 // Dispatched when sign-in can't start, carrying the reason as event.detail so
 // the button can stop saying "Opening…" and say what actually broke.
@@ -76,7 +77,9 @@ export function useWalletGate(): WalletGate {
 // start sign-in if already mounted).
 export function requestGoogleLogin() {
   try {
-    sessionStorage.setItem(GOOGLE_LOGIN_FLAG, "1");
+    // CircleStack is dynamically loaded. On a cold mobile visit this event can
+    // precede its listener, so retain a short-lived, user-initiated intent.
+    sessionStorage.setItem(GOOGLE_LOGIN_FLAG, String(Date.now()));
   } catch {
     // Storage unavailable (private browsing). The event below still fires; the
     // flag is only a hint for a stack that hasn't mounted yet.

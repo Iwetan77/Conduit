@@ -47,12 +47,14 @@ const CALLBACK_AT_LOAD =
 // reporting "no run to resume" over a run it had just started.
 const RESUME_AT_LOAD: { deviceToken: string; deviceEncryptionKey: string } | null = (() => {
   if (typeof window === "undefined") return null;
-  const raw = sessionStorage.getItem(RESUME_KEY);
-  if (!raw) return null;
-  sessionStorage.removeItem(RESUME_KEY);
   try {
+    const raw = sessionStorage.getItem(RESUME_KEY);
+    if (!raw) return null;
+    sessionStorage.removeItem(RESUME_KEY);
     return JSON.parse(raw);
   } catch {
+    // Safari's privacy modes can deny web storage during a cross-site OAuth
+    // return. Never let that abort module evaluation before React can mount.
     return null;
   }
 })();
@@ -66,9 +68,15 @@ const RESUME_AT_LOAD: { deviceToken: string; deviceEncryptionKey: string } | nul
 // the other one-shot values here.
 const RETURN_AT_LOAD: string | null = (() => {
   if (typeof window === "undefined") return null;
-  const v = sessionStorage.getItem(RETURN_KEY);
-  if (v) sessionStorage.removeItem(RETURN_KEY);
-  return v;
+  try {
+    const v = sessionStorage.getItem(RETURN_KEY);
+    if (v) sessionStorage.removeItem(RETURN_KEY);
+    return v;
+  } catch {
+    // A blocked storage area must not turn the OAuth callback into a root
+    // client-side exception. The safe fallback is the callback route.
+    return null;
+  }
 })();
 
 /**

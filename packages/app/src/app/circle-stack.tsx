@@ -30,6 +30,7 @@ import {
   GOOGLE_LOGIN_EVENT,
   GOOGLE_LOGIN_FAILED,
   GOOGLE_LOGIN_FLAG,
+  GOOGLE_LOGIN_INTENT_TTL_MS,
   GOOGLE_LOGIN_STARTED,
   SIGN_OUT_EVENT,
 } from "@/lib/wallet-gate";
@@ -99,6 +100,24 @@ export default function CircleStack() {
     const onSignOut = async () => {
       // The whole job, not half of it. This used to disconnect wagmi and clear
       // the Circle session only, leaving Conduit's own cs_ token in
+
+    // The button can hydrate before this dynamically loaded stack has mounted.
+    // Consume only a fresh timestamp recorded by that click; older values are
+    // discarded so a crashed or abandoned attempt can never reopen Google.
+    try {
+      const startedAt = Number(sessionStorage.getItem(GOOGLE_LOGIN_FLAG));
+      sessionStorage.removeItem(GOOGLE_LOGIN_FLAG);
+      if (
+        Number.isFinite(startedAt) &&
+        startedAt > 0 &&
+        Date.now() - startedAt >= 0 &&
+        Date.now() - startedAt <= GOOGLE_LOGIN_INTENT_TTL_MS
+      ) {
+        void onLogin();
+      }
+    } catch {
+      // The live event remains sufficient when browser storage is unavailable.
+    }
       // localStorage -- so the next person to sign in on this device was handed
       // the previous account. See lib/sign-out.
       await signOutCompletely({ queryClient });
@@ -197,21 +216,6 @@ export default function CircleStack() {
       cancelled = true;
     };
   }, [address, onCircle]);
-
-  // Clear any stale intent flag on mount.
-  //
-  // This used to auto-dispatch a sign-in when it found the flag, to cover a
-  // click that happened before this mounted. That is not needed -- CircleStack
-  // mounts at app boot -- and it was actively harmful: it started a connect
-  // that never settles, which left wagmi permanently "pending" and every
-  // sign-in button disabled before the user had touched anything.
-  useEffect(() => {
-    try {
-      sessionStorage.removeItem(GOOGLE_LOGIN_FLAG);
-    } catch {
-      // Storage unavailable; nothing to clean up.
-    }
-  }, []);
 
   return null;
 }

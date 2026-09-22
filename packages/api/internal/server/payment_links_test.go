@@ -317,3 +317,46 @@ func TestAmountBounds(t *testing.T) {
 		t.Errorf("expected payment_link_amount_required, got %s", code)
 	}
 }
+
+// A malformed body must not be treated as the empty object. Fixed links allow
+// a genuinely empty body, but accepting broken JSON silently creates an intent
+// the caller never received and may retry.
+func TestPayRejectsMalformedJSON(t *testing.T) {
+	srv, key, pool := newLinkTestServer(t, 15513)
+
+	resp := doJSON(t, srv.URL, "POST", "/v1/payment_links", key,
+		`{"amount_mode":"fixed","amount":10000,"settle_currency":"USD"}`, "")
+	if resp.status != http.StatusCreated {
+		t.Fatalf("create link: status=%d body=%s", resp.status, resp.body)
+	}
+	var link struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal([]byte(resp.body), &link); err != nil {
+		t.Fatalf("unmarshal link: %v", err)
+	}
+
+	resp = doJSON(t, srv.URL, "POST", "/v1/payment_links/"+link.ID+"/pay", "",
+		`{"payer_reference":`, "")
+	if resp.status != http.StatusBadRequest {
+		t.Fatalf("malformed pay body: expected 400, got %d body=%s", resp.status, resp.body)
+	}
+	if code := errCode(t, resp.body); code != "invalid_request" {
+		t.Fatalf("malformed pay body: expected invalid_request, got %s", code)
+	}
+
+	var intents int
+	if err := pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM settlement_intents WHERE payment_link_id = $1`, link.ID).Scan(&intents); err != nil {
+		t.Fatalf("count intents: %v", err)
+	}
+	if intents != 0 {
+		t.Fatalf("malformed body created %d settlement intents", intents)
+	}
+
+	// Preserve the documented fixed-link convenience: no JSON at all is valid.
+	resp = doJSON(t, srv.URL, "POST", "/v1/payment_links/"+link.ID+"/pay", "", "", "")
+	if resp.status != http.StatusCreated {
+		t.Fatalf("empty fixed-link body should succeed: status=%d body=%s", resp.status, resp.body)
+	}
+}

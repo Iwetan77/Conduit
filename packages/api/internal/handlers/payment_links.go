@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"math/big"
 	"net/http"
 	"time"
@@ -437,7 +438,10 @@ func (h *PaymentLinks) Pay(w http.ResponseWriter, r *http.Request) {
 	id := pathParam(r, "id")
 	var req payLinkRequest
 	if r.Body != nil {
-		json.NewDecoder(r.Body).Decode(&req) // empty body is valid for fixed-amount links
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil && err != io.EOF {
+			writeErr(w, apierrors.E(apierrors.CodeInvalidRequest, "body"))
+			return
+		}
 	}
 
 	ctx := r.Context()

@@ -29,6 +29,7 @@ import { usePayerIdentity } from "@/lib/use-payer-identity";
 import { usePayerUsdc, useRouteDecision } from "@/lib/use-payer-usdc";
 import { useBalances } from "@/lib/use-balances";
 import { chainLabel } from "@/lib/unified-balance";
+import { useRequiredPayerAmountMinor } from "@/lib/use-required-payer-amount";
 
 interface SettlementIntentPayProps {
   intentId: string;
@@ -85,9 +86,29 @@ export function SettlementIntentPay({ intentId }: SettlementIntentPayProps) {
   // reading it. `sourceUsdc.loading` was sitting right there and was never
   // read. useRouteDecision cannot make that mistake: "resolving" is its own
   // state and selects neither screen.
+  const settleTokenForRoute = fetched
+    ? (isoToToken(fetched.settle_currency) as Currency)
+    : "USDC";
+  const amountMinor =
+    fetched?.source_chain === "arc" ? BigInt(fetched.amount) : undefined;
+  // Route balances are USDC balances. Quote the merchant's requested token
+  // amount into USDC before comparing them, especially for 18-decimal tokens.
+  const requiredUsdc = useRequiredPayerAmountMinor(
+    "USDC",
+    settleTokenForRoute,
+    amountMinor,
+    fetched?.settle_address,
+  );
   const arcUsdc = identity?.kind === "evm" ? (arcBalances.balances.USDC ?? 0n) : 0n;
-  const amountMinor = fetched ? BigInt(fetched.amount) : undefined;
-  const decision = useRouteDecision(amountMinor, arcUsdc, sourceUsdc, arcBalances.settled);
+  const balanceDecision = useRouteDecision(
+    requiredUsdc.data,
+    arcUsdc,
+    sourceUsdc,
+    arcBalances.settled,
+  );
+  const decision = requiredUsdc.isError
+    ? ({ status: "resolved", route: { kind: "arc" }, partial: true } as const)
+    : balanceDecision;
 
   if (loadError) {
     return (

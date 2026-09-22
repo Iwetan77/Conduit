@@ -27,6 +27,7 @@ import { usePayerIdentity } from "@/lib/use-payer-identity";
 import { usePayerUsdc, useRouteDecision } from "@/lib/use-payer-usdc";
 import { useBalances } from "@/lib/use-balances";
 import { chainLabel } from "@/lib/unified-balance";
+import { useRequiredPayerAmountMinor } from "@/lib/use-required-payer-amount";
 // Loaded when reached. The cross chain flow is a screen the payer only sees
 // after choosing to fund from another chain, and it is one of the largest in
 // the app -- shipping it on first paint made every payer pay for a path most
@@ -128,19 +129,36 @@ export function PaymentLinkPay({ linkId }: PaymentLinkPayProps) {
   // "insufficient" -- a real-looking answer that hid the button. The "Pay from
   // Base" control then popped into existence under a Pay panel the payer was
   // already reading. `resolving` is now its own state.
-  const linkDecimals = link ? currencyDecimals(isoToToken(link.settle_currency)) : 6;
+  const settleTokenForRoute = link
+    ? (isoToToken(link.settle_currency) as Currency)
+    : "USDC";
+  const linkDecimals = currencyDecimals(settleTokenForRoute);
   const pendingAmountRaw = link
     ? link.amount_mode === "fixed" && link.amount
       ? BigInt(link.amount)
       : BigInt(amount ? toMinorUnits(amount, linkDecimals) : "0")
     : 0n;
-  const arcUsdc = identity?.kind === "evm" ? (arcBalances.balances.USDC ?? 0n) : 0n;
-  const decision = useRouteDecision(
+  // routeForAmount compares USDC balances, so its input must also be USDC
+  // minor units. Feeding it the merchant token amount made every 18-decimal
+  // invoice look 10^12 times too large and hid valid cross-chain routes.
+  const requiredUsdc = useRequiredPayerAmountMinor(
+    "USDC",
+    settleTokenForRoute,
     pendingAmountRaw > 0n ? pendingAmountRaw : undefined,
+    link?.settle_address,
+  );
+  const arcUsdc = identity?.kind === "evm" ? (arcBalances.balances.USDC ?? 0n) : 0n;
+  const balanceDecision = useRouteDecision(
+    requiredUsdc.data,
     arcUsdc,
     sourceUsdc,
     arcBalances.settled,
   );
+  // An unavailable FX preview must not leave checkout on an endless skeleton.
+  // The Arc panel can surface the provider's firm error when the payer acts.
+  const decision = requiredUsdc.isError
+    ? ({ status: "resolved", route: { kind: "arc" }, partial: true } as const)
+    : balanceDecision;
 
   if (error) {
     return (

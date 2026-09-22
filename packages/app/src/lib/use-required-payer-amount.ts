@@ -22,22 +22,24 @@ import { getFxRate } from "@/lib/conduit-api";
 // The firm quote at pay time is still authoritative; this is a pre-flight check
 // against the same provider, and a rate that drifts between the two is handled
 // by the quote, not here.
-export function useRequiredPayerAmount(
+export function useRequiredPayerAmountMinor(
   payerCurrency: Currency,
   recipientCurrency: Currency,
-  amount: string
+  recipientMinor: bigint | undefined,
+  recipientAddress?: string,
 ) {
   const sameCurrency = payerCurrency === recipientCurrency;
-  let recipientMinor: bigint | undefined;
-  try {
-    recipientMinor = amount ? parseAmount(amount, recipientCurrency) : undefined;
-  } catch {
-    recipientMinor = undefined; // mid-typing ("1.", "abc") — nothing to price yet
-  }
+  const amountKey = recipientMinor?.toString() ?? "";
   const validAmount = recipientMinor !== undefined && recipientMinor > 0n;
 
   return useQuery({
-    queryKey: ["required-payer-amount", payerCurrency, recipientCurrency, amount],
+    queryKey: [
+      "required-payer-amount",
+      payerCurrency,
+      recipientCurrency,
+      amountKey,
+      recipientAddress ?? "",
+    ],
     enabled: validAmount,
     staleTime: 15_000,
     // Same-currency can't fail. Cross-currency failures here are answers, not
@@ -47,8 +49,28 @@ export function useRequiredPayerAmount(
     retryDelay: (attempt: number) => 300 * 2 ** attempt,
     queryFn: async (): Promise<bigint> => {
       if (sameCurrency) return recipientMinor!;
-      const rate = await getFxRate(payerCurrency, recipientCurrency, recipientMinor!.toString());
+      const rate = await getFxRate(
+        payerCurrency,
+        recipientCurrency,
+        recipientMinor!.toString(),
+        recipientAddress,
+      );
       return BigInt(rate.pay_amount);
     },
   });
+}
+
+export function useRequiredPayerAmount(
+  payerCurrency: Currency,
+  recipientCurrency: Currency,
+  amount: string,
+) {
+  let recipientMinor: bigint | undefined;
+  try {
+    recipientMinor = amount ? parseAmount(amount, recipientCurrency) : undefined;
+  } catch {
+    recipientMinor = undefined; // mid-typing ("1.", "abc") — nothing to price yet
+  }
+
+  return useRequiredPayerAmountMinor(payerCurrency, recipientCurrency, recipientMinor);
 }

@@ -502,7 +502,10 @@ function AddEmployee({
     return (
       <button
         type="button"
-        onClick={() => setOpen(true)}
+        onClick={() => {
+          setGroupID(defaultGroup);
+          setOpen(true);
+        }}
         className="border border-border px-4 py-2 text-sm text-ink-dim hover:text-ink hover:border-ink-dim transition-colors"
       >
         Add someone

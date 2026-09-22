@@ -32,6 +32,7 @@ import { TokenIcon } from "@/components/Shared/TokenBadge";
 import { shortenAddress, formatMinorUnits } from "@/lib/format";
 import { PageHeader } from "@/components/Dashboard/PageHeader";
 import type { Currency } from "@conduit/sdk/lite";
+import { useCircleAccount } from "@/lib/circle/connection";
 
 const EXPLORER = process.env.NEXT_PUBLIC_EXPLORER ?? "https://testnet.arcscan.app";
 
@@ -57,6 +58,8 @@ export default function PayrollPage() {
   // Signing reached for window.ethereum when this was missing, which for a
   // Google merchant is the wrong wallet entirely — see lib/payroll-sign.
   const { connector } = useAccount();
+  const { connector: circleConnector } = useCircleAccount();
+  const signingConnector = circleConnector ?? connector;
   // The business's address. Salaries leave from here, not from the wallet the
   // owner signed in with -- see lib/settlement-signer.
   const { data: account } = useMyAccount();
@@ -108,6 +111,11 @@ export default function PayrollPage() {
     setBusy(true);
     try {
       // A key per attempt, generated once here. The server refuses a second
+      const settlementAddress = run.settle_address ?? treasury;
+      if (!settlementAddress) {
+        throw new Error("This payroll has no settlement wallet to sign from.");
+      }
+
       // execute carrying it, which is what makes a double click, a retry or a
       // restored tab pay nobody twice.
       const runKey = `${run.id}-${crypto.randomUUID()}`;
@@ -129,8 +137,8 @@ export default function PayrollPage() {
           const txHash = await payPayrollLeg(
             res.spender,
             leg,
-            connector,
-            treasury,
+            signingConnector,
+            settlementAddress,
             // A leg in a currency the treasury does not hold is converted
             // first, in the browser, right before its approve. The merchant
             // presses send once; the conversion is a step, not a chore.

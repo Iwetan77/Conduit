@@ -29,7 +29,7 @@ import {
 } from "@/lib/conduit-api";
 import { isoToToken } from "@/lib/currencies";
 import { TokenIcon } from "@/components/Shared/TokenBadge";
-import { shortenAddress, formatMinorUnits } from "@/lib/format";
+import { shortenAddress, formatMinorUnits, parseAmount } from "@/lib/format";
 import { PageHeader } from "@/components/Dashboard/PageHeader";
 import type { Currency } from "@conduit/sdk/lite";
 import { useCircleAccount } from "@/lib/circle/connection";
@@ -88,14 +88,34 @@ export default function PayrollPage() {
   // Who this run pays. "" is everybody active, which is what a run has always
   // meant and what an account with no groups still gets.
   const [groupID, setGroupID] = useState("");
-  const chosen = groups.find((g) => g.id === groupID);
+  const [amountGroup, setAmountGroup] = useState<string | null>(null);
+  const [variableAmounts, setVariableAmounts] = useState<Record<string, string>>({});
+  const variableEmployees =
+    amountGroup === null
+      ? []
+      : all.filter(
+          (employee) =>
+            employee.pay_type === "variable" &&
+            (amountGroup === "" || employee.group_id === amountGroup),
+        );
 
-  const build = async (forGroup: string) => {
+  const build = async (forGroup: string, enteredAmounts: Record<string, string> = {}) => {
     setError("");
     setBusy(true);
     setGroupID(forGroup);
     try {
-      const draft = await createPayrollRun(undefined, forGroup || undefined);
+      const amounts: Record<string, string> = {};
+      for (const [employeeID, displayAmount] of Object.entries(enteredAmounts)) {
+        const employee = all.find((candidate) => candidate.id === employeeID);
+        if (!employee) throw new Error("An employee in this payroll could not be found.");
+        amounts[employeeID] = parseAmount(
+          displayAmount,
+          isoToToken(employee.pay_currency) as Currency,
+        ).toString();
+      }
+      const draft = await createPayrollRun(amounts, forGroup || undefined);
+      setAmountGroup(null);
+      setVariableAmounts({});
       setRun(draft);
       setStage("preview");
     } catch (err) {
@@ -104,6 +124,22 @@ export default function PayrollPage() {
       setBusy(false);
     }
   };
+  const chooseScope = (forGroup: string) => {
+    setGroupID(forGroup);
+    const hasVariablePay = all.some(
+      (employee) =>
+        employee.pay_type === "variable" &&
+        (forGroup === "" || employee.group_id === forGroup),
+    );
+    if (hasVariablePay) {
+      setError("");
+      setVariableAmounts({});
+      setAmountGroup(forGroup);
+      return;
+    }
+    void build(forGroup);
+  };
+
 
   const execute = async () => {
     if (!run) return;
@@ -188,6 +224,18 @@ export default function PayrollPage() {
         // with three teams should see three teams, not a verb. Picking is the
         // action; the draft follows from it.
         <div className="space-y-4">
+          {amountGroup !== null && (
+            <VariablePayAmounts
+              employees={variableEmployees}
+              values={variableAmounts}
+              busy={busy}
+              error={error}
+              onChange={setVariableAmounts}
+              onSubmit={() => void build(amountGroup, variableAmounts)}
+              onCancel={() => setAmountGroup(null)}
+            />
+          )}
+
           {groups.length === 0 && all.length === 0 && (
             <div className="border border-border p-8 text-center space-y-2">
               <p className="text-ink text-sm">Nobody to pay yet.</p>
@@ -213,8 +261,8 @@ export default function PayrollPage() {
                   <button
                     key={g.id}
                     type="button"
-                    disabled={busy || g.members === 0}
-                    onClick={() => void build(g.id)}
+                    disabled={busy || amountGroup !== null || g.members === 0}
+                    onClick={() => chooseScope(g.id)}
                     className="text-left border border-border p-4 transition-colors
                                hover:border-signal hover:bg-signal/5
                                disabled:opacity-40 disabled:hover:border-border disabled:hover:bg-transparent"
@@ -232,8 +280,8 @@ export default function PayrollPage() {
                     thing on the screen and no longer the default. */}
                 <button
                   type="button"
-                  disabled={busy || all.length === 0}
-                  onClick={() => void build("")}
+                  disabled={busy || amountGroup !== null || all.length === 0}
+                  onClick={() => chooseScope("")}
                   className="text-left border border-dashed border-border p-4 transition-colors
                              hover:border-ink-dim hover:bg-surface
                              disabled:opacity-40"
@@ -256,7 +304,7 @@ export default function PayrollPage() {
               )}
 
               {busy && <p className="text-ink-dim text-xs font-mono">Building the draft…</p>}
-              {error && <p className="text-danger text-xs">{error}</p>}
+              {amountGroup === null && error && <p className="text-danger text-xs">{error}</p>}
             </>
           )}
         </div>
@@ -306,6 +354,85 @@ export default function PayrollPage() {
     </div>
   );
 }
+type VariablePayEmployee = {
+  id: string;
+  name: string;
+  pay_currency: string;
+};
+
+function VariablePayAmounts({
+  employees,
+  values,
+  busy,
+  error,
+  onChange,
+  onSubmit,
+  onCancel,
+}: {
+  employees: VariablePayEmployee[];
+  values: Record<string, string>;
+  busy: boolean;
+  error: string;
+  onChange: (values: Record<string, string>) => void;
+  onSubmit: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <form
+      onSubmit={(event) => {
+        event.preventDefault();
+        onSubmit();
+      }}
+      className="border border-border p-4 space-y-3"
+    >
+      <div>
+        <p className="text-ink text-sm font-medium">Enter variable pay</p>
+        <p className="text-ink-dim text-xs mt-1">
+          These amounts apply to this payroll run only.
+        </p>
+      </div>
+      {employees.map((employee) => (
+        <label key={employee.id} className="block">
+          <span className="flex justify-between text-xs mb-1">
+            <span className="text-ink">{employee.name}</span>
+            <span className="font-mono text-ink-dim">
+              {isoToToken(employee.pay_currency)}
+            </span>
+          </span>
+          <input
+            required
+            inputMode="decimal"
+            value={values[employee.id] ?? ""}
+            onChange={(event) =>
+              onChange({ ...values, [employee.id]: event.target.value })
+            }
+            placeholder="0.00"
+            className="w-full bg-surface border border-border px-3 py-2 text-sm font-mono focus:border-signal focus:outline-none"
+          />
+        </label>
+      ))}
+      <div className="flex gap-2">
+        <button
+          type="submit"
+          disabled={busy}
+          className="flex-1 bg-signal text-signal-ink py-2 text-sm font-medium disabled:opacity-50"
+        >
+          {busy ? "Building draft..." : "Review payroll"}
+        </button>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={onCancel}
+          className="border border-border px-4 py-2 text-sm text-ink-dim"
+        >
+          Cancel
+        </button>
+      </div>
+      {error && <p className="text-danger text-xs">{error}</p>}
+    </form>
+  );
+}
+
 
 // Re-reads the run after execution, so what is shown is what the server
 // recorded rather than what the browser believes happened.

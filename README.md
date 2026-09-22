@@ -145,7 +145,7 @@ Conduit's own contracts (`ConduitRouter`, `DeclarationRegistry`, `StableFXAdapte
 
 ## Running it
 
-Requires pnpm 9+, Go 1.22+, Foundry, and Node 18+. Testnet USDC from [faucet.circle.com](https://faucet.circle.com).
+Requires pnpm 9+, Go 1.22+, Foundry, and Node 24+ (the tested version is pinned in `.nvmrc`). Testnet USDC from [faucet.circle.com](https://faucet.circle.com).
 
 ```bash
 pnpm install

@@ -2,14 +2,19 @@
 
 import { useQueryClient } from "@tanstack/react-query";
 import { useApiKeys, useWebhookEndpoints, qk } from "@/lib/queries";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
-  listApiKeys, listWebhookEndpoints, createWebhookEndpoint, listWebhookDeliveries,
-  replayWebhookDelivery, type ApiKeySummary, type WebhookEndpoint, type WebhookDelivery,
-  ConduitApiError,
+  createWebhookEndpoint, listWebhookDeliveries, replayWebhookDelivery,
+  type WebhookDelivery, ConduitApiError,
 } from "@/lib/conduit-api";
 import { formatDate } from "@/lib/format";
 import { PageHeader } from "@/components/Dashboard/PageHeader";
+function errorText(error: unknown, fallback: string) {
+  if (error instanceof ConduitApiError) return error.message;
+  if (error instanceof Error && error.message) return error.message;
+  return fallback;
+}
+
 
 export default function DevelopersPage() {
   const [newEndpointURL, setNewEndpointURL] = useState("");
@@ -17,11 +22,13 @@ export default function DevelopersPage() {
   const [selectedEndpoint, setSelectedEndpoint] = useState<string | null>(null);
   const [deliveries, setDeliveries] = useState<WebhookDelivery[] | null>(null);
   const [error, setError] = useState("");
+  const [replaying, setReplaying] = useState<string | null>(null);
 
   // Two cached reads instead of a refresh() threaded through every handler.
   const qc = useQueryClient();
-  const { data: keys } = useApiKeys();
-  const { data: endpoints } = useWebhookEndpoints();
+  const { data: keys, error: keysError } = useApiKeys();
+  const { data: endpoints, error: endpointsError } = useWebhookEndpoints();
+  const loadError = keysError ?? endpointsError;
 
   const handleCreateEndpoint = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -39,24 +46,40 @@ export default function DevelopersPage() {
     }
   };
 
-  const openDeliveries = (endpointId: string) => {
+  const openDeliveries = async (endpointId: string) => {
     setSelectedEndpoint(endpointId);
-    listWebhookDeliveries(endpointId).then((r) => setDeliveries(r.data ?? [])).catch(() => setDeliveries([]));
+    setDeliveries(null);
+    setError("");
+    try {
+      const result = await listWebhookDeliveries(endpointId);
+      setDeliveries(result.data ?? []);
+    } catch (err) {
+      setError(errorText(err, "Failed to load webhook deliveries"));
+    }
   };
 
   const handleReplay = async (deliveryId: string) => {
-    await replayWebhookDelivery(deliveryId).catch(() => {});
-    if (selectedEndpoint) openDeliveries(selectedEndpoint);
+    setError("");
+    setReplaying(deliveryId);
+    try {
+      await replayWebhookDelivery(deliveryId);
+      if (selectedEndpoint) await openDeliveries(selectedEndpoint);
+    } catch (err) {
+      setError(errorText(err, "Failed to replay webhook delivery"));
+    } finally {
+      setReplaying(null);
+    }
   };
 
   return (
     <div className="space-y-10 max-w-3xl mx-auto">
       <PageHeader title="Developers" description="API keys and webhooks for building Conduit into your own product." />
+      {loadError && <p className="text-danger text-sm">Failed to load developer settings.</p>}
 
       <section>
         <h2 className="font-medium text-sm mb-3">API keys</h2>
         <div className="border border-border divide-y divide-border">
-          {keys === null && <p className="p-4 text-ink-dim text-sm">Loading...</p>}
+          {keys === undefined && !keysError && <p className="p-4 text-ink-dim text-sm">Loading...</p>}
           {keys?.length === 0 && <p className="p-4 text-ink-dim text-sm">No keys yet.</p>}
           {keys?.map((k) => (
             <div key={k.id} className="p-3 flex items-center justify-between text-sm">
@@ -90,14 +113,15 @@ export default function DevelopersPage() {
         {error && <p className="text-danger text-sm mb-3">{error}</p>}
 
         <div className="border border-border divide-y divide-border">
-          {endpoints === null && <p className="p-4 text-ink-dim text-sm">Loading...</p>}
+          {endpoints === undefined && !endpointsError && <p className="p-4 text-ink-dim text-sm">Loading...</p>}
           {endpoints?.length === 0 && <p className="p-4 text-ink-dim text-sm">No webhook endpoints yet.</p>}
           {endpoints?.map((ep) => (
             <div key={ep.id} className="p-3 flex items-center justify-between text-sm">
               <span className="font-mono text-xs">{ep.url}</span>
               <button
-                onClick={() => openDeliveries(ep.id)}
+                onClick={() => void openDeliveries(ep.id)}
                 className="text-signal text-xs hover:underline"
+                type="button"
               >
                 View deliveries
               </button>
@@ -121,6 +145,13 @@ export default function DevelopersPage() {
                 </tr>
               </thead>
               <tbody>
+                {deliveries === null && (
+                  <tr>
+                    <td colSpan={5} className="px-3 py-4 text-center text-ink-dim text-sm">
+                      Loading deliveries...
+                    </td>
+                  </tr>
+                )}
                 {(deliveries ?? []).map((d) => {
                   const failed = d.response_code != null && d.response_code >= 400;
                   const statusColor = failed ? "text-danger" : "text-ink-dim";
@@ -131,8 +162,13 @@ export default function DevelopersPage() {
                       <td className={`px-3 py-2 font-mono text-right ${statusColor}`}>{d.response_code ?? "—"}</td>
                       <td className="px-3 py-2 font-mono text-ink-dim">{d.delivered_at ? formatDate(new Date(d.delivered_at).getTime() / 1000) : "pending"}</td>
                       <td className="px-3 py-2">
-                        <button onClick={() => handleReplay(d.id)} className="text-signal text-xs font-mono hover:underline">
-                          Replay
+                        <button
+                          type="button"
+                          onClick={() => void handleReplay(d.id)}
+                          disabled={replaying === d.id}
+                          className="text-signal text-xs font-mono hover:underline disabled:opacity-50"
+                        >
+                          {replaying === d.id ? "Replaying..." : "Replay"}
                         </button>
                       </td>
                     </tr>

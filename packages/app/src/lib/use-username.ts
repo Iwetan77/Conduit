@@ -23,6 +23,8 @@ import { getSessionToken, getUsernameForWallet } from "@/lib/conduit-api";
 import { useMyAccount } from "@/lib/queries";
 import { usePayerIdentity } from "@/lib/use-payer-identity";
 import { useHydrated } from "@/lib/use-hydrated";
+import { useCircleAccount } from "@/lib/circle/connection";
+import { useWalletGate } from "@/lib/wallet-gate";
 
 export const usernameQk = {
   byWallet: (address?: string) => ["username", "wallet", address?.toLowerCase()] as const,
@@ -60,11 +62,13 @@ export interface UsernameState {
 
 export function useUsername(): UsernameState {
   const { identity } = usePayerIdentity();
+  const { connected: circleConnected } = useCircleAccount();
+  const { walletSettled } = useWalletGate();
   // Hydration-guarded: the token lives in browser storage, so the server render
   // must not branch on it or the two renders disagree.
   const hydrated = useHydrated();
   // A session means a merchant/Google account, which carries its own username.
-  const session = hydrated && !!getSessionToken();
+  const session = hydrated && circleConnected && !!getSessionToken();
   const account = useMyAccount(session);
 
   const isEvm = identity?.kind === "evm";
@@ -83,7 +87,7 @@ export function useUsername(): UsernameState {
   const walletLookup = useQuery({
     queryKey: usernameQk.byWallet(walletAddress),
     queryFn: () => getUsernameForWallet(walletAddress!),
-    enabled: !!walletAddress,
+    enabled: walletSettled && !!walletAddress,
     // A name is claimed once and never changes, so there is nothing to poll
     // for. Refetching on focus would be a request per tab switch for an answer
     // that cannot have moved.
@@ -91,7 +95,14 @@ export function useUsername(): UsernameState {
     refetchOnWindowFocus: false,
   });
 
-  const eligible = session || isEvm;
+  const eligible = walletSettled && (session || (isEvm && !circleConnected));
+
+  // A Circle wallet can connect before Conduit's own session token has been
+  // minted. Never reinterpret it as an ordinary wallet in that window, and
+  // never prompt while the app is still deciding which restored wallet wins.
+  if (!walletSettled || (circleConnected && !session)) {
+    return { username: null, loading: true, eligible: false, shouldPrompt: false };
+  }
 
   if (session) {
     // Fall back to the wallet's name only when the wallet is this account's own.

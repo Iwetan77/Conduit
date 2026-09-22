@@ -72,13 +72,15 @@ export function Providers({ children }: { children: React.ReactNode }) {
               signed in on any page. Renders null until it has something to ask,
               and its modal is loaded on demand, so the pages it does not apply
               to pay nothing for it. */}
-            <UsernameGate />
             {/* Holds back anything that DISPLAYS an address until the Circle
               session has been adopted — otherwise an auto-connected extension's
               address shows first and then swaps. Children are not held back:
               they render on the server, which is the point of this being a
               static import. */}
-            <CircleWalletGate>{children}</CircleWalletGate>
+            <CircleWalletGate>
+              <UsernameGate />
+              {children}
+            </CircleWalletGate>
           </RouteTransitionProvider>
         </QueryClientProvider>
       </WagmiProvider>

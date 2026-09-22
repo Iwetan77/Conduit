@@ -25,6 +25,7 @@ import { getSessionToken } from "@/lib/conduit-api";
 import { usePayerIdentity } from "@/lib/use-payer-identity";
 import { useInvalidateUsername } from "@/lib/use-username";
 import { UserMark } from "@/components/Shared/UserMark";
+import { useCircleAccount } from "@/lib/circle/connection";
 
 type Check =
   | { state: "idle" }
@@ -41,6 +42,7 @@ export function UsernamePrompt({ onDone }: { onDone: () => void }) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const { identity } = usePayerIdentity();
+  const { connected: circleConnected } = useCircleAccount();
   // wagmi's connector, which getWalletProvider needs to reach the right wallet
   // rather than falling back to window.ethereum.
   const { connector } = useAccount();
@@ -85,7 +87,7 @@ export function UsernamePrompt({ onDone }: { onDone: () => void }) {
     setSubmitting(true);
     setError("");
     try {
-      if (getSessionToken()) {
+      if (circleConnected && getSessionToken()) {
         // Merchant or Google sign-in: the session is the credential.
         await claimUsername(name);
       } else if (identity?.kind === "evm") {
@@ -118,7 +120,7 @@ export function UsernamePrompt({ onDone }: { onDone: () => void }) {
     } finally {
       setSubmitting(false);
     }
-  }, [value, check.state, submitting, identity, connector, invalidate, onDone]);
+  }, [value, check.state, submitting, identity, connector, circleConnected, invalidate, onDone]);
 
   const canSubmit = check.state === "ok" && !submitting;
 

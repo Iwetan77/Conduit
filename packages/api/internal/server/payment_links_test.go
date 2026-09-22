@@ -360,3 +360,42 @@ func TestPayRejectsMalformedJSON(t *testing.T) {
 		t.Fatalf("empty fixed-link body should succeed: status=%d body=%s", resp.status, resp.body)
 	}
 }
+
+// Creation rejects contradictory or non-positive policy values instead of
+// storing links whose own amount rules can never be satisfied.
+func TestLinkCreationRejectsInvalidPolicy(t *testing.T) {
+	srv, key, pool := newLinkTestServer(t, 15514)
+
+	cases := []struct {
+		name string
+		body string
+	}{
+		{"fixed min", `{"amount_mode":"fixed","amount":10000,"min_amount":1000,"settle_currency":"USD"}`},
+		{"fixed max", `{"amount_mode":"fixed","amount":10000,"max_amount":20000,"settle_currency":"USD"}`},
+		{"zero min", `{"amount_mode":"open","min_amount":0,"settle_currency":"USD"}`},
+		{"negative min", `{"amount_mode":"open","min_amount":-1,"settle_currency":"USD"}`},
+		{"zero max", `{"amount_mode":"open","max_amount":0,"settle_currency":"USD"}`},
+		{"negative max", `{"amount_mode":"open","max_amount":-1,"settle_currency":"USD"}`},
+		{"negative expiry", `{"amount_mode":"fixed","amount":10000,"settle_currency":"USD","expires_in":-1}`},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			resp := doJSON(t, srv.URL, "POST", "/v1/payment_links", key, tc.body, "")
+			if resp.status != http.StatusBadRequest {
+				t.Fatalf("expected 400, got %d body=%s", resp.status, resp.body)
+			}
+			if code := errCode(t, resp.body); code != "invalid_request" {
+				t.Fatalf("expected invalid_request, got %s", code)
+			}
+		})
+	}
+
+	var links int
+	if err := pool.QueryRow(context.Background(), `SELECT count(*) FROM payment_links`).Scan(&links); err != nil {
+		t.Fatalf("count links: %v", err)
+	}
+	if links != 0 {
+		t.Fatalf("invalid creation requests stored %d payment links", links)
+	}
+}

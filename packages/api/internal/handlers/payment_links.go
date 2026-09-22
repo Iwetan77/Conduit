@@ -104,6 +104,12 @@ func bigStrDisplay(b *big.Int) string {
 // allows optional min/max; open_with_suggested needs a default amount that
 // (if bounds are set) falls within them.
 func validateAmounts(req createLinkRequest) *apierrors.APIError {
+	if req.MinAmount != nil && req.MinAmount.Sign() <= 0 {
+		return apierrors.E(apierrors.CodeInvalidRequest, "min_amount must be positive")
+	}
+	if req.MaxAmount != nil && req.MaxAmount.Sign() <= 0 {
+		return apierrors.E(apierrors.CodeInvalidRequest, "max_amount must be positive")
+	}
 	if req.MinAmount != nil && req.MaxAmount != nil && req.MinAmount.Cmp(req.MaxAmount.bi()) > 0 {
 		return apierrors.E(apierrors.CodeInvalidRequest, "min_amount must not exceed max_amount")
 	}
@@ -111,6 +117,9 @@ func validateAmounts(req createLinkRequest) *apierrors.APIError {
 	case "fixed":
 		if req.Amount == nil || req.Amount.Sign() <= 0 {
 			return apierrors.E(apierrors.CodeLinkAmountRequired, "amount")
+		}
+		if req.MinAmount != nil || req.MaxAmount != nil {
+			return apierrors.E(apierrors.CodeInvalidRequest, "fixed links must omit min_amount and max_amount")
 		}
 	case "open":
 		if req.Amount != nil {
@@ -173,6 +182,10 @@ func (h *PaymentLinks) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	if apiErr := validateAmounts(req); apiErr != nil {
 		writeErr(w, apiErr)
+		return
+	}
+	if req.ExpiresIn < 0 {
+		writeErr(w, apierrors.E(apierrors.CodeInvalidRequest, "expires_in must not be negative"))
 		return
 	}
 	if req.AcceptCurrencies == nil {

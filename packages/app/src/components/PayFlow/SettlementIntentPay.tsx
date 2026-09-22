@@ -172,7 +172,7 @@ export function SettlementIntentPay({ intentId }: SettlementIntentPayProps) {
 
       {intent.source_chain !== "arc" || payFromOtherChain ? (
         <>
-          <CrossChainBridge intentId={intentId} intent={intent} />
+          <CrossChainBridge intentId={intentId} intent={intent} onStage={setBridgeStage} />
           {intent.source_chain === "arc" && (
             <button
               type="button"

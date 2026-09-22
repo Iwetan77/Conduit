@@ -5,6 +5,7 @@ import { ARC_RPC_URL, arcTestnet } from "@/lib/wagmi";
 import { useState } from "react";
 import { useAccount, useSwitchChain } from "wagmi";
 import type { Currency, PaymentReceipt } from "@conduit/sdk/lite";
+import type { Connector } from "wagmi";
 import { parseAmount, formatAmount, shortenAddress } from "@/lib/format";
 import { RoutePreview } from "./RoutePreview";
 import { ReceiptCard } from "@/components/Shared/ReceiptCard";
@@ -30,6 +31,8 @@ interface SendConfirmProps {
    * answer. See lib/settlement-signer.
    */
   spendFrom?: string;
+  /** Connector that owns spendFrom. Merchant flows pass the live Circle connector. */
+  signingConnector?: Connector;
 }
 
 export function SendConfirm({
@@ -40,10 +43,13 @@ export function SendConfirm({
   onBack,
   onReset,
   spendFrom,
+  signingConnector,
 }: SendConfirmProps) {
   const { address, connector, chainId } = useAccount();
   const { switchChainAsync } = useSwitchChain();
   const [step, setStep] = useState<"confirm" | "pending" | "success" | "error">("confirm");
+  const activeConnector = signingConnector ?? connector;
+  const payerAddress = spendFrom ?? address;
   const [receipt, setReceipt] = useState<PaymentReceipt | null>(null);
   const [error, setError] = useState<string>("");
   const [fxStage, setFxStage] = useState("");
@@ -55,7 +61,7 @@ export function SendConfirm({
   const isCrossCurrency = payerCurrency !== recipientCurrency;
 
   const handleSend = async () => {
-    if (!address) return;
+    if (!payerAddress) return;
     setStep("pending");
 
     try {
@@ -72,7 +78,7 @@ export function SendConfirm({
       // Asks the wallet to move rather than refusing. Most wallets switch
       // silently; the ones that prompt are asking a question the payer can
       // answer. Only a refusal is worth surfacing.
-      if (chainId !== undefined && chainId !== arcTestnet.id) {
+      if (!spendFrom && chainId !== undefined && chainId !== arcTestnet.id) {
         try {
           await switchChainAsync({ chainId: arcTestnet.id });
         } catch {
@@ -93,7 +99,7 @@ export function SendConfirm({
 
         setFxStage("Preparing the payment…");
         const intent = await createDirectSettlementIntent({
-          payer_wallet: address,
+          payer_wallet: payerAddress,
           amount: parsedAmount.toString(),
           settle_currency: recipientCurrency,
           settle_address: recipient,
@@ -101,7 +107,13 @@ export function SendConfirm({
         });
 
         const { runFxCheckout } = await import("@/lib/fx-checkout");
-        const res = await runFxCheckout(intent.id, payerCurrency, setFxStage, connector);
+        const res = await runFxCheckout(
+          intent.id,
+          payerCurrency,
+          setFxStage,
+          activeConnector,
+          spendFrom,
+        );
         setFxTx(res.txHash);
         setFxRate(res.rate);
         setFxPaid(formatAmount(BigInt(res.payAmount), payerCurrency));
@@ -118,10 +130,10 @@ export function SendConfirm({
       // the business's wallet when this screen is spending the business's money.
       const wallet = spendFrom
         ? await (await import("@/lib/settlement-signer")).getSettlementProvider(
-            connector,
+            activeConnector,
             spendFrom,
           )
-        : await (await import("@/lib/wallet-provider")).getWalletProvider(connector);
+        : await (await import("@/lib/wallet-provider")).getWalletProvider(activeConnector);
       const { browserProviderFrom } = await import("@/lib/wallet-provider");
       const browserProvider = await browserProviderFrom(wallet);
       const client = ConduitClient.fromBrowserProvider(browserProvider, "", undefined, ARC_RPC_URL);

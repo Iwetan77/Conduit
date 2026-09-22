@@ -59,7 +59,7 @@ export default function SendPage() {
   //
   // An injected wallet is the other case, and there the old rule still holds:
   // MetaMask signs for the address it is connected as and no other.
-  const isCircleSession = useCircleAccount().connected;
+  const { connected: isCircleSession, connector: circleConnector } = useCircleAccount();
   const canSignForTreasury =
     !!treasury &&
     (isCircleSession ||
@@ -161,6 +161,7 @@ export default function SendPage() {
           <SendConfirm
             // The business pays, so the business's wallet signs.
             spendFrom={treasury}
+            signingConnector={circleConnector}
             recipient={recipient}
             amount={amount}
             recipientCurrency={recipientCurrency}

@@ -73,6 +73,52 @@ for (const path of paths) {
   await page.close();
 }
 
+
+// Delay the destination RSC response and assert that the outgoing page is
+// covered immediately. This is the regression for route flashes: loading.tsx
+// alone does not start until Next begins rendering the destination tree.
+{
+  const page = await browser.newPage();
+  await page.route("**/*", async (route) => {
+    const requestURL = route.request().url();
+    if (requestURL.includes("/create") && requestURL.includes("_rsc=")) {
+      await new Promise((resolve) => setTimeout(resolve, 1_500));
+    }
+    await route.continue();
+  });
+
+  const errors = [];
+  page.on("pageerror", (error) => errors.push(String(error.message || error)));
+  await page.goto(base + "/send", { waitUntil: "domcontentloaded", timeout: 45_000 });
+  await page.getByRole("link", { name: "Create", exact: true }).first().click({ noWaitAfter: true });
+
+  const cover = page.locator("[data-route-transition]");
+  const covered = await cover
+    .waitFor({ state: "visible", timeout: 1_000 })
+    .then(() => true)
+    .catch(() => false);
+  const target = covered ? await cover.getAttribute("data-target-path") : null;
+
+  await page.waitForURL("**/create", { timeout: 10_000 }).catch((error) => errors.push(String(error)));
+  const cleared = await cover
+    .waitFor({ state: "detached", timeout: 3_000 })
+    .then(() => true)
+    .catch(() => false);
+  const broken = !covered || target !== "/create" || !cleared || errors.some((error) => FATAL.test(error));
+
+  if (broken) failures++;
+  console.log(
+    `${broken ? "FAIL" : " ok "}  ${base}/send -> /create route transition`,
+  );
+  if (!covered) console.log("        outgoing page was not covered while the route was pending");
+  if (target !== "/create") console.log(`        transition target was ${target ?? "missing"}`);
+  if (!cleared) console.log("        transition cover remained after the destination committed");
+  for (const error of errors.filter((value) => FATAL.test(value)).slice(0, 3)) {
+    console.log("        " + error.slice(0, 300));
+  }
+  await page.close();
+}
+
 await browser.close();
 
 if (failures > 0) {

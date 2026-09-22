@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import jsQR from "jsqr";
+import { useRouteTransition } from "@/lib/navigation-transition";
 
 // Scan-to-pay: opens the camera and decodes a QR into one of two things a
 // merchant might have printed:
@@ -39,6 +40,7 @@ interface ScanToPayProps {
 
 export function ScanToPay({ onAddress }: ScanToPayProps = {}) {
   const router = useRouter();
+  const { beginNavigation } = useRouteTransition();
   const [open, setOpen] = useState(false);
   const [error, setError] = useState("");
   const [unrecognized, setUnrecognized] = useState("");
@@ -108,7 +110,10 @@ export function ScanToPay({ onAddress }: ScanToPayProps = {}) {
             // like a wait. Prefetched first so the hold is spent on the
             // navigation rather than in front of it.
             router.prefetch?.(result.path);
-            setTimeout(() => router.push(result.path), 400);
+            setTimeout(() => {
+              beginNavigation(result.path);
+              router.push(result.path);
+            }, 400);
             return;
           }
           if (result?.kind === "address" && onAddress) {
@@ -153,8 +158,7 @@ export function ScanToPay({ onAddress }: ScanToPayProps = {}) {
       streamRef.current?.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+  }, [beginNavigation, onAddress, open, router, stop]);
 
   return (
     <>

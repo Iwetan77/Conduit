@@ -26,9 +26,11 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { SkeletonBlock } from "@/components/Shared/Skeleton";
+import { useRouteTransition } from "@/lib/navigation-transition";
 
 export default function CircleCallbackPage() {
   const router = useRouter();
+  const { beginNavigation } = useRouteTransition();
   const [stalled, setStalled] = useState(false);
   // Silence first, then a shape. See below.
   const [slow, setSlow] = useState(false);
@@ -50,13 +52,14 @@ export default function CircleCallbackPage() {
     // rather than leaving them on a page that only ever meant "in transit".
     const t = setTimeout(() => {
       setStalled(true);
+      beginNavigation("/dashboard");
       router.replace("/dashboard");
     }, 8000);
     return () => {
       clearTimeout(slowTimer);
       clearTimeout(t);
     };
-  }, [router]);
+  }, [beginNavigation, router]);
 
   return (
     <main className="min-h-screen flex items-center justify-center p-6">

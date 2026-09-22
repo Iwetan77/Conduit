@@ -13,6 +13,7 @@ import { WalletGateContext } from "@/lib/wallet-gate";
 // imported here without dragging the Circle SDK onto the server render path.
 import { CircleWalletGate } from "./circle-wallet-gate";
 import { UsernameGate } from "@/components/Shared/UsernameGate";
+import { RouteTransitionProvider } from "@/lib/navigation-transition";
 
 // Identity is Circle Wallets. Privy was removed here in Phase 7 of the
 // migration; what it used to do and why none of it is needed now:
@@ -61,22 +62,24 @@ export function Providers({ children }: { children: React.ReactNode }) {
     <WalletGateContext.Provider value={{ mounted: true, requestMount, walletSettled: true }}>
       <WagmiProvider config={wagmiConfig}>
         <QueryClientProvider client={queryClient}>
-          {/* Translates the app's sign-in and sign-out events into connect /
+          <RouteTransitionProvider>
+            {/* Translates the app's sign-in and sign-out events into connect /
               disconnect on the Circle connector, and issues the Conduit session
               token once a session exists. */}
-          <CircleStack />
-          {/* Asks a newly signed-in person for a username, once. Mounted here
+            <CircleStack />
+            {/* Asks a newly signed-in person for a username, once. Mounted here
               because "first sign-in" is not a route -- they can arrive already
               signed in on any page. Renders null until it has something to ask,
               and its modal is loaded on demand, so the pages it does not apply
               to pay nothing for it. */}
-          <UsernameGate />
-          {/* Holds back anything that DISPLAYS an address until the Circle
+            <UsernameGate />
+            {/* Holds back anything that DISPLAYS an address until the Circle
               session has been adopted — otherwise an auto-connected extension's
               address shows first and then swaps. Children are not held back:
               they render on the server, which is the point of this being a
               static import. */}
-          <CircleWalletGate>{children}</CircleWalletGate>
+            <CircleWalletGate>{children}</CircleWalletGate>
+          </RouteTransitionProvider>
         </QueryClientProvider>
       </WagmiProvider>
     </WalletGateContext.Provider>

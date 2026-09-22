@@ -45,9 +45,11 @@ export default function RequestPaymentPage() {
   const { data: myAccount } = useMyAccount();
   useEffect(() => {
     const addr = myAccount?.settle_address;
-    if (!addr) return;
+    const currency = myAccount?.settle_currency;
+    if (!addr || !currency) return;
     setAccountAddress(addr);
-  }, [myAccount?.settle_address]);
+    setSettleCurrency(currency);
+  }, [myAccount?.settle_address, myAccount?.settle_currency]);
 
   const toggleAccept = (c: string) => {
     setAcceptCurrencies((prev) => (prev.includes(c) ? prev.filter((x) => x !== c) : [...prev, c]));

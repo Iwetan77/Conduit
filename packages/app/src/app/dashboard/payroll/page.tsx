@@ -71,8 +71,8 @@ export default function PayrollPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
-  const { data: history } = useQuery({ queryKey: ["payroll-runs"], queryFn: listPayrollRuns });
-  const { data: groupData } = useQuery({
+  const { data: history, error: historyError } = useQuery({ queryKey: ["payroll-runs"], queryFn: listPayrollRuns });
+  const { data: groupData, error: groupsError } = useQuery({
     queryKey: ["employee-groups"],
     queryFn: listEmployeeGroups,
   });
@@ -80,11 +80,12 @@ export default function PayrollPage() {
   // Only to say how many "Everyone" means. The draft itself is built by the
   // server from the same rule, so this number is a label rather than a source
   // of truth -- it must never be what decides who gets paid.
-  const { data: employeeData } = useQuery({
+  const { data: employeeData, error: employeesError } = useQuery({
     queryKey: ["employees", false],
     queryFn: () => listEmployees(false),
   });
   const all = (employeeData?.data ?? []).filter((e) => e.status === "active");
+  const loadError = employeesError ?? groupsError ?? historyError;
   // Who this run pays. "" is everybody active, which is what a run has always
   // meant and what an account with no groups still gets.
   const [groupID, setGroupID] = useState("");
@@ -241,6 +242,11 @@ export default function PayrollPage() {
         title="Payroll"
         description="Pay everybody at once. Nothing moves until you have seen every line."
       />
+      {loadError && (
+        <p className="text-danger text-sm mb-4">
+          {errorText(loadError)}
+        </p>
+      )}
 
       {stage === "idle" && (
         // Groups first, as CARDS rather than a dropdown behind a button.
@@ -263,7 +269,7 @@ export default function PayrollPage() {
             />
           )}
 
-          {groups.length === 0 && all.length === 0 && (
+          {!loadError && groups.length === 0 && all.length === 0 && (
             <div className="border border-border p-8 text-center space-y-2">
               <p className="text-ink text-sm">Nobody to pay yet.</p>
               <p className="text-ink-dim text-xs">
@@ -279,7 +285,7 @@ export default function PayrollPage() {
             </div>
           )}
 
-          {(groups.length > 0 || all.length > 0) && (
+          {!loadError && (groups.length > 0 || all.length > 0) && (
             <>
               <p className="text-ink-dim text-xs">Who are you paying?</p>
 

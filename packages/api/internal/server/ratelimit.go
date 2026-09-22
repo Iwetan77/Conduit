@@ -100,33 +100,44 @@ type clientLimiter struct {
 }
 
 type rateLimiter struct {
-	mu      sync.Mutex
-	clients map[string]*clientLimiter
-	rps     rate.Limit
-	burst   int
+	mu        sync.Mutex
+	clients   map[string]*clientLimiter
+	rps       rate.Limit
+	burst     int
+	lastSweep time.Time
+	now       func() time.Time
 }
 
 func newRateLimiter(rps rate.Limit, burst int) *rateLimiter {
-	rl := &rateLimiter{clients: map[string]*clientLimiter{}, rps: rps, burst: burst}
-	go rl.sweep()
-	return rl
-}
-
-func (rl *rateLimiter) sweep() {
-	for range time.Tick(limiterSweepGap) {
-		cutoff := time.Now().Add(-limiterIdleTTL)
-		rl.mu.Lock()
-		for key, c := range rl.clients {
-			if c.lastSeen.Before(cutoff) {
-				delete(rl.clients, key)
-			}
-		}
-		rl.mu.Unlock()
+	now := time.Now()
+	return &rateLimiter{
+		clients:   map[string]*clientLimiter{},
+		rps:       rps,
+		burst:     burst,
+		lastSweep: now,
+		now:       time.Now,
 	}
 }
 
+// sweepExpired runs while rl.mu is held. Cleanup is request-driven so a
+// limiter has no background lifecycle to stop and an idle process does no work.
+func (rl *rateLimiter) sweepExpired(now time.Time) {
+	if now.Sub(rl.lastSweep) < limiterSweepGap {
+		return
+	}
+	cutoff := now.Add(-limiterIdleTTL)
+	for key, c := range rl.clients {
+		if c.lastSeen.Before(cutoff) {
+			delete(rl.clients, key)
+		}
+	}
+	rl.lastSweep = now
+}
+
 func (rl *rateLimiter) allow(key string) bool {
+	now := rl.now()
 	rl.mu.Lock()
+	rl.sweepExpired(now)
 	c, ok := rl.clients[key]
 	if !ok {
 		// Above the ceiling, everyone new shares one bucket. This is the
@@ -141,9 +152,9 @@ func (rl *rateLimiter) allow(key string) bool {
 			rl.clients[key] = c
 		}
 	}
-	c.lastSeen = time.Now()
+	c.lastSeen = now
 	rl.mu.Unlock()
-	return c.limiter.Allow()
+	return c.limiter.AllowN(now, 1)
 }
 
 // allowN is allow, for a request that costs more than one.
@@ -154,7 +165,9 @@ func (rl *rateLimiter) allowN(key string, n int) bool {
 	if n < 1 {
 		n = 1
 	}
+	now := rl.now()
 	rl.mu.Lock()
+	rl.sweepExpired(now)
 	c, ok := rl.clients[key]
 	if !ok {
 		if len(rl.clients) >= maxTrackedClients {
@@ -166,9 +179,9 @@ func (rl *rateLimiter) allowN(key string, n int) bool {
 			rl.clients[key] = c
 		}
 	}
-	c.lastSeen = time.Now()
+	c.lastSeen = now
 	rl.mu.Unlock()
-	return c.limiter.AllowN(time.Now(), n)
+	return c.limiter.AllowN(now, n)
 }
 
 // rateLimitRPC is the middleware for POST /v1/rpc.

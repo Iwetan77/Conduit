@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"golang.org/x/time/rate"
 )
@@ -180,4 +181,35 @@ func TestRateLimitLetsPreflightThrough(t *testing.T) {
 
 func randomishIP(i int) string {
 	return "198.51.100." + string(rune('0'+i%10)) + string(rune('0'+(i/10)%10))
+}
+
+// Idle entries are removed by the next request after the sweep interval. The
+// limiter used to run one permanent ticker goroutine per instance, which leaked
+// from every test server because an http.Handler has no shutdown lifecycle.
+func TestRateLimiterEvictsIdleClientsOnRequest(t *testing.T) {
+	now := time.Now()
+	rl := newRateLimiter(rate.Limit(publicRatePerSecond), publicBurst)
+	rl.now = func() time.Time { return now }
+	rl.lastSweep = now
+
+	if !rl.allow("idle-client") {
+		t.Fatal("first request was unexpectedly rejected")
+	}
+
+	now = now.Add(limiterIdleTTL + limiterSweepGap)
+	if !rl.allow("current-client") {
+		t.Fatal("request triggering cleanup was unexpectedly rejected")
+	}
+
+	rl.mu.Lock()
+	_, hasIdle := rl.clients["idle-client"]
+	_, hasCurrent := rl.clients["current-client"]
+	rl.mu.Unlock()
+
+	if hasIdle {
+		t.Error("idle client remained after the cleanup interval")
+	}
+	if !hasCurrent {
+		t.Error("current client was removed during cleanup")
+	}
 }

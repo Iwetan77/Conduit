@@ -7,19 +7,10 @@ import { createPaymentLink, type PaymentLink, type AmountMode, type ReusePolicy,
 import { SETTLE_CURRENCIES as CURRENCIES, isoToToken } from "@/lib/currencies";
 import { SettleCurrencySelect } from "@/components/Shared/SettleCurrencySelect";
 import { TokenIcon } from "@/components/Shared/TokenBadge";
-import { currencyDecimals, type Currency } from "@conduit/sdk/lite";
-import { shortenAddress } from "@/lib/format";
+import type { Currency } from "@conduit/sdk/lite";
+import { parseAmount, shortenAddress } from "@/lib/format";
 import { useCopy } from "@/lib/use-copy";
 import { PageHeader } from "@/components/Dashboard/PageHeader";
-
-// Minor units in the settle token's REAL decimals — BRLA/ZARU/KRW1 are
-// 18-decimals tokens; a hardcoded 6 mis-prices those links by 10^12.
-function toMinorUnits(humanAmount: string, decimals: number): string {
-  const clean = humanAmount.replace(/[^0-9.]/g, "");
-  const [whole = "0", frac = ""] = clean.split(".");
-  const padded = frac.padEnd(decimals, "0").slice(0, decimals);
-  return (BigInt(whole || "0") * 10n ** BigInt(decimals) + BigInt(padded || "0")).toString();
-}
 
 export default function RequestPaymentPage() {
   const [amountMode, setAmountMode] = useState<AmountMode>("fixed");
@@ -67,12 +58,19 @@ export default function RequestPaymentPage() {
     setError("");
     setBusy(true);
     try {
-      const decimals = currencyDecimals(isoToToken(settleCurrency));
+      const settleToken = isoToToken(settleCurrency) as Currency;
       const link = await createPaymentLink({
         amount_mode: amountMode,
-        amount: amountMode !== "open" ? toMinorUnits(amount, decimals) : undefined,
-        min_amount: amountMode !== "fixed" && minAmount ? toMinorUnits(minAmount, decimals) : undefined,
-        max_amount: amountMode !== "fixed" && maxAmount ? toMinorUnits(maxAmount, decimals) : undefined,
+        amount:
+          amountMode !== "open" ? parseAmount(amount, settleToken).toString() : undefined,
+        min_amount:
+          amountMode !== "fixed" && minAmount
+            ? parseAmount(minAmount, settleToken).toString()
+            : undefined,
+        max_amount:
+          amountMode !== "fixed" && maxAmount
+            ? parseAmount(maxAmount, settleToken).toString()
+            : undefined,
         settle_currency: settleCurrency,
         accept_currencies: acceptCurrencies.length ? acceptCurrencies : undefined,
         description: description || undefined,
@@ -82,7 +80,13 @@ export default function RequestPaymentPage() {
       });
       setResult(link);
     } catch (err) {
-      setError(err instanceof ConduitApiError ? err.message : "Failed to create payment request");
+      setError(
+        err instanceof ConduitApiError
+          ? err.message
+          : err instanceof Error
+            ? err.message
+            : "Failed to create payment request",
+      );
     } finally {
       setBusy(false);
     }

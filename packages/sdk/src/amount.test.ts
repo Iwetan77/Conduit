@@ -59,6 +59,13 @@ describe("toHumanAmount / fromHumanAmount round-trip", () => {
   it("truncates (does not round) precision beyond `decimals`", () => {
     expect(fromHumanAmount("1.9999999", 6)).toBe(fromHumanAmount("1.999999", 6));
   });
+  it("rejects malformed values instead of silently changing them", () => {
+    for (const value of ["", ".", "1e3", "12,34", "1.2.3", "USD 5", "--1"]) {
+      expect(() => fromHumanAmount(value, 6)).toThrow("Invalid amount");
+    }
+    expect(fromHumanAmount(".5", 6)).toBe(500000n);
+    expect(fromHumanAmount("1.", 6)).toBe(1000000n);
+  });
 
   it("handles negative amounts symmetrically", () => {
     const x = -123456789n;

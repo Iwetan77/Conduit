@@ -25,9 +25,13 @@ export function fromHumanAmount(value: string, decimals: number): bigint {
     throw new Error(`fromHumanAmount: invalid decimals ${decimals}`);
   }
   const clean = value.trim();
+  if (!/^-?(?:\d+(?:\.\d*)?|\.\d+)$/.test(clean)) {
+    throw new Error("Invalid amount. Use digits and at most one decimal point.");
+  }
+
   const negative = clean.startsWith("-");
   const unsigned = negative ? clean.slice(1) : clean;
-  const [wholeRaw = "0", fracRaw = ""] = unsigned.replace(/[^0-9.]/g, "").split(".");
+  const [wholeRaw = "0", fracRaw = ""] = unsigned.split(".");
   const whole = wholeRaw === "" ? "0" : wholeRaw;
   const paddedFrac = fracRaw.slice(0, decimals).padEnd(decimals, "0");
   const magnitude = BigInt(whole) * 10n ** BigInt(decimals) + BigInt(paddedFrac || "0");

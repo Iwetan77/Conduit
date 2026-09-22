@@ -18,7 +18,7 @@ import {
   type PublicPaymentLink,
   type PublicSettlementIntent,
 } from "@/lib/conduit-api";
-import { formatAmountRaw, shortenAddress } from "@/lib/format";
+import { formatAmountRaw, shortenAddress, tryParseAmount } from "@/lib/format";
 import { isoToToken } from "@/lib/currencies";
 import { TokenIcon } from "@/components/Shared/TokenBadge";
 import { currencyDecimals } from "@conduit/sdk/lite";
@@ -46,15 +46,6 @@ const CrossChainBridge = dynamic(
 
 interface PaymentLinkPayProps {
   linkId: string;
-}
-
-// Minor units in the settle token's REAL decimals — BRLA/ZARU/KRW1 are
-// 18-decimals tokens; assuming 6 there mis-prices by 10^12.
-function toMinorUnits(humanAmount: string, decimals: number): string {
-  const clean = humanAmount.replace(/[^0-9.]/g, "");
-  const [whole = "0", frac = ""] = clean.split(".");
-  const padded = frac.padEnd(decimals, "0").slice(0, decimals);
-  return (BigInt(whole || "0") * 10n ** BigInt(decimals) + BigInt(padded || "0")).toString();
 }
 
 export function PaymentLinkPay({ linkId }: PaymentLinkPayProps) {
@@ -132,11 +123,10 @@ export function PaymentLinkPay({ linkId }: PaymentLinkPayProps) {
   const settleTokenForRoute = link
     ? (isoToToken(link.settle_currency) as Currency)
     : "USDC";
-  const linkDecimals = currencyDecimals(settleTokenForRoute);
   const pendingAmountRaw = link
     ? link.amount_mode === "fixed" && link.amount
       ? BigInt(link.amount)
-      : BigInt(amount ? toMinorUnits(amount, linkDecimals) : "0")
+      : (tryParseAmount(amount, settleTokenForRoute) ?? 0n)
     : 0n;
   // routeForAmount compares USDC balances, so its input must also be USDC
   // minor units. Feeding it the merchant token amount made every 18-decimal
@@ -197,15 +187,15 @@ export function PaymentLinkPay({ linkId }: PaymentLinkPayProps) {
     );
   }
 
-  const decimals = currencyDecimals(isoToToken(link.settle_currency));
-  const settleToken = isoToToken(link.settle_currency) as Currency;
+  const settleToken = settleTokenForRoute;
+  const decimals = currencyDecimals(settleToken);
   const isFixed = link.amount_mode === "fixed";
 
   // The amount the intent will settle: the link's own for fixed, the payer's
   // typed amount otherwise. Kept as minor units so nothing downstream ever
   // touches a float.
-  const enteredMinor = amount ? toMinorUnits(amount, decimals) : "0";
-  const amountRaw = isFixed && link.amount ? BigInt(link.amount) : BigInt(enteredMinor);
+  const enteredMinor = isFixed ? "0" : pendingAmountRaw.toString();
+  const amountRaw = pendingAmountRaw;
 
   // Every chain the payment draws from, not just the first. A payment can pool
   // across chains, so naming one would misdescribe it.

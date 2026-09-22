@@ -25,20 +25,13 @@ import {
 import { isoToToken } from "@/lib/currencies";
 import { SettleCurrencySelect } from "@/components/Shared/SettleCurrencySelect";
 import { TokenIcon } from "@/components/Shared/TokenBadge";
-import { shortenAddress, formatMinorUnits } from "@/lib/format";
+import { shortenAddress, formatMinorUnits, parseAmount } from "@/lib/format";
 import { PageHeader } from "@/components/Dashboard/PageHeader";
 import { UserMark } from "@/components/Shared/UserMark";
-import { currencyDecimals, type Currency } from "@conduit/sdk/lite";
+import type { Currency } from "@conduit/sdk/lite";
 
 const qkEmployees = ["employees"] as const;
 const qkEmployeeGroups = ["employee-groups"] as const;
-
-function toMinorUnits(human: string, decimals: number): string {
-  const clean = human.replace(/[^0-9.]/g, "");
-  const [whole = "0", frac = ""] = clean.split(".");
-  const padded = frac.padEnd(decimals, "0").slice(0, decimals);
-  return (BigInt(whole || "0") * 10n ** BigInt(decimals) + BigInt(padded || "0")).toString();
-}
 
 function errorText(err: unknown): string {
   // The real message, whatever kind of error it is.
@@ -486,7 +479,7 @@ function AddEmployee({
         group_id: groupID || undefined,
         amount:
           payType === "fixed"
-            ? toMinorUnits(amount, currencyDecimals(isoToToken(currency) as Currency))
+            ? parseAmount(amount, isoToToken(currency) as Currency).toString()
             : undefined,
       });
       setName("");

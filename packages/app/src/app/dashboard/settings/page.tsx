@@ -3,7 +3,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useMyAccount, qk } from "@/lib/queries";
 import { useEffect, useRef, useState } from "react";
-import { useAccount } from "wagmi";
+import { useCircleAccount } from "@/lib/circle/connection";
 import { WalletConnect } from "@/components/Shared/WalletConnect";
 import { CURRENCIES } from "@conduit/sdk/lite";
 import { updateAccount, type Account, ConduitApiError } from "@/lib/conduit-api";
@@ -213,11 +213,24 @@ const PREF_REGISTRY_ABI = [
 ] as const;
 
 export default function SettingsPage() {
-  const { isConnected, connector } = useAccount();
+  const { connected: isConnected, connector } = useCircleAccount();
+  const { data: merchantAccount } = useMyAccount();
   const [tokenSymbol, setTokenSymbol] = useState<keyof typeof CURRENCIES>("EURC");
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
+  const businessProvider = async () => {
+    const settleAddress = merchantAccount?.settle_address;
+    if (!settleAddress) {
+      throw new Error("Your business settlement wallet is not ready yet.");
+    }
+    const { getSettlementProvider } = await import("@/lib/settlement-signer");
+    const { browserProviderFrom } = await import("@/lib/wallet-provider");
+    return browserProviderFrom(
+      await getSettlementProvider(connector, settleAddress),
+    );
+  };
+
 
   const handleSetPreference = async () => {
     if (!SETTLEMENT_PREFERENCE_REGISTRY) {
@@ -231,8 +244,7 @@ export default function SettingsPage() {
       // Loaded on click, not on page load: this page is 500+ kB otherwise
       // and ethers is only needed once the merchant actually signs.
       const { ethers } = await import("ethers");
-      const { browserProviderFor } = await import("@/lib/wallet-provider");
-      const provider = await browserProviderFor(connector);
+      const provider = await businessProvider();
       const signer = await provider.getSigner();
       const contract = new ethers.Contract(SETTLEMENT_PREFERENCE_REGISTRY, PREF_REGISTRY_ABI, signer);
       const tokenAddress = CURRENCIES[tokenSymbol].token;
@@ -254,8 +266,7 @@ export default function SettingsPage() {
     setBusy(true);
     try {
       const { ethers } = await import("ethers");
-      const { browserProviderFor } = await import("@/lib/wallet-provider");
-      const provider = await browserProviderFor(connector);
+      const provider = await businessProvider();
       const signer = await provider.getSigner();
       const contract = new ethers.Contract(SETTLEMENT_PREFERENCE_REGISTRY, PREF_REGISTRY_ABI, signer);
       const tx = await contract["clearPreference"]();
@@ -311,14 +322,14 @@ export default function SettingsPage() {
             <div className="flex gap-2">
               <button
                 onClick={handleSetPreference}
-                disabled={busy}
+                disabled={busy || !merchantAccount}
                 className="flex-1 bg-signal text-signal-ink font-medium py-2 text-sm disabled:opacity-50"
               >
                 {busy ? "Submitting..." : "Set preference"}
               </button>
               <button
                 onClick={handleClearPreference}
-                disabled={busy}
+                disabled={busy || !merchantAccount}
                 className="border border-border py-2 px-4 text-sm disabled:opacity-50"
               >
                 Clear

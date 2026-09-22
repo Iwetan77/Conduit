@@ -52,7 +52,14 @@ export const wagmiConfigParams = {
         ]
       : []),
     injected(),
-    ...(wcProjectId ? [walletConnect({ projectId: wcProjectId })] : []),
+    // WalletConnect initializes its IndexedDB migration as soon as wagmi
+    // constructs the connector. The config module also runs during SSR, where
+    // indexedDB does not exist, so constructing it there creates an unhandled
+    // rejection during every production server start. The browser builds this
+    // same config before the provider mounts and gets the connector normally.
+    ...(wcProjectId && typeof window !== "undefined"
+      ? [walletConnect({ projectId: wcProjectId })]
+      : []),
   ],
   transports: {
     [arcTestnet.id]: http(ARC_RPC_URL),

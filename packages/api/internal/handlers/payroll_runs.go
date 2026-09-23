@@ -619,23 +619,31 @@ func (h *PayrollRuns) affordability(ctx context.Context, p *payrollRunResponse, 
 // unit would refuse or admit runs on noise.
 func (h *PayrollRuns) convertedNeed(ctx context.Context, from, to string, amount *big.Int) (*big.Int, bool) {
 	withMargin := func(n *big.Int) *big.Int {
-		// 2%. Enough to cover ordinary movement between the preview and the
-		// trade without being a tax on the merchant's own headroom.
 		out := new(big.Int).Mul(n, big.NewInt(102))
-		return out.Div(out, big.NewInt(100))
+		return out.Add(out, big.NewInt(99)).Div(out, big.NewInt(100))
+	}
+	fromInfo, okF := currency.ByISO(from)
+	toInfo, okT := currency.ByISO(to)
+	if !okF || !okT {
+		return withMargin(amount), true
 	}
 	if h.StableFX != nil {
-		fromInfo, okF := currency.ByISO(from)
-		toInfo, okT := currency.ByISO(to)
-		if okF && okT {
-			q, err := h.StableFX.Quote(ctx, toInfo.Symbol, fromInfo.Symbol, amount, indicativeRecipient)
-			if err == nil && q.FromAmount != nil && q.FromAmount.Sign() > 0 {
-				return withMargin(q.FromAmount), false
-			}
+		q, err := h.StableFX.Quote(ctx, toInfo.Symbol, fromInfo.Symbol, amount, indicativeRecipient)
+		if err == nil && q.FromAmount != nil && q.FromAmount.Sign() > 0 {
+			return withMargin(q.FromAmount), false
 		}
 	}
-	// No quote. Count it at par plus the margin rather than at zero.
-	return withMargin(amount), true
+	// Without a quote, compare nominal amounts in the treasury token's minor
+	// units. Raw units are not interchangeable: BRLA has 18 decimals, USDC 6.
+	fallback := new(big.Int).Set(amount)
+	if delta := toInfo.Decimals - fromInfo.Decimals; delta > 0 {
+		scale := new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(delta)), nil)
+		fallback.Mul(fallback, scale)
+	} else if delta < 0 {
+		scale := new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(-delta)), nil)
+		fallback.Add(fallback, new(big.Int).Sub(scale, big.NewInt(1))).Div(fallback, scale)
+	}
+	return withMargin(fallback), true
 }
 
 func (h *PayrollRuns) treasuryBalance(ctx context.Context, address, iso string) (*big.Int, error) {

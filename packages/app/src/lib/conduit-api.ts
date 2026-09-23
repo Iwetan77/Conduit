@@ -658,6 +658,7 @@ export interface PayrollRun {
   wallet_balance?: string;
   estimated_gas?: string;
   balance_covers?: boolean;
+  balance_estimated?: boolean;
   settle_address?: string;
   payroll_contract?: string;
 }

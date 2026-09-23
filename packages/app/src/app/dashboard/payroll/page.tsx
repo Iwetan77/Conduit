@@ -504,6 +504,7 @@ function Preview({
 }) {
   const confirming = stage === "confirm";
   const shortfall = run.balance_covers === false;
+  const rateUnavailable = run.balance_estimated === true;
 
   return (
     <div className="space-y-4">
@@ -593,6 +594,12 @@ function Preview({
             the wallet, and leaves the rest unpaid.
           </p>
         )}
+        {rateUnavailable && (
+          <p className="text-danger text-xs">
+            Exchange rates for this payroll could not be verified. No payment has started.
+            Go back and try again when rates are available.
+          </p>
+        )}
       </div>
 
       {error && <p className="text-danger text-xs">{error}</p>}
@@ -615,13 +622,15 @@ function Preview({
         <button
           type="button"
           onClick={confirming ? onConfirm : onContinue}
-          disabled={busy || shortfall}
+          disabled={busy || shortfall || rateUnavailable}
           className="flex-1 bg-signal text-signal-ink font-medium py-2 text-sm disabled:opacity-50"
         >
           {busy
             ? "Paying…"
             : shortfall
               ? "Not enough to run this"
+              : rateUnavailable
+                ? "Rates unavailable"
               : confirming
                 ? `Pay ${run.items.length} people`
                 : "Review and confirm"}

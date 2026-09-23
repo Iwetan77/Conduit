@@ -25,10 +25,10 @@ import {
 import { isoToToken } from "@/lib/currencies";
 import { SettleCurrencySelect } from "@/components/Shared/SettleCurrencySelect";
 import { TokenIcon } from "@/components/Shared/TokenBadge";
-import { shortenAddress, formatMinorUnits, parseAmount } from "@/lib/format";
+import { shortenAddress, formatMinorUnits, formatAmountRaw, parseAmount } from "@/lib/format";
 import { PageHeader } from "@/components/Dashboard/PageHeader";
 import { UserMark } from "@/components/Shared/UserMark";
-import type { Currency } from "@conduit/sdk/lite";
+import { currencyDecimals, type Currency } from "@conduit/sdk/lite";
 
 const qkEmployees = ["employees"] as const;
 const qkEmployeeGroups = ["employee-groups"] as const;
@@ -291,6 +291,8 @@ function EmployeeRow({
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [editingAmount, setEditingAmount] = useState(false);
+  const [amountInput, setAmountInput] = useState("");
   const token = isoToToken(employee.pay_currency);
 
   const run = async (fn: () => Promise<unknown>) => {
@@ -304,6 +306,30 @@ function EmployeeRow({
     } finally {
       setBusy(false);
     }
+  };
+
+  const saveAmount = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setError("");
+    setBusy(true);
+    try {
+      const amount = parseAmount(amountInput, token as Currency);
+      if (amount <= 0n) throw new Error("Enter an amount greater than zero.");
+      await updateEmployee(employee.id, { amount: amount.toString() });
+      setEditingAmount(false);
+      onChanged();
+    } catch (err) {
+      setError(errorText(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const startAmountEdit = () => {
+    if (!employee.amount) return;
+    setAmountInput(formatAmountRaw(BigInt(employee.amount), currencyDecimals(token as Currency)));
+    setError("");
+    setEditingAmount(true);
   };
 
   return (
@@ -345,11 +371,48 @@ function EmployeeRow({
         </span>
       </td>
       <td className="px-4 py-3 text-right font-mono text-xs">
-        {employee.pay_type === "fixed" && employee.amount
-          ? formatMinorUnits(employee.amount, employee.pay_currency)
-          : // Not an empty cell. A variable employee HAS no fixed amount, and
-            // a blank reads as missing data rather than as the arrangement.
-            <span className="text-ink-dim">Variable</span>}
+        {editingAmount ? (
+          <form onSubmit={saveAmount} className="flex flex-wrap items-center justify-end gap-2">
+            <input
+              autoFocus
+              aria-label={`New pay amount for ${employee.name} in ${token}`}
+              inputMode="decimal"
+              value={amountInput}
+              onChange={(event) => setAmountInput(event.target.value)}
+              required
+              className="w-24 bg-bg border border-border px-2 py-1 text-right text-ink focus:border-signal focus:outline-none"
+            />
+            <span>{token}</span>
+            <button type="submit" disabled={busy} className="text-signal hover:underline disabled:opacity-50">
+              {busy ? "Saving..." : "Save"}
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => { setEditingAmount(false); setError(""); }}
+              className="text-ink-dim hover:text-ink disabled:opacity-50"
+            >
+              Cancel
+            </button>
+          </form>
+        ) : employee.pay_type === "fixed" && employee.amount ? (
+          <span className="inline-flex items-center justify-end gap-2">
+            <span>{formatMinorUnits(employee.amount, employee.pay_currency)}</span>
+            {employee.status !== "archived" && (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={startAmountEdit}
+                aria-label={`Edit pay amount for ${employee.name}`}
+                className="text-ink-dim hover:text-ink disabled:opacity-50"
+              >
+                Edit
+              </button>
+            )}
+          </span>
+        ) : (
+          <span className="text-ink-dim">Variable</span>
+        )}
       </td>
       <td className="px-4 py-3">
         <span

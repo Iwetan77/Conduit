@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"testing"
@@ -76,5 +77,61 @@ func TestPublicIntentFallsBackToTheAccountName(t *testing.T) {
 	}
 	if view.DisplayName != "Link Test Co" {
 		t.Fatalf("display_name = %q, want the account's own name", view.DisplayName)
+	}
+}
+
+func TestBusinessPaymentViewsShowBusinessName(t *testing.T) {
+	srv, key, pool := newLinkTestServer(t, 15529)
+	_, err := pool.Exec(context.Background(),
+		`UPDATE accounts SET name = 'Ivan and sons', username = 'Ivan',
+		        auth_provider = 'circle', auth_subject = 'business-test'
+		  WHERE name = 'Link Test Co'`)
+	if err != nil {
+		t.Fatalf("set business identity: %v", err)
+	}
+
+	link := doJSON(t, srv.URL, "POST", "/v1/payment_links", key,
+		`{"amount_mode":"fixed","amount":50000,"settle_currency":"USD"}`, "")
+	if link.status != http.StatusCreated {
+		t.Fatalf("create link: status=%d body=%s", link.status, link.body)
+	}
+	var created struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal([]byte(link.body), &created); err != nil {
+		t.Fatalf("unmarshal link: %v", err)
+	}
+
+	intent := doJSON(t, srv.URL, "POST", "/v1/settlement_intents", key,
+		`{"amount":"50000","settle_currency":"USD"}`, "")
+	if intent.status != http.StatusCreated {
+		t.Fatalf("create intent: status=%d body=%s", intent.status, intent.body)
+	}
+	var createdIntent struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal([]byte(intent.body), &createdIntent); err != nil {
+		t.Fatalf("unmarshal intent: %v", err)
+	}
+
+	for _, path := range []string{
+		"/v1/payment_links/" + created.ID + "/public",
+		"/v1/settlement_intents/" + createdIntent.ID + "/public",
+	} {
+		t.Run(path, func(t *testing.T) {
+			resp := doJSON(t, srv.URL, "GET", path, "", "", "")
+			if resp.status != http.StatusOK {
+				t.Fatalf("public view: status=%d body=%s", resp.status, resp.body)
+			}
+			var view struct {
+				DisplayName string `json:"display_name"`
+			}
+			if err := json.Unmarshal([]byte(resp.body), &view); err != nil {
+				t.Fatalf("unmarshal public view: %v", err)
+			}
+			if view.DisplayName != "Ivan and sons" {
+				t.Fatalf("display_name = %q, want business name", view.DisplayName)
+			}
+		})
 	}
 }

@@ -419,21 +419,11 @@ func (h *SettlementIntents) GetPublic(w http.ResponseWriter, r *http.Request) {
 	resp.ID = id
 	err := h.Pool.QueryRow(r.Context(),
 		`SELECT si.amount::text, si.status, si.settle_currency, si.source_chain, si.expires_at, si.settle_address,
-		        -- The username is the name this person chose to be paid under,
-		        -- so it wins over the account's own name. Without it a personal
-		        -- account falls back to the literal string "Personal", which is
-		        -- what every payer-created link said it came from: a payment
-		        -- request from nobody in particular.
-		        --
-		        -- And when THIS account has no name, any name on the same
-		        -- WALLET will do. One wallet can hold a personal account and a
-		        -- business account, and a name claimed while signed in as the
-		        -- business sits on the business row -- so a link created from
-		        -- the same wallet's personal account found nothing and said
-		        -- "Personal", to someone who had plainly claimed a username.
-		        -- It is one person and one wallet; the handle is theirs either
-		        -- way. Personal preferred when both have one.
-		        COALESCE(
+		        -- Merchant requests show the business name. Personal requests
+		        -- prefer a username, including one held on the same wallet,
+		        -- before falling back to the account name.
+		        CASE WHEN a.privy_user_id IS NOT NULL OR a.auth_subject IS NOT NULL
+		             THEN a.name ELSE COALESCE(
 		            NULLIF(a.username, ''),
 		            (SELECT w.username FROM accounts w
 		              WHERE w.username IS NOT NULL
@@ -442,7 +432,7 @@ func (h *SettlementIntents) GetPublic(w http.ResponseWriter, r *http.Request) {
 		              ORDER BY (w.privy_user_id IS NULL AND w.auth_subject IS NULL) DESC
 		              LIMIT 1),
 		            a.name
-		        ), a.logo_url, COALESCE(si.return_url,''),
+		        ) END, a.logo_url, COALESCE(si.return_url,''),
 		        -- The settling transaction, when one exists. The browser polls
 		        -- this endpoint for the outcome now that Confirm returns 202
 		        -- rather than waiting, so without it a payer could see

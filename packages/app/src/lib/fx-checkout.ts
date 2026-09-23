@@ -172,7 +172,11 @@ export async function runFxCheckout(
    * payer's own checkout, where the connected wallet is the right answer.
    * See lib/settlement-signer.
    */
-  spendFrom?: string
+  spendFrom?: string,
+  // Payroll must wait for the conversion before it can safely disperse.
+  // The normal checkout keeps its bounded wait for a payer who can leave.
+  waitUntilSettled = false,
+  signal?: AbortSignal,
 ): Promise<FxCheckoutResult> {
   const { quoteSettlementIntent, prepareSettlementIntent, confirmSettlementIntent } = await import(
     "@/lib/conduit-api"
@@ -314,10 +318,21 @@ export async function runFxCheckout(
 
   const txHash = await new Promise<string>((resolve, reject) => {
     const deadline = Date.now() + 90_000;
-    const cancel = pollWithBackoff(
+    if (signal?.aborted) {
+      reject(new DOMException("Payroll page closed while conversion was settling.", "AbortError"));
+      return;
+    }
+    let cancel = () => {};
+    const onAbort = () => {
+      cancel();
+      reject(new DOMException("Payroll page closed while conversion was settling.", "AbortError"));
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+    cancel = pollWithBackoff(
       async () => {
-        if (Date.now() > deadline) {
+        if (!waitUntilSettled && Date.now() > deadline) {
           cancel();
+          signal?.removeEventListener("abort", onAbort);
           // Not an error the payer caused, and not a payment that failed --
           // the trade is durable and the reconciler will finish it. Saying so
           // is more honest than a spinner that never resolves.
@@ -330,10 +345,12 @@ export async function runFxCheckout(
         }
         const intent = await getPublicSettlementIntent(intentId);
         if (intent.status === "settled") {
+          signal?.removeEventListener("abort", onAbort);
           resolve(intent.tx_hash ?? "");
           return true;
         }
         if (intent.status === "failed" || intent.status === "expired") {
+          signal?.removeEventListener("abort", onAbort);
           reject(new Error("The payment did not complete. Nothing was taken from your wallet."));
           return true;
         }

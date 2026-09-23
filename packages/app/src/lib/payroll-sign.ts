@@ -43,6 +43,7 @@ async function convertForLeg(
   settleAddress: string,
   connector: Connector | undefined,
   onStage: (stage: string) => void,
+  signal?: AbortSignal,
 ): Promise<void> {
   const { createSettlementIntent } = await import("@/lib/conduit-api");
   const { runFxCheckout } = await import("@/lib/fx-checkout");
@@ -68,7 +69,7 @@ async function convertForLeg(
     reference: `payroll conversion ${leg.run_id_hash}`,
   });
 
-  await runFxCheckout(intent.id, treasuryCurrency, onStage, connector, settleAddress);
+  await runFxCheckout(intent.id, treasuryCurrency, onStage, connector, settleAddress, true, signal);
 }
 
 /**
@@ -94,6 +95,7 @@ export async function payPayrollLeg(
   settleAddress: string,
   treasuryCurrency: string,
   onStage: (stage: string) => void = () => {},
+  signal?: AbortSignal,
 ): Promise<string> {
   // Convert first, if this leg is not in the currency the treasury holds.
   //
@@ -101,7 +103,7 @@ export async function payPayrollLeg(
   // nothing to approve AN ALLOWANCE OVER costs the merchant a signature and a
   // transaction fee for a run that was never going to work.
   if (leg.currency !== treasuryCurrency) {
-    await convertForLeg(leg, treasuryCurrency, settleAddress, connector, onStage);
+    await convertForLeg(leg, treasuryCurrency, settleAddress, connector, onStage, signal);
   }
 
   const { ethers } = await import("ethers");

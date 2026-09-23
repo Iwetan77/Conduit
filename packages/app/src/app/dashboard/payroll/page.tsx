@@ -10,7 +10,7 @@
 // The confirmation step is the last point a wrong address can be caught by a
 // human, which is why it shows resolved names rather than hex and why it is a
 // separate screen rather than a checkbox on the preview.
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useAccount } from "wagmi";
 import { useMyAccount } from "@/lib/queries";
@@ -70,6 +70,8 @@ export default function PayrollPage() {
   const [progress, setProgress] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const activeConversion = useRef<AbortController | null>(null);
+  useEffect(() => () => activeConversion.current?.abort(), []);
 
   const { data: history, error: historyError } = useQuery({ queryKey: ["payroll-runs"], queryFn: listPayrollRuns });
   const { data: groupData, isLoading: groupsLoading, error: groupsError } = useQuery({
@@ -162,6 +164,8 @@ export default function PayrollPage() {
       // resolves rather than all at the end -- groups genuinely land at
       // different times, and collapsing them is what makes "partial"
       // impossible to show.
+      const conversionController = new AbortController();
+      activeConversion.current = conversionController;
       for (const leg of res.legs) {
         setProgress((p) => ({ ...p, [leg.currency]: "waiting for you to approve…" }));
         try {
@@ -179,10 +183,12 @@ export default function PayrollPage() {
             // presses send once; the conversion is a step, not a chore.
             run.treasury_currency,
             (stage) => setProgress((p) => ({ ...p, [leg.currency]: stage })),
+            conversionController.signal,
           );
           await recordPayrollLeg(run.id, { currency: leg.currency, tx_hash: txHash });
           setProgress((p) => ({ ...p, [leg.currency]: "paid" }));
         } catch (err) {
+          if (conversionController.signal.aborted && err instanceof DOMException && err.name === "AbortError") return;
           const reason = errorText(err);
           setProgress((p) => ({ ...p, [leg.currency]: `failed — ${reason}` }));
           // Recorded, not swallowed. A group nobody reports stays pending
@@ -203,6 +209,7 @@ export default function PayrollPage() {
       setError(errorText(err));
       setStage("preview");
     } finally {
+      activeConversion.current = null;
       setBusy(false);
     }
   };

@@ -103,6 +103,13 @@ func (h *PayrollRuns) Execute(w http.ResponseWriter, r *http.Request) {
 		_ = h.Pool.QueryRow(ctx,
 			`SELECT settle_address FROM accounts WHERE id = $1`, principal.AccountID).Scan(&settleAddress)
 		a := h.affordability(ctx, p, settleAddress)
+		// A fallback estimate is not a tradable rate. Refuse before claiming
+		// the run so no currency group is paid before another discovers that
+		// its conversion cannot be quoted.
+		if a.estimated && h.StableFX.Configured() {
+			writeErr(w, apierrors.E(apierrors.CodeFxProviderUnavailable, ""))
+			return
+		}
 		// Only on a balance we actually read. An unreachable RPC must not stop
 		// payroll — that would turn a flaky node into an outage for the one
 		// operation with a deadline attached — and the on-chain transaction is

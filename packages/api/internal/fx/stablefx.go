@@ -36,6 +36,10 @@ func NewStableFXProvider(baseURL, apiKey string) *StableFXProvider {
 
 func (p *StableFXProvider) Name() string { return "stablefx" }
 
+func (p *StableFXProvider) Configured() bool {
+	return p != nil && strings.TrimSpace(p.apiKey) != ""
+}
+
 type quoteRequest struct {
 	From             quoteAmount `json:"from"`
 	To               quoteAmount `json:"to"`

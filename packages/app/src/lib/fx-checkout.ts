@@ -214,10 +214,24 @@ export async function runFxCheckout(
   let prep: { funding_typed_data: unknown } | undefined;
   let rate = "";
   let payAmount = "";
+  let lastQuoteError: unknown;
 
   for (let attempt = 0; attempt < 3 && !prep; attempt++) {
-    onStage(attempt === 0 ? "Getting a rate from Circle StableFX…" : "Rate moved — getting a fresh one…");
-    const quote = await quoteSettlementIntent(intentId, payCurrency, payerAddress);
+    onStage(attempt === 0 ? "Getting a rate from Circle StableFX…" : "Getting a fresh rate…");
+    let quote: Awaited<ReturnType<typeof quoteSettlementIntent>>;
+    try {
+      quote = await quoteSettlementIntent(intentId, payCurrency, payerAddress);
+      lastQuoteError = undefined;
+    } catch (err) {
+      const code = (err as { code?: string })?.code;
+      if (attempt < 2 && (code === "fx_provider_unavailable" || err instanceof TypeError)) {
+        lastQuoteError = err;
+        onStage("Rate service unavailable. Trying again...");
+        await new Promise((resolve) => setTimeout(resolve, 500 * (attempt + 1)));
+        continue;
+      }
+      throw err;
+    }
     if (!quote.typed_data) {
       throw new Error("The FX provider returned no payload to sign.");
     }
@@ -267,6 +281,7 @@ export async function runFxCheckout(
   }
 
   if (!prep) {
+    if (lastQuoteError) throw lastQuoteError;
     throw new Error(
       "The rate kept moving before the signature landed. Try again — approving a little faster usually does it."
     );

@@ -8,6 +8,7 @@
 // a typed address is unrecoverable when wrong and looks identical when right,
 // and this is a list that gets paid every month without anyone re-reading it.
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   addEmployee,
@@ -22,7 +23,7 @@ import {
   type Employee,
   type EmployeeGroup,
 } from "@/lib/conduit-api";
-import { isoToToken } from "@/lib/currencies";
+import { SETTLE_CURRENCIES, isoToToken } from "@/lib/currencies";
 import { SettleCurrencySelect } from "@/components/Shared/SettleCurrencySelect";
 import { TokenIcon } from "@/components/Shared/TokenBadge";
 import { shortenAddress, formatMinorUnits, formatAmountRaw, parseAmount } from "@/lib/format";
@@ -53,15 +54,16 @@ export default function EmployeesPage() {
   // Which named payroll group is being looked at. The first group is selected
   // once the roster loads; an account with none must create one before hiring.
   const [groupID, setGroupID] = useState("");
-  const { data, isLoading, error: employeesError } = useQuery({
+  const { data, isLoading: employeesLoading, error: employeesError } = useQuery({
     queryKey: [...qkEmployees, showArchived],
     queryFn: () => listEmployees(showArchived),
   });
-  const { data: groupData, error: groupsError } = useQuery({
+  const { data: groupData, isLoading: groupsLoading, error: groupsError } = useQuery({
     queryKey: qkEmployeeGroups,
     queryFn: listEmployeeGroups,
   });
   const loadError = employeesError ?? groupsError;
+  const isLoading = employeesLoading || groupsLoading;
   const groups = useMemo(() => groupData?.data ?? [], [groupData?.data]);
   const all = data?.data ?? [];
   useEffect(() => {
@@ -81,6 +83,7 @@ export default function EmployeesPage() {
       <PageHeader
         title="Employees"
         description="The people this business pays. Group them by business, then pay one group at a time."
+        action={<Link href="/dashboard/payroll" className="text-sm text-signal hover:underline">Payroll</Link>}
       />
       {loadError && (
         <p className="text-danger text-sm mb-4">
@@ -97,7 +100,23 @@ export default function EmployeesPage() {
 
       <AddEmployee onAdded={refresh} groups={groups} defaultGroup={groupID} />
 
-      <div className="mt-6 border border-border">
+      {groupID && !isLoading && (
+        <div className="mt-6 mb-2 flex flex-wrap items-center justify-between gap-2 text-xs text-ink-dim">
+          <p>
+            <span className="text-ink">{employees.filter((e) => e.status === "active").length} active</span>
+            {" / "}{employees.filter((e) => e.status === "paused").length} paused
+            {showArchived && ` / ${employees.filter((e) => e.status === "archived").length} archived`}
+          </p>
+          <button
+            type="button"
+            onClick={() => setShowArchived((value) => !value)}
+            className="font-mono hover:text-ink"
+          >
+            {showArchived ? "Hide archived" : "Show archived"}
+          </button>
+        </div>
+      )}
+      <div className="border border-border">
         {isLoading && <p className="text-ink-dim text-xs p-4">Loading…</p>}
 
         {!isLoading && !loadError && employees.length === 0 && (
@@ -116,34 +135,29 @@ export default function EmployeesPage() {
         )}
 
         {employees.length > 0 && (
-          <table className="w-full text-sm">
-            <thead className="text-left text-ink-dim border-b border-border">
-              <tr>
-                <th className="px-4 py-3 font-medium">Name</th>
-                <th className="px-4 py-3 font-medium">Paid to</th>
-                <th className="px-4 py-3 font-medium">Group</th>
-                <th className="px-4 py-3 font-medium">Receives</th>
-                <th className="px-4 py-3 font-medium text-right">Amount</th>
-                <th className="px-4 py-3 font-medium">Status</th>
-                <th className="px-4 py-3" />
-              </tr>
-            </thead>
-            <tbody>
-              {employees.map((e) => (
-                <EmployeeRow key={e.id} employee={e} groups={groups} onChanged={refresh} />
-              ))}
-            </tbody>
-          </table>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[780px] text-sm">
+              <thead className="text-left text-ink-dim border-b border-border">
+                <tr>
+                  <th className="px-4 py-3 font-medium">Name</th>
+                  <th className="px-4 py-3 font-medium">Paid to</th>
+                  <th className="px-4 py-3 font-medium">Group</th>
+                  <th className="px-4 py-3 font-medium">Receives</th>
+                  <th className="px-4 py-3 font-medium text-right">Amount</th>
+                  <th className="px-4 py-3 font-medium">Status</th>
+                  <th className="px-4 py-3" />
+                </tr>
+              </thead>
+              <tbody>
+                {employees.map((e) => (
+                  <EmployeeRow key={e.id} employee={e} groups={groups} onChanged={refresh} />
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
 
-      <button
-        type="button"
-        onClick={() => setShowArchived((v) => !v)}
-        className="mt-3 text-ink-dim text-xs font-mono hover:text-ink"
-      >
-        {showArchived ? "Hide archived" : "Show archived"}
-      </button>
     </div>
   );
 }
@@ -220,7 +234,7 @@ function GroupBar({
         {groups.map((g) => (
           <span key={g.id} className="inline-flex items-center">
             <button type="button" onClick={() => onSelect(g.id)} className={tab(selected === g.id)}>
-              {g.name} <span className="text-ink-dim/70">{g.members}</span>
+              {g.name} <span className="text-ink-dim/70">{g.members} active</span>
             </button>
             {/* Labelled, and only on the open group.
                 A bare × is the kind of control that gets missed until somebody
@@ -484,12 +498,20 @@ function EmployeeRow({
         <td colSpan={7} className="px-4 py-4">
           <form onSubmit={savePay} className="flex flex-wrap items-end gap-3">
             <div className="w-36">
-              <label className="block text-xs text-ink-dim mb-1">Pay asset</label>
-              <SettleCurrencySelect
+              <label htmlFor={`pay-asset-${employee.id}`} className="block text-xs text-ink-dim mb-1">
+                Pay asset
+              </label>
+              <select
+                id={`pay-asset-${employee.id}`}
                 value={currencyInput}
-                onChange={setCurrencyInput}
-                label={`Pay asset for ${employee.name}`}
-              />
+                onChange={(event) => setCurrencyInput(event.target.value)}
+                aria-label={`Pay asset for ${employee.name}`}
+                className="w-full bg-bg border border-border px-3 py-2 text-sm font-mono text-ink focus:border-signal focus:outline-none"
+              >
+                {SETTLE_CURRENCIES.map((iso) => (
+                  <option key={iso} value={iso}>{isoToToken(iso)}</option>
+                ))}
+              </select>
             </div>
             {employee.pay_type === "fixed" && (
               <label className="block text-xs text-ink-dim">

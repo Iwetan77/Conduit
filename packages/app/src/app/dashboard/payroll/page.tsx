@@ -72,20 +72,18 @@ export default function PayrollPage() {
   const [error, setError] = useState("");
 
   const { data: history, error: historyError } = useQuery({ queryKey: ["payroll-runs"], queryFn: listPayrollRuns });
-  const { data: groupData, error: groupsError } = useQuery({
+  const { data: groupData, isLoading: groupsLoading, error: groupsError } = useQuery({
     queryKey: ["employee-groups"],
     queryFn: listEmployeeGroups,
   });
   const groups = groupData?.data ?? [];
-  // Only to say how many "Everyone" means. The draft itself is built by the
-  // server from the same rule, so this number is a label rather than a source
-  // of truth -- it must never be what decides who gets paid.
-  const { data: employeeData, error: employeesError } = useQuery({
+  const { data: employeeData, isLoading: employeesLoading, error: employeesError } = useQuery({
     queryKey: ["employees", false],
     queryFn: () => listEmployees(false),
   });
   const all = (employeeData?.data ?? []).filter((e) => e.status === "active");
-  const loadError = employeesError ?? groupsError ?? historyError;
+  const loadError = employeesError ?? groupsError;
+  const rosterLoading = groupsLoading || employeesLoading;
   // Who this run pays. "" is everybody active, which is what a run has always
   // meant and what an account with no groups still gets.
   const [groupID, setGroupID] = useState("");
@@ -240,7 +238,8 @@ export default function PayrollPage() {
     <div className="max-w-3xl mx-auto">
       <PageHeader
         title="Payroll"
-        description="Pay everybody at once. Nothing moves until you have seen every line."
+        description="Review the people and amounts before sending each group's payroll."
+        action={<Link href="/dashboard/employees" className="text-sm text-signal hover:underline">Employees</Link>}
       />
       {loadError && (
         <p className="text-danger text-sm mb-4">
@@ -269,7 +268,8 @@ export default function PayrollPage() {
             />
           )}
 
-          {!loadError && groups.length === 0 && (
+          {rosterLoading && <p className="text-ink-dim text-xs py-4">Loading groups...</p>}
+          {!rosterLoading && !loadError && groups.length === 0 && (
             <div className="border border-border p-8 text-center space-y-2">
               <p className="text-ink text-sm">No employee groups yet.</p>
               <p className="text-ink-dim text-xs">
@@ -285,29 +285,47 @@ export default function PayrollPage() {
             </div>
           )}
 
-          {!loadError && groups.length > 0 && (
+          {!rosterLoading && !loadError && groups.length > 0 && (
             <>
               <p className="text-ink-dim text-xs">Who are you paying?</p>
 
               <div className="grid gap-2 sm:grid-cols-2">
-                {groups.map((g) => (
-                  <button
-                    key={g.id}
-                    type="button"
-                    disabled={busy || amountGroup !== null || g.members === 0}
-                    onClick={() => chooseScope(g.id)}
-                    className="text-left border border-border p-4 transition-colors
-                               hover:border-signal hover:bg-signal/5
-                               disabled:opacity-40 disabled:hover:border-border disabled:hover:bg-transparent"
-                  >
-                    <p className="text-ink text-sm font-medium">{g.name}</p>
-                    <p className="text-ink-dim text-xs mt-0.5 font-mono">
-                      {g.members === 0
-                        ? "nobody in this group"
-                        : `${g.members} ${g.members === 1 ? "person" : "people"}`}
-                    </p>
-                  </button>
-                ))}
+                {groups.map((g) => {
+                  const members = all.filter((employee) => employee.group_id === g.id);
+                  const assets = [...new Set(members.map((employee) => isoToToken(employee.pay_currency)))];
+                  const variableCount = members.filter((employee) => employee.pay_type === "variable").length;
+                  return (
+                    <button
+                      key={g.id}
+                      type="button"
+                      disabled={busy || amountGroup !== null || members.length === 0}
+                      onClick={() => chooseScope(g.id)}
+                      className="min-h-[92px] text-left border border-border p-4 transition-colors
+                                 hover:border-signal hover:bg-signal/5
+                                 disabled:opacity-40 disabled:hover:border-border disabled:hover:bg-transparent"
+                    >
+                      <span className="flex items-center justify-between gap-3">
+                        <span className="text-ink text-sm font-medium break-words">{g.name}</span>
+                        <span className="shrink-0 text-signal text-xs font-mono">
+                          {members.length > 0 ? "Review" : "Empty"}
+                        </span>
+                      </span>
+                      <span className="block text-ink-dim text-xs mt-1 font-mono">
+                        {members.length} active
+                        {variableCount > 0 && ` / ${variableCount} variable`}
+                      </span>
+                      {assets.length > 0 && (
+                        <span className="flex flex-wrap items-center gap-2 mt-2">
+                          {assets.map((asset) => (
+                            <span key={asset} className="inline-flex items-center gap-1 text-xs font-mono text-ink-dim">
+                              <TokenIcon currency={asset as Currency} px={14} />{asset}
+                            </span>
+                          ))}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
 
               </div>
 
@@ -368,6 +386,7 @@ export default function PayrollPage() {
         />
       )}
 
+      {historyError && <p className="mt-6 text-danger text-xs">Past runs could not be loaded.</p>}
       <History runs={history?.data ?? []} />
     </div>
   );
@@ -489,29 +508,31 @@ function Preview({
           <p className="text-ink-dim text-xs font-mono">{run.items.length} people</p>
         </div>
 
-        <table className="w-full text-sm">
-          <tbody>
-            {run.items.map((it) => (
-              <tr key={it.id} className="border-b border-border last:border-0">
-                <td className="px-4 py-3 text-ink">{it.name}</td>
-                {/* Resolved name over hex, always. This is the last screen where
-                    a wrong line can be caught by a person, and a column of hex
-                    is a column nobody reads. */}
-                <td className="px-4 py-3 font-mono text-xs text-ink-dim">
-                  {it.username ? `@${it.username}` : shortenAddress(it.address)}
-                </td>
-                <td className="px-4 py-3 text-right font-mono text-xs">
-                  {formatMinorUnits(it.amount, it.currency)}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[480px] text-sm">
+            <tbody>
+              {run.items.map((it) => (
+                <tr key={it.id} className="border-b border-border last:border-0">
+                  <td className="px-4 py-3 text-ink">{it.name}</td>
+                  {/* Resolved name over hex, always. This is the last screen where
+                      a wrong line can be caught by a person, and a column of hex
+                      is a column nobody reads. */}
+                  <td className="px-4 py-3 font-mono text-xs text-ink-dim">
+                    {it.username ? `@${it.username}` : shortenAddress(it.address)}
+                  </td>
+                  <td className="px-4 py-3 text-right font-mono text-xs">
+                    {formatMinorUnits(it.amount, it.currency)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       <div className="border border-border p-4 space-y-2">
         {run.groups.map((g) => (
-          <div key={g.currency} className="flex items-center justify-between text-sm">
+          <div key={g.currency} className="flex flex-wrap items-center justify-between gap-2 text-sm">
             <span className="flex items-center gap-2">
               <TokenIcon currency={isoToToken(g.currency) as Currency} px={18} />
               <span className="font-mono text-xs">{isoToToken(g.currency)}</span>
@@ -530,7 +551,7 @@ function Preview({
                 </span>
               )}
             </span>
-            <span className="font-mono text-xs">
+            <span className="font-mono text-xs text-right">
               {formatMinorUnits(g.total, g.currency)} · {g.recipients} people
             </span>
           </div>
@@ -627,7 +648,7 @@ function Progress({
 
   return (
     <div className="space-y-4">
-      <div className="border border-border p-4 space-y-2">
+      <div aria-live="polite" className="border border-border p-4 space-y-2">
         {legs.map((leg) => (
           <div key={leg.currency} className="flex items-center justify-between text-sm">
             <span className="flex items-center gap-2">

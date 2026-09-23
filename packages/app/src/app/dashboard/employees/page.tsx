@@ -291,8 +291,9 @@ function EmployeeRow({
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [editingAmount, setEditingAmount] = useState(false);
+  const [editingPay, setEditingPay] = useState(false);
   const [amountInput, setAmountInput] = useState("");
+  const [currencyInput, setCurrencyInput] = useState(employee.pay_currency);
   const token = isoToToken(employee.pay_currency);
 
   const run = async (fn: () => Promise<unknown>) => {
@@ -308,15 +309,22 @@ function EmployeeRow({
     }
   };
 
-  const saveAmount = async (event: React.FormEvent) => {
+  const savePay = async (event: React.FormEvent) => {
     event.preventDefault();
     setError("");
     setBusy(true);
     try {
-      const amount = parseAmount(amountInput, token as Currency);
-      if (amount <= 0n) throw new Error("Enter an amount greater than zero.");
-      await updateEmployee(employee.id, { amount: amount.toString() });
-      setEditingAmount(false);
+      const amount = employee.pay_type === "fixed"
+        ? parseAmount(amountInput, isoToToken(currencyInput) as Currency)
+        : undefined;
+      if (amount !== undefined && amount <= 0n) {
+        throw new Error("Enter an amount greater than zero.");
+      }
+      await updateEmployee(employee.id, {
+        pay_currency: currencyInput,
+        ...(amount !== undefined ? { amount: amount.toString() } : {}),
+      });
+      setEditingPay(false);
       onChanged();
     } catch (err) {
       setError(errorText(err));
@@ -325,14 +333,17 @@ function EmployeeRow({
     }
   };
 
-  const startAmountEdit = () => {
-    if (!employee.amount) return;
-    setAmountInput(formatAmountRaw(BigInt(employee.amount), currencyDecimals(token as Currency)));
+  const startPayEdit = () => {
+    setCurrencyInput(employee.pay_currency);
+    setAmountInput(employee.amount
+      ? formatAmountRaw(BigInt(employee.amount), currencyDecimals(token as Currency))
+      : "");
     setError("");
-    setEditingAmount(true);
+    setEditingPay(true);
   };
 
   return (
+    <>
     <tr className="border-b border-border last:border-0">
       <td className="px-4 py-3 text-ink">{employee.name}</td>
       <td className="px-4 py-3 font-mono text-xs">
@@ -371,48 +382,9 @@ function EmployeeRow({
         </span>
       </td>
       <td className="px-4 py-3 text-right font-mono text-xs">
-        {editingAmount ? (
-          <form onSubmit={saveAmount} className="flex flex-wrap items-center justify-end gap-2">
-            <input
-              autoFocus
-              aria-label={`New pay amount for ${employee.name} in ${token}`}
-              inputMode="decimal"
-              value={amountInput}
-              onChange={(event) => setAmountInput(event.target.value)}
-              required
-              className="w-24 bg-bg border border-border px-2 py-1 text-right text-ink focus:border-signal focus:outline-none"
-            />
-            <span>{token}</span>
-            <button type="submit" disabled={busy} className="text-signal hover:underline disabled:opacity-50">
-              {busy ? "Saving..." : "Save"}
-            </button>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => { setEditingAmount(false); setError(""); }}
-              className="text-ink-dim hover:text-ink disabled:opacity-50"
-            >
-              Cancel
-            </button>
-          </form>
-        ) : employee.pay_type === "fixed" && employee.amount ? (
-          <span className="inline-flex items-center justify-end gap-2">
-            <span>{formatMinorUnits(employee.amount, employee.pay_currency)}</span>
-            {employee.status !== "archived" && (
-              <button
-                type="button"
-                disabled={busy}
-                onClick={startAmountEdit}
-                aria-label={`Edit pay amount for ${employee.name}`}
-                className="text-ink-dim hover:text-ink disabled:opacity-50"
-              >
-                Edit
-              </button>
-            )}
-          </span>
-        ) : (
-          <span className="text-ink-dim">Variable</span>
-        )}
+        {employee.pay_type === "fixed" && employee.amount
+          ? formatMinorUnits(employee.amount, employee.pay_currency)
+          : <span className="text-ink-dim">Variable</span>}
       </td>
       <td className="px-4 py-3">
         <span
@@ -430,6 +402,15 @@ function EmployeeRow({
       <td className="px-4 py-3 text-right whitespace-nowrap">
         {employee.status !== "archived" && (
           <>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={startPayEdit}
+              aria-expanded={editingPay}
+              className="text-ink-dim text-xs font-mono hover:text-signal mr-3 disabled:opacity-50"
+            >
+              Edit pay
+            </button>
             <button
               type="button"
               disabled={busy}
@@ -495,9 +476,51 @@ function EmployeeRow({
             Restore
           </button>
         )}
-        {error && <p className="text-danger text-xs mt-1">{error}</p>}
+        {error && !editingPay && <p className="text-danger text-xs mt-1">{error}</p>}
       </td>
     </tr>
+    {editingPay && (
+      <tr className="border-b border-border bg-surface">
+        <td colSpan={7} className="px-4 py-4">
+          <form onSubmit={savePay} className="flex flex-wrap items-end gap-3">
+            <div className="w-36">
+              <label className="block text-xs text-ink-dim mb-1">Pay asset</label>
+              <SettleCurrencySelect
+                value={currencyInput}
+                onChange={setCurrencyInput}
+                label={`Pay asset for ${employee.name}`}
+              />
+            </div>
+            {employee.pay_type === "fixed" && (
+              <label className="block text-xs text-ink-dim">
+                Amount in {isoToToken(currencyInput)}
+                <input
+                  autoFocus
+                  inputMode="decimal"
+                  value={amountInput}
+                  onChange={(event) => setAmountInput(event.target.value)}
+                  required
+                  className="block w-36 mt-1 bg-bg border border-border px-3 py-2 text-sm font-mono text-ink focus:border-signal focus:outline-none"
+                />
+              </label>
+            )}
+            <button type="submit" disabled={busy} className="bg-signal text-signal-ink px-4 py-2 text-sm font-medium disabled:opacity-50">
+              {busy ? "Saving..." : "Save pay"}
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => { setEditingPay(false); setError(""); }}
+              className="border border-border px-4 py-2 text-sm text-ink-dim hover:text-ink disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            {error && <p role="alert" className="basis-full text-danger text-xs">{error}</p>}
+          </form>
+        </td>
+      </tr>
+    )}
+    </>
   );
 }
 

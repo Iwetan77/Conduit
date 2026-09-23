@@ -297,3 +297,40 @@ func TestNonEmptyEmployeeGroupCannotBeDeleted(t *testing.T) {
 		t.Fatalf("delete non-empty group: status=%d, want 400; body=%s", deleted.status, deleted.body)
 	}
 }
+
+func TestEmployeePayCurrencyChangesWithExplicitAmount(t *testing.T) {
+	srv, key, _ := newLinkTestServer(t, 15627)
+	_, fixedAddress := newSigner(t)
+	_, fixed := addEmployee(t, srv.URL, key, fmt.Sprintf(
+		`{"name":"Ada","address":%q,"pay_currency":"CAD","pay_type":"fixed","amount":"4000000"}`,
+		fixedAddress))
+
+	changed := doJSON(t, srv.URL, "PATCH", "/v1/employees/"+fixed.ID, key,
+		`{"pay_currency":"BRL","amount":"20000000000000000000"}`, "")
+	if changed.status != http.StatusOK {
+		t.Fatalf("change fixed pay: status=%d body=%s", changed.status, changed.body)
+	}
+	var updated employee
+	if err := json.Unmarshal([]byte(changed.body), &updated); err != nil {
+		t.Fatalf("decode fixed pay: %v", err)
+	}
+	if updated.PayCurrency != "BRL" || updated.Amount == nil || *updated.Amount != "20000000000000000000" {
+		t.Fatalf("fixed pay after asset change: currency=%s amount=%v", updated.PayCurrency, updated.Amount)
+	}
+
+	_, variableAddress := newSigner(t)
+	_, variable := addEmployee(t, srv.URL, key, fmt.Sprintf(
+		`{"name":"Bea","address":%q,"pay_currency":"USD","pay_type":"variable"}`,
+		variableAddress))
+	changed = doJSON(t, srv.URL, "PATCH", "/v1/employees/"+variable.ID, key,
+		`{"pay_currency":"CAD"}`, "")
+	if changed.status != http.StatusOK {
+		t.Fatalf("change variable asset: status=%d body=%s", changed.status, changed.body)
+	}
+	if err := json.Unmarshal([]byte(changed.body), &updated); err != nil {
+		t.Fatalf("decode variable pay: %v", err)
+	}
+	if updated.PayCurrency != "CAD" || updated.Amount != nil {
+		t.Fatalf("variable pay after asset change: currency=%s amount=%v", updated.PayCurrency, updated.Amount)
+	}
+}
